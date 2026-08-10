@@ -1,5 +1,6 @@
 import "server-only";
 import { audit, insert, select, selectOne, update } from "./db";
+import { HQ_MAIL, acquisitionMail, licenseTestMail, sendMail } from "./mail";
 
 /**
  * 外から届いた申込を受け止めて、代理店・トスアップ・デモ機として登録する。
@@ -471,9 +472,159 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
     照合: matchStatus,
   });
 
+  // 報酬を計上し、獲得した代理店に知らせる。
+  // どちらも失敗しても受注の登録は取り消さない。
+  try {
+    const { accrueRewards } = await import("./rewards");
+    await accrueRewards(String(order["id"]));
+  } catch (e) {
+    console.error("[reward]", e);
+  }
+  try {
+    await notifyAcquisition(String(order["id"]));
+  } catch (e) {
+    console.error("[notify]", e);
+  }
+
   return {
     ok: true,
     code: String(order["id"]),
     message: `${name} 様のご注文を登録しました。`,
   };
+}
+
+
+/* ═══════════════════════ デモ機の登録（Make #16） ═══════════════════════ */
+
+export type DemoApplication = {
+  serialNo: string;
+  model?: string;
+  acquiredKind?: string;
+  acquiredOn?: string;
+  holderCode?: string;
+  holderName?: string;
+  purpose?: string;
+  note?: string;
+};
+
+export async function registerDemoMachine(app: DemoApplication): Promise<IntakeResult> {
+  const serial = (app.serialNo || "").trim();
+  if (!serial) return { ok: false, message: "製品番号（シリアル）が入っていません。" };
+
+  const dup = await selectOne<Row>(
+    `demo_machines?select=id&serial_no=eq.${encodeURIComponent(serial)}`,
+  );
+  if (dup) return { ok: true, code: serial, message: "この製品番号は登録済みです。" };
+
+  // 保有代理店の名前を補う
+  let holderName = app.holderName || "";
+  if (app.holderCode && !holderName) {
+    const owner = await selectOne<Row>(
+      `agencies?select=name&code=eq.${encodeURIComponent(app.holderCode.trim())}`,
+    );
+    holderName = s_(owner, "name");
+  }
+
+  const kinds = ["個人購入", "デモ機購入", "無料貸与"];
+  await insert("demo_machines", [
+    {
+      serial_no: serial,
+      model: app.model || "VIS本体",
+      acquired_kind: kinds.includes(app.acquiredKind ?? "") ? app.acquiredKind : null,
+      acquired_on: app.acquiredOn || null,
+      state: "在庫",
+      holder_code: app.holderCode || null,
+      holder_name: holderName || null,
+      purpose: app.purpose || null,
+      note: app.note || null,
+    },
+  ]);
+  await audit("intake", "デモ機登録", { type: "demo", key: serial });
+  return { ok: true, code: serial, message: `デモ機 ${serial} を登録しました。` };
+}
+
+/* ═══════════════════════ 体験の事前登録（Make シナリオD） ═══════════════════════ */
+
+/**
+ * 体験前の事前登録フォームから届いた方を、トスアップとして先に記録する。
+ * まだ紹介ではなく「体験に同意して検討中」の段階なので、状態を分けておく。
+ */
+export async function registerPreLead(app: LeadApplication): Promise<IntakeResult> {
+  const name = (app.customerName || "").trim();
+  if (!name) return { ok: false, message: "お名前が入っていません。" };
+
+  const normalized = normalizePhone(app.phone);
+  if (normalized) {
+    const dup = await selectOne<Row>(
+      `leads?select=id&phone_normalized=eq.${normalized}`,
+    );
+    if (dup) return { ok: true, code: name, message: "すでに受付済みです。" };
+  }
+
+  await insert("leads", [
+    {
+      customer_name: name,
+      phone: app.phone || null,
+      phone_normalized: normalized || null,
+      referrer_code: (app.referrerCode || "").trim() || "（直接）",
+      status: "体験同意・検討中",
+      note: app.note || null,
+    },
+  ]);
+  await audit("intake", "体験事前登録", { type: "lead", key: name });
+  return { ok: true, code: name, message: `${name} 様の事前登録を受け付けました。` };
+}
+
+/* ═══════════════════════ ライセンステストの提出（Make #17） ═══════════════════════ */
+
+export async function notifyLicenseTest(opts: {
+  name: string;
+  agencyCode?: string;
+  score?: string;
+  detail?: string;
+}): Promise<IntakeResult> {
+  const name = (opts.name || "").trim();
+  if (!name) return { ok: false, message: "お名前が入っていません。" };
+
+  const mail = licenseTestMail(opts);
+  const sent = await sendMail(HQ_MAIL, mail.subject, mail.body);
+  await audit("intake", "ライセンステスト提出", { type: "license", key: name }, {
+    通知: sent.ok ? "送信済み" : sent.error,
+  });
+
+  // メールが送れなくても提出自体は受け付ける（受信箱に残っている）
+  return {
+    ok: true,
+    code: name,
+    message: sent.ok
+      ? "提出を受け付け、本部へ採点を依頼しました。"
+      : "提出を受け付けました。本部への通知は届いていないため、別途ご連絡ください。",
+  };
+}
+
+/* ═══════════════════════ 受注の通知（Make #8） ═══════════════════════ */
+
+/**
+ * 受注が入ったことを、獲得した代理店に知らせる。
+ * 送信に失敗しても受注の登録は取り消さない。
+ */
+export async function notifyAcquisition(orderId: string): Promise<void> {
+  const order = await selectOne<Row>(`orders?select=*&id=eq.${encodeURIComponent(orderId)}`);
+  if (!order) return;
+  const code = s_(order, "agency_code");
+  if (!code) return;
+
+  const agency = await selectOne<Row>(
+    `agencies?select=name,email&code=eq.${encodeURIComponent(code)}`,
+  );
+  const to = s_(agency, "email");
+  if (!to) return;
+
+  const mail = acquisitionMail({
+    agencyName: s_(agency, "name"),
+    customerName: s_(order, "customer_name"),
+    amount: Number(order["amount"] ?? 0),
+    productName: s_(order, "product_name"),
+  });
+  await sendMail(to, mail.subject, mail.body);
 }

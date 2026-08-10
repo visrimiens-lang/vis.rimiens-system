@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   markProcessed,
+  notifyLicenseTest,
   receive,
   registerAgency,
+  registerDemoMachine,
   registerLead,
+  registerPreLead,
   type AgencyApplication,
 } from "@/lib/intake";
 
@@ -15,10 +18,13 @@ import {
  *   https://vis-rimiens-system.vercel.app/api/webhooks/jotform?token=＜合言葉＞&kind=＜種類＞
  *
  * kind に入れる値:
- *   agency   … 代理店システム登録（会社としての登録）
- *   referrer … 取次パートナー登録
- *   staff    … スタッフ／販売ライセンス認定登録
- *   lead     … トスアップ（お客様のご紹介）
+ *   agency       … 代理店システム登録（会社としての登録）
+ *   referrer     … 取次パートナー登録
+ *   staff        … スタッフ／販売ライセンス認定登録
+ *   lead         … トスアップ（お客様のご紹介）
+ *   demo         … デモ機登録
+ *   pre-register … 体験の事前登録（QR1）
+ *   license-test … ライセンステストの提出（本部へ採点依頼が飛ぶ）
  *
  * 届いたものは必ず受信箱に丸ごと残してから処理する。
  * 途中で失敗しても申込が消えないようにするため。
@@ -104,6 +110,43 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    if (kind === "demo") {
+      const r = await registerDemoMachine({
+        serialNo: pick(data, "製品番号", "シリアル", "serial"),
+        model: pick(data, "機種", "model") || undefined,
+        acquiredKind: pick(data, "取得区分", "acquiredKind") || undefined,
+        acquiredOn: pick(data, "取得日", "acquiredOn") || undefined,
+        holderCode: pick(data, "代理店コード", "保有代理店コード", "code") || undefined,
+        holderName: pick(data, "保有代理店名", "代理店名") || undefined,
+        purpose: pick(data, "貸与目的", "目的", "purpose") || undefined,
+        note: pick(data, "備考", "note") || undefined,
+      });
+      await markProcessed(box.id, r.ok ? undefined : r.message);
+      return NextResponse.json(r, { status: r.ok ? 200 : 202 });
+    }
+
+    if (kind === "pre-register" || kind === "prelead") {
+      const r = await registerPreLead({
+        customerName: pick(data, "お名前", "氏名", "ニックネーム", "name"),
+        phone: pick(data, "電話", "phone", "tel"),
+        referrerCode: pick(data, "紹介コード", "スタッフコード", "code"),
+        note: pick(data, "備考", "note"),
+      });
+      await markProcessed(box.id, r.ok ? undefined : r.message);
+      return NextResponse.json(r, { status: r.ok ? 200 : 202 });
+    }
+
+    if (kind === "license-test" || kind === "test") {
+      const r = await notifyLicenseTest({
+        name: pick(data, "お名前", "氏名", "name"),
+        agencyCode: pick(data, "代理店コード", "スタッフコード", "code") || undefined,
+        score: pick(data, "点数", "得点", "score") || undefined,
+        detail: pick(data, "回答", "detail") || undefined,
+      });
+      await markProcessed(box.id, r.ok ? undefined : r.message);
+      return NextResponse.json(r, { status: r.ok ? 200 : 202 });
+    }
+
     if (kind === "lead") {
       const r = await registerLead({
         customerName: pick(data, "お客様氏名", "お名前", "氏名", "name", "customerName"),

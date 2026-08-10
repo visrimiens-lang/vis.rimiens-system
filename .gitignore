@@ -10,3 +10,7 @@ build
 next-env.d.ts
 *.tsbuildinfo
 .spec
+
+# 設定ファイルのバックアップも絶対に上げない
+.env*.bak
+.env.local.bak

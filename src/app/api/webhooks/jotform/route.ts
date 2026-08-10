@@ -33,20 +33,38 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** JotForm は項目名がフォームごとに違うので、よくある言い方をまとめて探す。 */
+/**
+ * JotForm の項目名は「q6_input3」「q60_inviteCode」のような形で届く。
+ * 頭の「q番号_」を落として、後ろの名前だけで照合できるようにする。
+ */
+function normalizeKey(k: string): string {
+  return k.replace(/^q\d+_/, "");
+}
+
+/**
+ * JotForm は項目名がフォームごとに違うので、よくある言い方をまとめて探す。
+ * 日本語のラベル名でも、JotForm の内部名（inviteCode, input3 など）でも拾える。
+ */
 function pick(data: Record<string, unknown>, ...names: string[]): string {
   for (const n of names) {
-    for (const [k, v] of Object.entries(data)) {
-      if (k === n || k.includes(n)) {
+    for (const [rawKey, v] of Object.entries(data)) {
+      const k = normalizeKey(rawKey);
+      if (k === n || k.includes(n) || rawKey === n || rawKey.includes(n)) {
         if (v === null || v === undefined) continue;
         if (typeof v === "object") {
-          // JotForm の氏名欄は {first, last} の形で届くことがある
           const o = v as Record<string, unknown>;
-          const joined = [o.last, o.first, o.第一, o.姓, o.名]
-            .filter(Boolean)
-            .join(" ")
-            .trim();
-          if (joined) return joined;
+          // 氏名は {first, last}。日本語なので「姓 名」の順で並べる。
+          if (o.last || o.first) {
+            const joined = [o.last, o.first].filter(Boolean).join(" ").trim();
+            if (joined) return joined;
+          }
+          // 生年月日は {year, month, day}
+          if (o.year && o.month && o.day) {
+            const p2 = (x: unknown) => String(x).padStart(2, "0");
+            return `${o.year}-${p2(o.month)}-${p2(o.day)}`;
+          }
+          // 電話は {full} や {area, phone}
+          if (o.full) return String(o.full).trim();
           const flat = Object.values(o).filter(Boolean).join(" ").trim();
           if (flat) return flat;
           continue;
@@ -165,15 +183,16 @@ export async function POST(req: NextRequest) {
 
     const r = await registerAgency({
       formKind,
-      name: pick(data, "法人名", "会社名", "お名前", "氏名", "name"),
+      // JotForm の内部名（input3 など）でも拾えるようにする
+      name: pick(data, "法人名", "会社名", "お名前", "氏名", "input3", "name"),
       repName: pick(data, "代表者", "代表者名", "representative"),
-      email: pick(data, "メール", "email", "mail"),
-      phone: pick(data, "電話", "phone", "tel"),
+      email: pick(data, "input32", "メール", "email", "mail"),
+      phone: pick(data, "input33", "携帯電話", "電話", "phone", "tel"),
       zip: pick(data, "郵便番号", "zip", "postal"),
       address: pick(data, "住所", "address"),
-      shopName: pick(data, "店舗名", "屋号", "shop"),
-      birthday: pick(data, "生年月日", "birthday"),
-      inviteCode: pick(data, "招待コード", "紹介コード", "上位代理店コード", "inviteCode"),
+      shopName: pick(data, "input60", "店舗名", "屋号", "shop"),
+      birthday: pick(data, "input19", "生年月日", "birthday"),
+      inviteCode: pick(data, "inviteCode", "招待コード", "紹介コード", "上位代理店コード"),
       channel: pick(data, "販路種別", "channel") || undefined,
       areaClass: pick(data, "エリア", "area") || undefined,
       bank: {

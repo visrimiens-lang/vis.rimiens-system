@@ -183,8 +183,12 @@ export async function POST(req: NextRequest) {
 
     const r = await registerAgency({
       formKind,
-      // JotForm の内部名（input3 など）でも拾えるようにする
-      name: pick(data, "法人名", "会社名", "お名前", "氏名", "input3", "name"),
+      // VIS代理店システム登録は「法人／サロン／個人」で入口が分かれ、
+      // 会社名(textbox6)・サロン名(textbox14)・氏名(fullname20)のいずれかに入る。
+      name: pick(
+        data, "会社名", "サロン名", "法人名", "textbox6", "textbox14",
+        "fullname20", "お名前", "氏名", "input3", "name",
+      ),
       repName: pick(data, "代表者", "代表者名", "representative"),
       email: pick(data, "input32", "メール", "email", "mail"),
       phone: pick(data, "input33", "携帯電話", "電話", "phone", "tel"),
@@ -192,7 +196,7 @@ export async function POST(req: NextRequest) {
       address: pick(data, "住所", "address"),
       shopName: pick(data, "input60", "店舗名", "屋号", "shop"),
       birthday: pick(data, "input19", "生年月日", "birthday"),
-      inviteCode: pick(data, "inviteCode", "招待コード", "紹介コード", "上位代理店コード"),
+      inviteCode: pick(data, "input48", "inviteCode", "招待コード", "紹介コード", "上位代理店コード"),
       channel: pick(data, "販路種別", "channel") || undefined,
       areaClass: pick(data, "エリア", "area") || undefined,
       bank: {

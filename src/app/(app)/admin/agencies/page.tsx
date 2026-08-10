@@ -2,6 +2,19 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { currentViewer, listCodesWithPassword } from "@/lib/auth";
 import { DEFAULT_SLOT_LIMIT, countsTowardSlot, listAllAgencies } from "@/lib/agencies";
+import {
+  ALL,
+  buildListHref,
+  buildOptions,
+  matchesKeyword,
+  parseSort,
+  readChoice,
+  readParam,
+  sortRows,
+  type Accessors,
+  type SearchParams,
+  type SortState,
+} from "@/lib/list-params";
 import type { Agency } from "@/lib/types";
 import {
   Badge,
@@ -13,46 +26,98 @@ import {
   StatusBadge,
   Table,
   Td,
-  Th,
   cn,
   jpDate,
 } from "@/components/ui";
-import { AgencySearch } from "./AgencySearch";
+import {
+  FilterActions,
+  FilterBar,
+  FilterSelect,
+  FilterSummary,
+  FilterText,
+  SortableTh,
+} from "@/components/SortableTh";
 import { IssuePassword } from "./IssuePassword";
 import { ResetRequests } from "./ResetRequests";
 
+const BASE = "/admin/agencies";
+
 type Tab = "agency" | "partner" | "staff";
 
-const TABS: { key: Tab; label: string; codeKind: string }[] = [
-  { key: "agency", label: "代理店", codeKind: "00" },
-  { key: "partner", label: "取次パートナー", codeKind: "01" },
-  { key: "staff", label: "スタッフ", codeKind: "02" },
+const TABS: { key: Tab; label: string; unit: string }[] = [
+  { key: "agency", label: "代理店", unit: "社" },
+  { key: "partner", label: "取次パートナー", unit: "件" },
+  { key: "staff", label: "スタッフ", unit: "名" },
 ];
 
-function toTab(v: string | undefined): Tab {
-  return v === "partner" || v === "staff" ? v : "agency";
+/** 絞り込みの選択肢。データに無くても選べるように、決まっているものは並べておく。 */
+const STATUSES = ["未稼働", "稼働中", "停止・解約"];
+const RANKS = ["総販売代理店", "2次代理店", "取次店"];
+const CHANNELS = [
+  "販売代理店",
+  "サロン代理店",
+  "個人販売パートナー",
+  "サロン提携パートナー（取次）",
+];
+
+/** 並び替えに使える列。URL を手で書き換えられても、知らない列では並び替えない。 */
+const SORT_COLUMNS = [
+  "code",
+  "name",
+  "rank",
+  "channel",
+  "area",
+  "parent",
+  "slot",
+  "status",
+  "email",
+  "created",
+];
+
+const DEFAULT_SORT: SortState = { column: "code", desc: false };
+
+/** ランクは五十音順ではなく、上下関係の順に並べたい。 */
+function rankOrder(v: string): number | null {
+  const i = RANKS.indexOf(v);
+  return i < 0 ? null : i;
 }
 
-function hrefFor(tab: Tab, keyword: string): string {
-  const params = new URLSearchParams();
-  if (tab !== "agency") params.set("tab", tab);
-  if (keyword) params.set("keyword", keyword);
-  const qs = params.toString();
-  return qs ? `/admin/agencies?${qs}` : "/admin/agencies";
+/** 稼働状況も、手当てが要る順（稼働中→未稼働→停止）に並べる。 */
+function statusOrder(v: string): number | null {
+  const i = STATUSES.indexOf(v);
+  return i < 0 ? null : i;
+}
+
+function toTab(v: string): Tab {
+  return v === "partner" || v === "staff" ? v : "agency";
 }
 
 export default async function AdminAgenciesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string; keyword?: string }>;
+  searchParams: Promise<{
+    tab?: string;
+    keyword?: string;
+    status?: string;
+    rank?: string;
+    channel?: string;
+    area?: string;
+    sort?: string;
+    dir?: string;
+  }>;
 }) {
   const viewer = await currentViewer();
   if (!viewer) redirect("/login");
   if (viewer.kind !== "hq") redirect("/dashboard");
 
-  const params = await searchParams;
-  const tab = toTab(params.tab);
-  const keyword = (params.keyword ?? "").trim();
+  const params: SearchParams = await searchParams;
+  const tab = toTab(readParam(params, "tab"));
+  const keyword = readParam(params, "keyword");
+  const status = readChoice(params, "status", STATUSES);
+  const rank = readChoice(params, "rank", RANKS);
+  const channel = readParam(params, "channel") || ALL;
+  const area = readParam(params, "area") || ALL;
+  const sort = parseSort(params, DEFAULT_SORT, SORT_COLUMNS);
 
   let all: Agency[] = [];
   let loadError: string | null = null;
@@ -68,7 +133,7 @@ export default async function AdminAgenciesPage({
   const header = (
     <PageHeader
       title="代理店管理"
-      description="代理店マスタに登録されている取引先の一覧です。コード区分ごとにタブが分かれています。"
+      description="代理店マスタに登録されている取引先の一覧です。コード区分ごとにタブが分かれています。見出しを押すと、その列で並び替えられます。"
     />
   );
 
@@ -99,18 +164,59 @@ export default async function AdminAgenciesPage({
   const unclassified = all.filter((a) => !["00", "01", "02"].includes(a.codeKind));
   const pending = all.filter((a) => a.slotRequestStatus === "申請中");
 
-  const kw = keyword.toLowerCase();
-  const matches = (a: Agency) =>
-    !kw ||
-    a.code.toLowerCase().includes(kw) ||
-    a.name.toLowerCase().includes(kw);
+  /* --- 絞り込み --- */
+  const matches = (a: Agency) => {
+    if (!matchesKeyword(keyword, [a.code, a.name, a.representative])) return false;
+    if (status !== ALL && a.status !== status) return false;
+    if (rank !== ALL && a.rank !== rank) return false;
+    if (channel !== ALL && a.channel !== channel) return false;
+    if (area !== ALL && a.area !== area) return false;
+    return true;
+  };
 
+  const inTab: Record<Tab, Agency[]> = {
+    agency: agencies,
+    partner: partners,
+    staff: staff,
+  };
   const filtered: Record<Tab, Agency[]> = {
     agency: agencies.filter(matches),
     partner: partners.filter(matches),
     staff: staff.filter(matches),
   };
-  const rows = filtered[tab];
+
+  /* --- 並び替え --- */
+  const accessors: Accessors<Agency> = {
+    code: (a) => a.code,
+    name: (a) => a.name,
+    rank: (a) => rankOrder(a.rank),
+    channel: (a) => a.channel,
+    area: (a) => a.area,
+    parent: (a) => a.parentName || a.parentCode,
+    slot: (a) => usedByParent.get(a.code) ?? 0,
+    status: (a) => statusOrder(a.status),
+    email: (a) => a.email,
+    created: (a) => a.createdAt,
+  };
+  const rows = sortRows(filtered[tab], sort.column, sort.desc, accessors);
+
+  const current = TABS.find((t) => t.key === tab)!;
+  const tabRows = inTab[tab];
+  const isFiltered =
+    Boolean(keyword) || status !== ALL || rank !== ALL || channel !== ALL || area !== ALL;
+  const clearHref = buildListHref(BASE, params, {
+    keyword: "",
+    status: "",
+    rank: "",
+    channel: "",
+    area: "",
+  });
+
+  // 選択肢は、いま開いているタブに実際にある値から作る（他のタブの値は出さない）
+  const statusOptions = buildOptions(tabRows, (a) => a.status, STATUSES, status);
+  const rankOptions = buildOptions(tabRows, (a) => a.rank, RANKS, rank);
+  const channelOptions = buildOptions(tabRows, (a) => a.channel, CHANNELS, channel);
+  const areaOptions = buildOptions(tabRows, (a) => a.area, [], area);
 
   // ログイン情報を発行できる相手（解約済みは除く）
   const withPassword = await listCodesWithPassword();
@@ -121,7 +227,6 @@ export default async function AdminAgenciesPage({
       name: a.name || "（名称未登録）",
       hasPassword: withPassword.has(a.code),
     }));
-  const current = TABS.find((t) => t.key === tab)!;
 
   return (
     <div className="space-y-6">
@@ -174,61 +279,88 @@ export default async function AdminAgenciesPage({
         </Notice>
       ) : null}
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <nav className="flex items-center gap-1 rounded-xl border border-ink-800 bg-ink-900/70 p-1">
-          {TABS.map((t) => {
-            const active = t.key === tab;
-            return (
-              <Link
-                key={t.key}
-                href={hrefFor(t.key, keyword)}
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition",
-                  active
-                    ? "bg-gold-500/12 text-gold-300"
-                    : "text-ink-300 hover:bg-ink-850 hover:text-ink-100",
-                )}
-              >
-                <span>{t.label}</span>
-                <span
-                  className={cn(
-                    "tabnum text-xs",
-                    active ? "text-gold-400" : "text-ink-400",
-                  )}
-                >
-                  {filtered[t.key].length}
-                </span>
-              </Link>
-            );
-          })}
-        </nav>
+      <nav className="flex flex-wrap items-center gap-1 rounded-xl border border-ink-800 bg-ink-900/70 p-1">
+        {TABS.map((t) => {
+          const active = t.key === tab;
+          return (
+            <Link
+              key={t.key}
+              href={buildListHref(BASE, params, {
+                tab: t.key === "agency" ? "" : t.key,
+              })}
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                "flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition",
+                active
+                  ? "bg-gold-500/12 text-gold-300"
+                  : "text-ink-300 hover:bg-ink-850 hover:text-ink-100",
+              )}
+            >
+              <span>{t.label}</span>
+              <span className={cn("tabnum text-xs", active ? "text-gold-400" : "text-ink-400")}>
+                {filtered[t.key].length}
+              </span>
+            </Link>
+          );
+        })}
+      </nav>
 
-        <AgencySearch key={`${tab}:${keyword}`} tab={tab} keyword={keyword} />
-      </div>
+      <Card>
+        <FilterBar
+          action={BASE}
+          hidden={{
+            tab: tab === "agency" ? "" : tab,
+            sort: sort.column,
+            dir: sort.desc ? "desc" : "asc",
+          }}
+        >
+          <FilterText
+            name="keyword"
+            label="キーワード"
+            value={keyword}
+            placeholder="コード・名前・代表者"
+            width="w-60"
+          />
+          <FilterSelect
+            name="status"
+            label="稼働状況"
+            value={status}
+            options={statusOptions}
+            allLabel={`すべて（${tabRows.length}）`}
+          />
+          <FilterSelect name="rank" label="ランク" value={rank} options={rankOptions} />
+          <FilterSelect
+            name="channel"
+            label="販路種別"
+            value={channel}
+            options={channelOptions}
+            width="w-56"
+          />
+          <FilterSelect name="area" label="エリア" value={area} options={areaOptions} />
+          <FilterActions clearHref={clearHref} filtered={isFiltered} />
+        </FilterBar>
+      </Card>
 
-      {keyword ? (
-        <p className="text-sm text-ink-300">
-          「{keyword}」で絞り込み中。3つのタブそれぞれの該当件数をタブの数字に出しています。
-          <Link
-            href={hrefFor(tab, "")}
-            className="ml-1.5 underline underline-offset-2 hover:text-gold-300"
-          >
-            絞り込みを解除
-          </Link>
-        </p>
+      {isFiltered ? (
+        <FilterSummary
+          total={tabRows.length}
+          shown={rows.length}
+          unit={current.unit}
+          clearHref={clearHref}
+          note={`${current.label}のタブ`}
+        />
       ) : null}
 
-      <Card title={`${current.label}　${rows.length} 件`}>
+      <Card title={`${current.label}　${rows.length} ${current.unit}`}>
         {rows.length === 0 ? (
           <EmptyState
-            title={emptyTitle(tab, keyword)}
-            description={emptyDescription(tab, keyword)}
+            title={emptyTitle(tab, isFiltered)}
+            description={emptyDescription(tab, isFiltered)}
           />
         ) : tab === "agency" ? (
-          <AgencyTable rows={rows} usedByParent={usedByParent} />
+          <AgencyTable rows={rows} usedByParent={usedByParent} sort={sort} params={params} />
         ) : (
-          <PeopleTable rows={rows} />
+          <PeopleTable rows={rows} sort={sort} params={params} />
         )}
       </Card>
 
@@ -253,22 +385,38 @@ export default async function AdminAgenciesPage({
 function AgencyTable({
   rows,
   usedByParent,
+  sort,
+  params,
 }: {
   rows: Agency[];
   usedByParent: Map<string, number>;
+  sort: SortState;
+  params: SearchParams;
 }) {
+  const th = (column: string, label: string, align?: "left" | "right") => (
+    <SortableTh
+      column={column}
+      label={label}
+      sort={sort}
+      basePath={BASE}
+      params={params}
+      align={align}
+    />
+  );
+
   return (
     <Table>
       <thead>
         <tr>
-          <Th>代理店コード</Th>
-          <Th>法人名</Th>
-          <Th>ランク</Th>
-          <Th>エリア</Th>
-          <Th>上位代理店</Th>
-          <Th align="right">枠</Th>
-          <Th>稼働ステータス</Th>
-          <Th>登録日</Th>
+          {th("code", "代理店コード")}
+          {th("name", "法人名")}
+          {th("rank", "ランク")}
+          {th("channel", "販路種別")}
+          {th("area", "エリア")}
+          {th("parent", "上位代理店")}
+          {th("slot", "枠", "right")}
+          {th("status", "稼働ステータス")}
+          {th("created", "登録日")}
         </tr>
       </thead>
       <tbody>
@@ -280,15 +428,15 @@ function AgencyTable({
             <tr key={a.recordId || a.code}>
               <Td numeric className="whitespace-nowrap font-medium text-ink-100">
                 {a.code ? (
-                    <Link
-                      href={`/admin/agencies/${encodeURIComponent(a.code)}`}
-                      className="underline underline-offset-4 hover:text-gold-300"
-                    >
-                      {a.code}
-                    </Link>
-                  ) : (
-                    "—"
-                  )}
+                  <Link
+                    href={`/admin/agencies/${encodeURIComponent(a.code)}`}
+                    className="underline underline-offset-4 hover:text-gold-300"
+                  >
+                    {a.code}
+                  </Link>
+                ) : (
+                  "—"
+                )}
               </Td>
               <Td>
                 <div className="min-w-0">
@@ -299,6 +447,7 @@ function AgencyTable({
                 </div>
               </Td>
               <Td>{a.rank || "—"}</Td>
+              <Td>{a.channel || "—"}</Td>
               <Td>{a.area || "—"}</Td>
               <Td>
                 <Parent agency={a} />
@@ -332,18 +481,30 @@ function AgencyTable({
 
 /* ---------- 表（取次・スタッフタブ） ---------- */
 
-function PeopleTable({ rows }: { rows: Agency[] }) {
+function PeopleTable({
+  rows,
+  sort,
+  params,
+}: {
+  rows: Agency[];
+  sort: SortState;
+  params: SearchParams;
+}) {
+  const th = (column: string, label: string) => (
+    <SortableTh column={column} label={label} sort={sort} basePath={BASE} params={params} />
+  );
+
   return (
     <Table>
       <thead>
         <tr>
-          <Th>コード</Th>
-          <Th>氏名</Th>
-          <Th>販路種別</Th>
-          <Th>上位代理店</Th>
-          <Th>メールアドレス</Th>
-          <Th>稼働ステータス</Th>
-          <Th>登録日</Th>
+          {th("code", "コード")}
+          {th("name", "氏名")}
+          {th("channel", "販路種別")}
+          {th("parent", "上位代理店")}
+          {th("email", "メールアドレス")}
+          {th("status", "稼働ステータス")}
+          {th("created", "登録日")}
         </tr>
       </thead>
       <tbody>
@@ -351,15 +512,15 @@ function PeopleTable({ rows }: { rows: Agency[] }) {
           <tr key={a.recordId || a.code}>
             <Td numeric className="whitespace-nowrap font-medium text-ink-100">
               {a.code ? (
-                    <Link
-                      href={`/admin/agencies/${encodeURIComponent(a.code)}`}
-                      className="underline underline-offset-4 hover:text-gold-300"
-                    >
-                      {a.code}
-                    </Link>
-                  ) : (
-                    "—"
-                  )}
+                <Link
+                  href={`/admin/agencies/${encodeURIComponent(a.code)}`}
+                  className="underline underline-offset-4 hover:text-gold-300"
+                >
+                  {a.code}
+                </Link>
+              ) : (
+                "—"
+              )}
             </Td>
             <Td>
               <div className="truncate text-ink-100">{a.name || "（名称未登録）"}</div>
@@ -409,16 +570,16 @@ function Parent({ agency }: { agency: Agency }) {
 
 /* ---------- 空のときの文言 ---------- */
 
-function emptyTitle(tab: Tab, keyword: string): string {
-  if (keyword) return `「${keyword}」に一致する登録はありません`;
+function emptyTitle(tab: Tab, filtered: boolean): string {
+  if (filtered) return "条件に合うものがありません";
   if (tab === "agency") return "代理店がまだ登録されていません";
   if (tab === "partner") return "取次パートナーがまだ登録されていません";
   return "スタッフがまだ登録されていません";
 }
 
-function emptyDescription(tab: Tab, keyword: string): string {
-  if (keyword) {
-    return "法人名の一部か、代理店コードの一部で探せます。別のタブに入っている可能性もあるので、タブの数字も確認してください。";
+function emptyDescription(tab: Tab, filtered: boolean): string {
+  if (filtered) {
+    return "条件を変えてお試しください。キーワードは法人名・代理店コード・代表者名の一部で探せます。別のタブに入っている可能性もあるので、タブの数字もご確認ください。";
   }
   if (tab === "agency") {
     return "代理店の申込が承認され、代理店マスタにコード区分 00 で登録されると、ここに自動で表示されます。";

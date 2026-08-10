@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useState } from "react";
 import {
   changeStatusAction,
+  resendGuideMailAction,
   createAgencyAction,
   updateAgencyAction,
   type AgencyActionState,
@@ -350,6 +351,8 @@ export function StatusPanel({ agency }: { agency: AgencyDetail }) {
           <Notice tone="info">{state.ok}</Notice>
         </div>
       ) : null}
+
+      {agency.status === "稼働中" ? <ResendGuideMail agency={agency} /> : null}
     </div>
   );
 }
@@ -827,5 +830,39 @@ export function NewChildForm({
         </div>
       ) : null}
     </div>
+  );
+}
+
+
+/**
+ * 案内メールをもう一度送る。
+ *
+ * 代理店から「届いていない」と言われたときに使う。
+ * 承認のときは二重に送らない作りにしているため、送り直しはここからだけ。
+ */
+function ResendGuideMail({ agency }: { agency: AgencyDetail }) {
+  const [state, run, pending] = useActionState(resendGuideMailAction, initial);
+  return (
+    <form action={run} className="mt-4 border-t border-ink-800 pt-4">
+      <input type="hidden" name="id" value={agency.id} />
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="submit" disabled={pending} className={quietBtn}>
+          {pending ? "送信中…" : "案内メールを送り直す"}
+        </button>
+        <span className={hintCls}>
+          「案内のメールが届いていない」とご連絡があったときにお使いください。
+        </span>
+      </div>
+      {state.error ? (
+        <div className="mt-3">
+          <Notice tone="bad">{state.error}</Notice>
+        </div>
+      ) : null}
+      {state.ok ? (
+        <div className="mt-3">
+          <Notice tone="info">{state.ok}</Notice>
+        </div>
+      ) : null}
+    </form>
   );
 }

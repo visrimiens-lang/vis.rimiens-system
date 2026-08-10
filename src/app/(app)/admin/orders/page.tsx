@@ -4,6 +4,19 @@ import { currentViewer } from "@/lib/auth";
 import { listAllAgencies } from "@/lib/agencies";
 import { select } from "@/lib/db";
 import { currentMonth, recentMonths, unitRewardFor } from "@/lib/orders";
+import {
+  ALL,
+  buildListHref,
+  buildOptions,
+  matchesKeyword,
+  parseSort,
+  readParam,
+  sortRows,
+  type Accessors,
+  type FilterOption,
+  type SearchParams,
+  type SortState,
+} from "@/lib/list-params";
 import type { Agency, Order } from "@/lib/types";
 import {
   Badge,
@@ -21,7 +34,16 @@ import {
   jpMonthLabel,
   yen,
 } from "@/components/ui";
-import { OrderFilters, type CodeOption, type ShipOption } from "./OrderFilters";
+import {
+  FilterActions,
+  FilterBar,
+  FilterSelect,
+  FilterSummary,
+  FilterText,
+  SortableTh,
+} from "@/components/SortableTh";
+
+const BASE = "/admin/orders";
 
 export const metadata = { title: "受注一覧（本部）｜VIS 代理店ポータル" };
 
@@ -35,6 +57,43 @@ export const metadata = { title: "受注一覧（本部）｜VIS 代理店ポー
 
 /** App10「出荷状況」の選択肢。受注が1件も無い状態でも絞り込めるように持っておく。 */
 const SHIPPING_STATUSES = ["出荷待ち", "出荷手配中", "出荷済", "キャンセル"];
+
+/**
+ * 決済方法と照合ステータスも、受注が無い状態で選べるように並べておく。
+ *
+ * ここに書く文字は、必ずデータベースに保存されている値と同じにすること。
+ * 受注テーブルの決済方法は 九州信販／アプラス／ライフカード／Stripe／スクエア／代引き の
+ * 6つだけ、照合ステータスは 照合済／要確認／直販 の3つだけを受け付けるようになっている
+ * （supabase/part2.sql の orders）。ここに無い言葉（「クレジット」など）を並べると、
+ * 選んでも必ず0件になる選択肢が出てしまう。
+ *
+ * 照合ステータスの「直販」は、新しい受注に何も入っていないときの初期値なので、
+ * 実際にはいちばん件数が多くなる。これが選べないと本部が直販ぶんを絞り込めない。
+ */
+const PAYMENT_METHODS = [
+  "九州信販",
+  "アプラス",
+  "ライフカード",
+  "Stripe",
+  "スクエア",
+  "代引き",
+];
+const MATCH_STATUSES = ["照合済", "要確認", "直販"];
+
+/** 並び替えに使える列。 */
+const SORT_COLUMNS = [
+  "date",
+  "customer",
+  "product",
+  "quantity",
+  "amount",
+  "payee",
+  "owner",
+  "ship",
+  "match",
+];
+
+const DEFAULT_SORT: SortState = { column: "date", desc: true };
 
 const PAGE_SIZE = 500;
 const MAX_PAGES = 5;
@@ -195,19 +254,32 @@ function orderDate(v: string, withYear: boolean): string {
 export default async function AdminOrdersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string; code?: string; ship?: string }>;
+  searchParams: Promise<{
+    month?: string;
+    code?: string;
+    ship?: string;
+    pay?: string;
+    match?: string;
+    keyword?: string;
+    sort?: string;
+    dir?: string;
+  }>;
 }) {
   const viewer = await currentViewer();
   if (!viewer) redirect("/login");
   if (viewer.kind !== "hq") redirect("/dashboard");
 
-  const params = await searchParams;
+  const params: SearchParams = await searchParams;
   const thisMonth = currentMonth();
   const months = recentMonths(12);
-  const month = normalizeMonth(params.month, thisMonth);
-  const monthOptions = month === "all" || months.includes(month) ? months : [month, ...months];
-  const selectedCode = params.code?.trim() ? params.code.trim() : "all";
-  const selectedShip = params.ship?.trim() ? params.ship.trim() : "all";
+  const month = normalizeMonth(readParam(params, "month"), thisMonth);
+  const monthChoices = month === "all" || months.includes(month) ? months : [month, ...months];
+  const selectedCode = readParam(params, "code") || ALL;
+  const selectedShip = readParam(params, "ship") || ALL;
+  const selectedPay = readParam(params, "pay") || ALL;
+  const selectedMatch = readParam(params, "match") || ALL;
+  const keyword = readParam(params, "keyword");
+  const sort = parseSort(params, DEFAULT_SORT, SORT_COLUMNS);
   const allPeriod = month === "all";
   const periodLabel = allPeriod ? "全期間" : jpMonthLabel(month);
 
@@ -234,7 +306,7 @@ export default async function AdminOrdersPage({
   const header = (
     <PageHeader
       title="受注一覧（全代理店）"
-      description="全代理店の受注をまとめて確認できます。期間・代理店コード・出荷状況で絞り込めます。"
+      description="全代理店の受注をまとめて確認できます。期間・代理店・出荷状況・決済方法・照合状態で絞り込め、注文者名や送り状番号でも探せます。表の見出しを押すと並び替わります。"
     />
   );
 
@@ -255,40 +327,83 @@ export default async function AdminOrdersPage({
 
   /* --- 絞り込みの選択肢は、期間で絞ったあとの受注から作る --- */
   const codeCounts = new Map<string, number>();
-  const shipCounts = new Map<string, number>();
   for (const o of periodOrders) {
     for (const c of codesOf(o)) codeCounts.set(c, (codeCounts.get(c) ?? 0) + 1);
-    if (o.shippingStatus) {
-      shipCounts.set(o.shippingStatus, (shipCounts.get(o.shippingStatus) ?? 0) + 1);
-    }
   }
 
   // 受注が0件でも代理店を選べるように、代理店マスタの正規代理店（コード区分00）も並べる。
   const codeSet = new Set<string>(codeCounts.keys());
   for (const a of agencies) if (a.codeKind === "00" && a.code) codeSet.add(a.code);
-  if (selectedCode !== "all") codeSet.add(selectedCode);
+  if (selectedCode !== ALL) codeSet.add(selectedCode);
 
-  const codeOptions: CodeOption[] = [...codeSet]
+  const codeOptions: FilterOption[] = [...codeSet]
     .map((code) => ({
-      code,
-      name: nameByCode.get(code) ?? "",
+      value: code,
+      label: `${code}${nameByCode.get(code) ? `　${nameByCode.get(code)}` : ""}`,
       count: codeCounts.get(code) ?? 0,
     }))
-    .sort((a, b) => b.count - a.count || a.code.localeCompare(b.code));
+    .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
 
-  const shipSet = new Set<string>(SHIPPING_STATUSES);
-  for (const s of shipCounts.keys()) shipSet.add(s);
-  if (selectedShip !== "all") shipSet.add(selectedShip);
-  const shipOptions: ShipOption[] = [...shipSet].map((value) => ({
-    value,
-    count: shipCounts.get(value) ?? 0,
+  const monthOptions: FilterOption[] = monthChoices.map((m) => ({
+    value: m,
+    label: `${jpMonthLabel(m)}${m === thisMonth ? "（今月）" : ""}`,
+    count: 0,
   }));
+  const shipOptions = buildOptions(
+    periodOrders,
+    (o) => o.shippingStatus,
+    SHIPPING_STATUSES,
+    selectedShip,
+  );
+  const payOptions = buildOptions(
+    periodOrders,
+    (o) => o.paymentMethod,
+    PAYMENT_METHODS,
+    selectedPay,
+  );
+  const matchOptions = buildOptions(
+    periodOrders,
+    (o) => o.matchStatus,
+    MATCH_STATUSES,
+    selectedMatch,
+  );
 
   /* --- 絞り込み --- */
-  const rows = periodOrders.filter((o) => {
-    if (selectedCode !== "all" && !codesOf(o).includes(selectedCode)) return false;
-    if (selectedShip !== "all" && o.shippingStatus !== selectedShip) return false;
+  const filteredRows = periodOrders.filter((o) => {
+    if (selectedCode !== ALL && !codesOf(o).includes(selectedCode)) return false;
+    if (selectedShip !== ALL && o.shippingStatus !== selectedShip) return false;
+    if (selectedPay !== ALL && o.paymentMethod !== selectedPay) return false;
+    if (selectedMatch !== ALL && o.matchStatus !== selectedMatch) return false;
+    if (!matchesKeyword(keyword, [o.customerName, o.trackingNo])) return false;
     return true;
+  });
+
+  /* --- 並び替え --- */
+  const accessors: Accessors<AdminOrder> = {
+    date: (o) => o.date,
+    customer: (o) => o.customerName,
+    product: (o) => o.productName,
+    quantity: (o) => o.quantity || 1,
+    amount: (o) => o.amount,
+    payee: (o) => payeeCodeOf(o),
+    owner: (o) => o.ownerCode,
+    ship: (o) => o.shippingStatus,
+    match: (o) => o.matchStatus,
+  };
+  const rows = sortRows(filteredRows, sort.column, sort.desc, accessors);
+
+  const isFiltered =
+    selectedCode !== ALL ||
+    selectedShip !== ALL ||
+    selectedPay !== ALL ||
+    selectedMatch !== ALL ||
+    Boolean(keyword);
+  const clearHref = buildListHref(BASE, params, {
+    code: "",
+    ship: "",
+    pay: "",
+    match: "",
+    keyword: "",
   });
 
   const orderCount = rows.length;
@@ -299,12 +414,15 @@ export default async function AdminOrdersPage({
   const needsCheck = rows.filter((o) => o.matchStatus === "要確認");
   const groups = groupByPayee(rows, nameByCode);
   const missingPayable = groups.some((g) => g.payable === null);
-  const selectedName = selectedCode === "all" ? "" : (nameByCode.get(selectedCode) ?? "");
+  const selectedName = selectedCode === ALL ? "" : (nameByCode.get(selectedCode) ?? "");
 
   const filterLabel = [
     periodLabel,
-    selectedCode === "all" ? null : selectedCode,
-    selectedShip === "all" ? null : selectedShip,
+    selectedCode === ALL ? null : selectedCode,
+    selectedShip === ALL ? null : selectedShip,
+    selectedPay === ALL ? null : selectedPay,
+    selectedMatch === ALL ? null : selectedMatch,
+    keyword ? `「${keyword}」` : null,
   ]
     .filter(Boolean)
     .join("・");
@@ -314,17 +432,66 @@ export default async function AdminOrdersPage({
       {header}
 
       <Card>
-        <OrderFilters
-          month={month}
-          months={monthOptions}
-          defaultMonth={thisMonth}
-          code={selectedCode}
-          codeOptions={codeOptions}
-          ship={selectedShip}
-          shipOptions={shipOptions}
-          periodCount={periodOrders.length}
-        />
+        <FilterBar
+          action={BASE}
+          hidden={{ sort: sort.column, dir: sort.desc ? "desc" : "asc" }}
+        >
+          <FilterSelect
+            name="month"
+            label="期間"
+            value={month}
+            options={monthOptions}
+            allLabel="全期間"
+            showCount={false}
+          />
+          <FilterSelect
+            name="code"
+            label="代理店コード"
+            value={selectedCode}
+            options={codeOptions}
+            allLabel={`すべての代理店（${periodOrders.length}）`}
+            width="w-72"
+          />
+          <FilterSelect
+            name="ship"
+            label="出荷状況"
+            value={selectedShip}
+            options={shipOptions}
+            allLabel={`すべて（${periodOrders.length}）`}
+            width="w-48"
+          />
+          <FilterSelect
+            name="pay"
+            label="決済方法"
+            value={selectedPay}
+            options={payOptions}
+            width="w-48"
+          />
+          <FilterSelect
+            name="match"
+            label="照合状態"
+            value={selectedMatch}
+            options={matchOptions}
+            width="w-44"
+          />
+          <FilterText
+            name="keyword"
+            label="キーワード"
+            value={keyword}
+            placeholder="注文者名・送り状番号"
+          />
+          <FilterActions clearHref={clearHref} filtered={isFiltered} />
+        </FilterBar>
       </Card>
+
+      {isFiltered ? (
+        <FilterSummary
+          total={periodOrders.length}
+          shown={rows.length}
+          clearHref={clearHref}
+          note={`${periodLabel}の受注のうち`}
+        />
+      ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile
@@ -458,38 +625,44 @@ export default async function AdminOrdersPage({
         title={`受注明細（${filterLabel}）`}
         action={
           <span className="text-xs text-ink-400">
-            受注日の新しい順・{orderCount.toLocaleString("ja-JP")} 件
+            {orderCount.toLocaleString("ja-JP")} 件・見出しを押すと並び替えられます
           </span>
         }
       >
         {orderCount === 0 ? (
           <EmptyState
             title={
-              selectedCode === "all" && selectedShip === "all"
-                ? "この期間の受注はまだありません"
-                : "この条件に合う受注はありません"
+              isFiltered ? "条件に合うものがありません" : "この期間の受注はまだありません"
             }
             description={
-              selectedCode === "all" && selectedShip === "all"
-                ? "お客様の決済が完了すると、受注がここに自動で表示されます。反映は数分以内です。期間を「全期間」に切り替えると、過去のぶんも確認できます。"
-                : `${selectedCode === "all" ? "" : `代理店 ${selectedCode}${selectedName ? `（${selectedName}）` : ""}`}${
-                    selectedShip === "all" ? "" : `${selectedCode === "all" ? "" : "・"}出荷状況「${selectedShip}」`
-                  } に当てはまる受注は${periodLabel}にはありません。絞り込みを「すべて」に戻すと全代理店の受注を確認できます。`
+              isFiltered
+                ? `${periodLabel}には、${[
+                    selectedCode === ALL
+                      ? null
+                      : `代理店 ${selectedCode}${selectedName ? `（${selectedName}）` : ""}`,
+                    selectedShip === ALL ? null : `出荷状況「${selectedShip}」`,
+                    selectedPay === ALL ? null : `決済方法「${selectedPay}」`,
+                    selectedMatch === ALL ? null : `照合状態「${selectedMatch}」`,
+                    keyword ? `キーワード「${keyword}」` : null,
+                  ]
+                    .filter(Boolean)
+                    .join("・")}に当てはまる受注がありません。条件を変えてお試しください。期間を「全期間」にすると、過去のぶんからも探せます。`
+                : "お客様の決済が完了すると、受注がここに自動で表示されます。反映は数分以内です。期間を「全期間」に切り替えると、過去のぶんも確認できます。"
             }
           />
         ) : (
           <Table>
             <thead>
               <tr>
-                <Th>受注日</Th>
-                <Th>注文者名</Th>
-                <Th>商品名</Th>
-                <Th align="right">台数</Th>
-                <Th align="right">金額</Th>
-                <Th>代理店コード</Th>
-                <Th>担当コード</Th>
-                <Th>出荷状況</Th>
-                <Th>照合ステータス</Th>
+                <SortableTh column="date" label="受注日" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="customer" label="注文者名" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="product" label="商品名" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="quantity" label="台数" sort={sort} basePath={BASE} params={params} align="right" />
+                <SortableTh column="amount" label="金額" sort={sort} basePath={BASE} params={params} align="right" />
+                <SortableTh column="payee" label="代理店コード" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="owner" label="担当コード" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="ship" label="出荷状況" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="match" label="照合ステータス" sort={sort} basePath={BASE} params={params} />
               </tr>
             </thead>
             <tbody>

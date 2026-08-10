@@ -6,6 +6,8 @@ import { listAllAgencies, listDescendants, slotLimitsOf } from "@/lib/agencies";
 import { currentViewer } from "@/lib/auth";
 import { audit, insert, select, selectOne, update } from "@/lib/db";
 import { canRegisterUnder, nextAgencyCode, orgPrefixOf } from "@/lib/intake";
+import { PORTAL_URL, approvalMail, sendMail } from "@/lib/mail";
+import { OFFICIAL_LINE_URL, tossUpUrl } from "@/lib/qr";
 import { areaUsage, breakdownSlots, slotModelOf } from "@/lib/slots";
 import type { Agency } from "@/lib/types";
 
@@ -593,6 +595,179 @@ export async function updateAgencyAction(
   return { ok: [head, ...notes].join(" ") };
 }
 
+/* ═══════════════ 承認したときの案内メール ═══════════════ */
+
+/*
+ * 本部が「稼働中」にした（＝承認した）ときに、その代理店へ案内メールを送る。
+ *
+ * 文面はコード区分と販路種別の2つで選ぶ。会社に個人向けのQR案内を送ってしまう
+ * 取り違えを起こさないため、選び分けはこの一か所だけで行う
+ * （2026-08-07 会議の指摘 #2）。
+ *
+ * コード区分だけでは足りない。個人販売パートナー（税理士・保険の方など、
+ * ご自身でお客様に販売する個人事業主）は、申込フォーム経由でも手で登録しても
+ * コード区分が会社と同じ 00 になるため、区分だけを見ると会社と見分けがつかない。
+ * 見分けられるのは販路種別だけなので、そちらもあわせて見る。
+ *
+ * メールが送れなくても承認そのものは取り消さない。
+ * 届いていないことを画面と記録の両方に残し、本部が次の手を打てるようにする。
+ */
+
+/** 案内メールを送ろうとした結果。呼び出し側が画面の文面を組み立てるのに使う。 */
+type GuideMail =
+  /** 送れた。recorded が false のときは送信日時を残せていない。 */
+  | { kind: "sent"; to: string; recorded: boolean }
+  /** すでに送ってあるので送らなかった。at は前回送った日時。 */
+  | { kind: "already"; at: string }
+  /** メールアドレスが未登録で送れなかった。 */
+  | { kind: "noEmail" }
+  /** 送信そのものに失敗した。 */
+  | { kind: "failed"; reason: string };
+
+/** ご本人が個人でお客様に販売する販路種別。会社あての文面を送ってはいけない相手。 */
+const PERSONAL_CHANNEL = "個人販売パートナー";
+
+/** 案内メールの送り方。文面の種類・記録に残す言い方・QRを載せてよいかの3つ。 */
+type MailPlan = {
+  /** どの文面を使うか。 */
+  kind: "会社" | "スタッフ" | "取次パートナー";
+  /** 操作の記録に残す言い方。誰あてに送ったのかを後から辿れるようにする。 */
+  label: string;
+  /** ご本人が使う個別のQR（QR1／QR2）を載せてよい相手か。 */
+  withQr: boolean;
+};
+
+/**
+ * コード区分と販路種別から、どの文面で送るかを決める。
+ *
+ *   取次パートナー（区分01）… 紹介だけの相手。個別のQRは出さず、
+ *                             共通の公式LINEとご紹介フォームをご案内する。
+ *   スタッフ（区分02）      … 代理店に所属する個人。ご本人がお客様にQRをお見せする。
+ *   個人販売パートナー      … コード区分は会社と同じ 00 だが、実際に販売するのは
+ *                             ご本人。会社あての「御中」も、「QRは販売ライセンスを
+ *                             お持ちのスタッフの方それぞれにお渡しします」という
+ *                             案内も当てはまらないので、個人あての文面で送る。
+ *   会社（区分00）          … 「御中」の文面。QRは載せない
+ *                             （お客様にお見せするQRは、販売する個人にお渡しするもの）。
+ */
+function mailPlanOf(codeKind: string, channel: string): MailPlan {
+  if (codeKind === "01") {
+    return { kind: "取次パートナー", label: "取次パートナー", withQr: false };
+  }
+  if (codeKind === "02") {
+    return { kind: "スタッフ", label: "スタッフ", withQr: true };
+  }
+  if (channel === PERSONAL_CHANNEL) {
+    // 文面はスタッフと同じ（「様」＋ご本人のQR）だが、記録には販路種別のまま残す。
+    return { kind: "スタッフ", label: "個人販売パートナー", withQr: true };
+  }
+  // 区分が入っていない古いデータは会社あつかい。
+  // 会社の文面にはQRが入らないので、取り違えても個人向けのQRは送られない。
+  return { kind: "会社", label: "会社", withQr: false };
+}
+
+/** 日時を画面に出せる形にする。読めない値はそのまま返す。 */
+function jpStamp(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return new Intl.DateTimeFormat("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(d);
+}
+
+/**
+ * 案内メールを1通送る。
+ *
+ * resend が false のときは、すでに送ってある相手には送らない（二重送信の防止）。
+ * 送れたら送信日時（guide_mailed_at）を残す。
+ */
+async function sendGuideMail(
+  row: Row,
+  opts: { resend: boolean },
+): Promise<GuideMail> {
+  const code = s(row, "code");
+  // コードが読めない行に送ると、送信日時の書き戻し先も決められない
+  if (!code) {
+    return { kind: "failed", reason: "代理店コードを読み取れませんでした。" };
+  }
+  const label = s(row, "name") || code;
+  const to = s(row, "email");
+  if (!to) return { kind: "noEmail" };
+
+  const already = s(row, "guide_mailed_at");
+  if (already && !opts.resend) return { kind: "already", at: already };
+
+  const plan = mailPlanOf(s(row, "code_kind"), s(row, "channel"));
+  const isToss = plan.kind === "取次パートナー";
+  const mail = approvalMail({
+    name: label,
+    code,
+    kind: plan.kind,
+    portalUrl: PORTAL_URL,
+    // パスワードの値は渡さない。発行済みかどうかだけを伝える。
+    passwordIssued: Boolean(s(row, "portal_password")),
+    // ご本人が使う個別のQRは、その相手にだけ載せる（発行済みのときだけ）。
+    // 取次パートナーには出さない。共通の公式LINEとご紹介フォームだけ。
+    qr1Url: plan.withQr ? s(row, "qr1_url") || undefined : undefined,
+    qr2Url: plan.withQr ? s(row, "qr2_url") || undefined : undefined,
+    lineQrUrl: isToss ? OFFICIAL_LINE_URL : undefined,
+    tossFormUrl: isToss ? tossUpUrl(code) || undefined : undefined,
+  });
+
+  const sent = await sendMail(to, mail.subject, mail.body);
+  const common = {
+    代理店: label,
+    宛先: to,
+    文面: plan.label,
+    再送: opts.resend ? "はい" : "いいえ",
+  };
+
+  if (!sent.ok) {
+    await audit("HQ", "承認メール送信失敗", { type: "agency", key: code }, {
+      ...common,
+      理由: sent.error,
+    });
+    return { kind: "failed", reason: sent.error };
+  }
+
+  /*
+   * 送信日時を残す。ここが失敗しても「送れた」ことは変わらないので、
+   * メールを送り直したりはしない。次に承認の操作をすると
+   * 同じ案内がもう一通届きうるため、その旨を記録と画面に残す。
+   */
+  let recorded = true;
+  try {
+    await update(`agencies?code=eq.${encodeURIComponent(code)}`, {
+      guide_mailed_at: new Date().toISOString(),
+    });
+  } catch {
+    recorded = false;
+  }
+
+  await audit("HQ", "承認メール送信", { type: "agency", key: code }, {
+    ...common,
+    送信日時の記録: recorded ? "残しました" : "残せませんでした",
+    前回の送信: already ? jpStamp(already) : "なし",
+  });
+
+  return { kind: "sent", to, recorded };
+}
+
+/**
+ * 案内メールが送れなかったときに、本部へ出す言葉。
+ *
+ * 送り直す操作は、まだどの画面にも出していない（下の resendGuideMailAction を参照）。
+ * 押せないボタンの名前を出すと本部が探し回ることになるため、
+ * いまは「本部から直接ご連絡ください」までにとどめる。
+ */
+const NO_EMAIL_NOTE =
+  "メールアドレスが未登録のため案内を送れませんでした。「内容を直す」欄にメールアドレスを登録したうえで、ポータルのご案内は本部から直接ご連絡ください。";
+
 /* ═══════════════ 稼働状況の切り替え（＝承認の操作） ═══════════════ */
 
 /**
@@ -601,6 +776,9 @@ export async function updateAgencyAction(
  * 「稼働中」にすることが、本部がこの代理店を承認したという意味になる。
  * 誰がいつ承認・停止したかを必ず記録に残す。
  * 停止・解約にするときは理由を必ず受け取り、日時とあわせて保存する。
+ *
+ * 稼働中にしたときは、その代理店へ案内メールを送る（相手ごとに文面を変える）。
+ * メールが送れなくても承認は取り消さない。届いていないことを正直に画面へ出す。
  */
 export async function changeStatusAction(
   _prev: AgencyActionState,
@@ -681,12 +859,42 @@ export async function changeStatusAction(
     元の停止理由: s(current, "suspended_reason") || "",
   });
 
+  /*
+   * 承認（稼働中）のときだけ案内メールを送る。
+   * ここから先で何が起きても、稼働中になった事実は取り消さない。
+   */
+  const guide =
+    next === "稼働中" ? await sendGuideMail(current, { resend: false }) : null;
+
   refresh(code);
 
   if (next === "稼働中") {
-    return {
-      ok: `${label}（${code}）を稼働中にしました。承認済みの取引先として一覧に出ます。ログイン情報がまだの場合は、代理店管理の一覧の下にある発行欄から出してください。`,
-    };
+    const head = `${label}（${code}）を稼働中にしました。承認済みの取引先として一覧に出ます。`;
+    const loginNote = s(current, "portal_password")
+      ? ""
+      : "ログイン用のパスワードはまだ発行されていません。代理店管理の一覧の下にある発行欄から出して、ご本人へお伝えください。";
+
+    if (guide?.kind === "sent") {
+      const twice = guide.recorded
+        ? ""
+        : "ただし送った日時を記録できませんでした。もう一度この操作をすると、同じ案内がもう一通届くことがあります。";
+      return {
+        ok: `${head}ご登録のメールアドレス（${guide.to}）へ案内メールをお送りしました。${twice}${loginNote}`,
+      };
+    }
+    if (guide?.kind === "already") {
+      return {
+        ok: `${head}案内メールは ${jpStamp(guide.at)} にお送りしているため、今回は送っていません。届いていないとご連絡があった場合は、本部から直接ご連絡ください。${loginNote}`,
+      };
+    }
+    if (guide?.kind === "failed") {
+      return {
+        ok: `${head}${loginNote}`,
+        error: `承認しましたが案内メールは届いていません。（${guide.reason}）お手数ですが、ポータルのご案内は本部から直接ご連絡ください。`,
+      };
+    }
+    // 残るのはメールアドレスが未登録のときだけ
+    return { ok: `${head}${loginNote}`, error: NO_EMAIL_NOTE };
   }
   if (next === "停止・解約") {
     return {
@@ -695,6 +903,91 @@ export async function changeStatusAction(
   }
   return {
     ok: `${label}（${code}）を未稼働に戻しました。ポータルには入れますが、本部の確認前の扱いになります。`,
+  };
+}
+
+/* ═══════════════ 案内メールの再送 ═══════════════ */
+
+/** 代理店コードの形。画面から来た値をそのまま検索条件に使わないため。 */
+const CODE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/;
+
+/**
+ * 案内メールをもう一度送る。
+ *
+ * 「届いていない」とご連絡があったとき、メールアドレスを直したとき、
+ * ログイン情報を発行し直したときに使う。すでに稼働中の代理店だけが対象。
+ * 稼働状況は何も変えない（承認の操作とは切り離す）。
+ *
+ * 二重送信の防止は効かせない。送り直すための操作だから。
+ * 送るたびに記録に残るので、何通送ったかは後から辿れる。
+ *
+ * ⚠️ この処理は、まだどの画面からも呼ばれていない（配線待ち）。
+ * 代理店の詳細画面（/admin/agencies/[code]）の「稼働状況の切り替え」の下に、
+ * この処理を呼ぶ送り直しの欄（id を隠し項目で渡し、確認を挟むボタン）を足す想定。
+ * 画面に出したら、承認したときの案内文（上）とメール未登録のときの案内文を
+ * 「案内メールを再送する」でお送りください、という言い方に戻すこと。
+ * それまでは、押せないボタンの名前を本部に案内しないようにしてある。
+ */
+export async function resendGuideMailAction(
+  _prev: AgencyActionState,
+  formData: FormData,
+): Promise<AgencyActionState> {
+  const denied = await denyIfNotHq();
+  if (denied) return { error: denied };
+
+  // 画面によって id で渡すところと、代理店コードで渡すところがある
+  const id = readId(formData);
+  const code = text(formData, "code");
+  if (!id && !CODE_RE.test(code)) {
+    return {
+      error: "対象の代理店を特定できませんでした。画面を読み込み直してからお試しください。",
+    };
+  }
+
+  let current: Row | null = null;
+  try {
+    current = id ? await findById(id) : await findByCode(code);
+  } catch (e) {
+    return failed("代理店の情報を読み込めませんでした。", e);
+  }
+  if (!current) {
+    return {
+      error: "この代理店は見つかりませんでした。すでに削除されている可能性があります。",
+    };
+  }
+
+  const label = s(current, "name") || s(current, "code");
+  const status = s(current, "status");
+  if (status !== "稼働中") {
+    return {
+      error:
+        status === "停止・解約"
+          ? `${label} は停止・解約のため、案内メールは送れません。取引を再開する場合は、先に稼働中に戻してください。`
+          : `${label} はまだ稼働中ではありません。上の欄で「稼働中」に切り替えると、そのときに案内メールをお送りします。`,
+    };
+  }
+
+  const guide = await sendGuideMail(current, { resend: true });
+
+  refresh(s(current, "code"));
+
+  if (guide.kind === "noEmail") return { error: NO_EMAIL_NOTE };
+  if (guide.kind === "failed") {
+    return {
+      error: `案内メールを送れませんでした。（${guide.reason}）時間をおいてもう一度お試しいただくか、本部から直接ご連絡ください。`,
+    };
+  }
+  if (guide.kind === "already") {
+    // 再送では通らない道だが、扱いを決めておく
+    return { ok: `${label} には ${jpStamp(guide.at)} に案内メールをお送りしています。` };
+  }
+
+  const twice = guide.recorded
+    ? ""
+    : "ただし送った日時を記録できませんでした。次に承認の操作をすると、同じ案内がもう一通届くことがあります。";
+  return {
+    ok: `${label} のご登録のメールアドレス（${guide.to}）へ案内メールをもう一度お送りしました。${twice}`,
+    at: Date.now(),
   };
 }
 

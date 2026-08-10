@@ -17,6 +17,7 @@ import {
   type SlotBreakdown as SlotBreakdownData,
 } from "@/lib/slots";
 import { listAllAgencies } from "@/lib/agencies";
+import { select } from "@/lib/db";
 import { SlotBreakdown } from "@/components/SlotBreakdown";
 import {
   attachRewards,
@@ -37,7 +38,6 @@ import {
   Notice,
   PageHeader,
   StatTile,
-  StatusBadge,
   Table,
   Td,
   Th,
@@ -45,14 +45,25 @@ import {
   jpMonthLabel,
   yen,
 } from "@/components/ui";
+import { Progress } from "@/components/Progress";
 import { SlotGrid } from "./SlotGrid";
+
+/** 直近の受注1件。進み具合を出すために審査結果と配達完了日も持たせる。 */
+type RecentOrder = OrderWithReward & { reviewResult: string; deliveredOn: string };
+
+type Row = Record<string, unknown>;
+
+const text = (r: Row, k: string): string => {
+  const v = r[k];
+  return v === null || v === undefined ? "" : String(v);
+};
 
 type Loaded = {
   self: Agency;
   summary: MonthlySummary;
   slot: SlotSummary;
   breakdown: SlotBreakdownData;
-  recent: OrderWithReward[];
+  recent: RecentOrder[];
 };
 
 async function load(code: string, month: string): Promise<Loaded | null> {
@@ -95,12 +106,57 @@ async function load(code: string, month: string): Promise<Loaded | null> {
   ]);
 
   const orders = attachRewards(thisMonth.raw, effectiveRank(self));
+
+  // 審査結果とお客様の紐づけは Order には入っていないので、
+  // 元の行から拾って進み具合の判定に回す。
+  const reviewById = new Map<string, string>();
+  const customerIdByOrder = new Map<string, string>();
+  for (const r of allTime.raw) {
+    const id = text(r, "id");
+    if (!id) continue;
+    reviewById.set(id, text(r, "review_result"));
+    const customerId = text(r, "customer_id");
+    if (customerId) customerIdByOrder.set(id, customerId);
+  }
+
+  const latest = attachRewards(allTime.raw, effectiveRank(self)).slice(0, 5);
+
+  // 配達が終わった日は顧客台帳のほうに入っている。
+  // 顧客一覧と同じ進み具合になるよう、ここでも引いてくる。
+  // 画面に出すのは5件だけなので、その5件ぶんだけ問い合わせる。
+  const deliveredByCustomer = new Map<string, string>();
+  const customerIds = [
+    ...new Set(
+      latest
+        .map((o) => customerIdByOrder.get(o.recordId) ?? "")
+        .filter((id) => /^\d+$/.test(id)),
+    ),
+  ];
+  if (customerIds.length > 0) {
+    try {
+      const rows = await select<Row>(
+        `customers?select=id,delivered_on&id=in.(${customerIds.join(",")})`,
+      );
+      for (const c of rows) {
+        const day = text(c, "delivered_on");
+        if (day) deliveredByCustomer.set(text(c, "id"), day);
+      }
+    } catch {
+      // 配達完了日が読めなくても、出荷までの進み具合は表示できるので続ける
+    }
+  }
+
   return {
     breakdown,
     self,
     summary: summarize(orders, month),
     slot,
-    recent: attachRewards(allTime.raw, effectiveRank(self)).slice(0, 5),
+    recent: latest.map((o) => ({
+      ...o,
+      reviewResult: reviewById.get(o.recordId) ?? "",
+      deliveredOn:
+        deliveredByCustomer.get(customerIdByOrder.get(o.recordId) ?? "") ?? "",
+    })),
   };
 }
 
@@ -146,6 +202,11 @@ export default async function DashboardPage() {
 
   const { self, summary, slot, breakdown, recent } = data;
 
+  // スタッフ（コード区分 02）には報酬の金額を出さない。
+  // 2026-04-23 の打ち合わせで「金額が見えるのは親アカウントだけ」と決まっている。
+  const isStaff = self.codeKind === "02";
+  const showReward = !isStaff;
+
   // 自分のランクに対応する単価が App10 にあるかどうか。
   // 「販売代理店」ぶんのフィールドは未整備のため null が返る。
   const rewardAvailable = canComputeReward(self);
@@ -174,16 +235,25 @@ export default async function DashboardPage() {
           value={yen(summary.salesTotal)}
           hint="ご自身と配下の販売金額の合計"
         />
-        <StatTile
-          label="今月の報酬見込み"
-          value={rewardTotal === null ? "—" : yen(rewardTotal)}
-          tone="gold"
-          hint={
-            rewardAvailable
-              ? `${rankLabel}としての単価 × 台数。確定額は本部の締め後に確定します。`
-              : "単価が未設定のため計算できません"
-          }
-        />
+        {showReward ? (
+          <StatTile
+            label="今月の報酬見込み"
+            value={rewardTotal === null ? "—" : yen(rewardTotal)}
+            tone="gold"
+            hint={
+              rewardAvailable
+                ? `${rankLabel}としての単価 × 台数。確定額は本部の締め後に確定します。`
+                : "単価が未設定のため計算できません"
+            }
+          />
+        ) : (
+          <StatTile
+            label="今月の出荷済"
+            value={String(summary.shippedCount)}
+            unit="件"
+            hint="発送が終わった受注の件数"
+          />
+        )}
         <StatTile
           label="枠の空き"
           value={String(breakdown.totalLimit - breakdown.totalUsed)}
@@ -193,13 +263,20 @@ export default async function DashboardPage() {
         />
       </div>
 
-      {!rewardAvailable ? (
-        <Notice tone="warn">
-          {rankMissing
-            ? "代理店ランクが登録されていないため、報酬額を計算できません。本部にご確認ください。"
-            : "販売代理店ぶんの単価がマスタ未設定のため金額を表示できません。本部にお問い合わせください。"}
+      {showReward ? (
+        !rewardAvailable ? (
+          <Notice tone="warn">
+            {rankMissing
+              ? "代理店ランクが登録されていないため、報酬額を計算できません。本部にご確認ください。"
+              : "販売代理店ぶんの単価がマスタ未設定のため金額を表示できません。本部にお問い合わせください。"}
+          </Notice>
+        ) : null
+      ) : (
+        <Notice tone="info">
+          報酬の金額は所属先の代理店にお問い合わせください。
+          この画面では、件数と売上金額、配送の進み具合のみ表示しています。
         </Notice>
-      ) : null}
+      )}
 
       {/* 2. 枠の状況 */}
       <Card
@@ -278,7 +355,7 @@ export default async function DashboardPage() {
                 <Th>顧客名</Th>
                 <Th>担当コード</Th>
                 <Th align="right">金額</Th>
-                <Th>出荷状況</Th>
+                <Th>進み具合</Th>
               </tr>
             </thead>
             <tbody>
@@ -293,7 +370,12 @@ export default async function DashboardPage() {
                     {yen(o.amount)}
                   </Td>
                   <Td>
-                    <StatusBadge status={o.shippingStatus} />
+                    <Progress
+                      compact
+                      reviewResult={o.reviewResult}
+                      shipStatus={o.shippingStatus}
+                      deliveredOn={o.deliveredOn}
+                    />
                   </Td>
                 </tr>
               ))}

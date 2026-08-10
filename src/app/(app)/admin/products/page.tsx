@@ -1,6 +1,13 @@
 import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import { select } from "@/lib/db";
+import {
+  parseSort,
+  sortRows,
+  type Accessors,
+  type SearchParams,
+  type SortState,
+} from "@/lib/list-params";
 import type { Product } from "@/actions/product-actions";
 import {
   Card,
@@ -13,7 +20,10 @@ import {
   Th,
   yen,
 } from "@/components/ui";
+import { SortableTh } from "@/components/SortableTh";
 import { ProductForm, ProductRow } from "./ProductForm";
+
+const BASE = "/admin/products";
 
 export const metadata = { title: "商品マスタ（本部）｜VIS 代理店ポータル" };
 
@@ -65,29 +75,62 @@ function rewardMissing(p: Product): boolean {
   );
 }
 
-function Head() {
+/** 並び替えに使える列。 */
+const SORT_COLUMNS = [
+  "name",
+  "price",
+  "so",
+  "niji",
+  "hanbai",
+  "toritsugi",
+  "points",
+  "order",
+];
+
+/** 既定は「並び順」の小さい順。受注の画面に出る順番と同じ。 */
+const DEFAULT_SORT: SortState = { column: "order", desc: false };
+
+function Head({ sort, params }: { sort: SortState; params: SearchParams }) {
+  const th = (column: string, label: string, align: "left" | "right" = "right") => (
+    <SortableTh
+      column={column}
+      label={label}
+      sort={sort}
+      basePath={BASE}
+      params={params}
+      align={align}
+    />
+  );
+
   return (
     <thead>
       <tr>
-        <Th>商品名</Th>
-        <Th align="right">販売単価</Th>
+        {th("name", "商品名", "left")}
+        {th("price", "販売単価")}
         <Th align="center">報酬</Th>
-        <Th align="right">総販売代理店</Th>
-        <Th align="right">2次代理店</Th>
-        <Th align="right">販売代理店</Th>
-        <Th align="right">取次店</Th>
-        <Th align="right">ポイント</Th>
-        <Th align="right">並び順</Th>
+        {th("so", "総販売代理店")}
+        {th("niji", "2次代理店")}
+        {th("hanbai", "販売代理店")}
+        {th("toritsugi", "取次店")}
+        {th("points", "ポイント")}
+        {th("order", "並び順")}
         <Th align="right">操作</Th>
       </tr>
     </thead>
   );
 }
 
-export default async function AdminProductsPage() {
+export default async function AdminProductsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ sort?: string; dir?: string }>;
+}) {
   const viewer = await currentViewer();
   if (!viewer) redirect("/login");
   if (viewer.kind !== "hq") redirect("/dashboard");
+
+  const params: SearchParams = await searchParams;
+  const sort = parseSort(params, DEFAULT_SORT, SORT_COLUMNS);
 
   let products: Product[] = [];
   let loadError: string | null = null;
@@ -104,7 +147,7 @@ export default async function AdminProductsPage() {
   const header = (
     <PageHeader
       title="商品マスタ"
-      description="販売単価と、代理店ランクごとの報酬額をここで管理します。報酬の金額はこの表から引いているため、価格改定も新商品の追加もこの画面だけで完結します。"
+      description="販売単価と、代理店ランクごとの報酬額をここで管理します。報酬の金額はこの表から引いているため、価格改定も新商品の追加もこの画面だけで完結します。表の見出しを押すと、単価や報酬額の大きい順に並び替えられます。"
     />
   );
 
@@ -122,8 +165,20 @@ export default async function AdminProductsPage() {
     );
   }
 
-  const active = products.filter((p) => p.active);
-  const stopped = products.filter((p) => !p.active);
+  const accessors: Accessors<Product> = {
+    name: (p) => p.name,
+    price: (p) => p.price,
+    so: (p) => p.amountSo,
+    niji: (p) => p.amountNiji,
+    hanbai: (p) => p.amountHanbai,
+    toritsugi: (p) => p.amountToritsugi,
+    points: (p) => p.points,
+    order: (p) => p.sortOrder,
+  };
+  const ordered = sortRows(products, sort.column, sort.desc, accessors);
+
+  const active = ordered.filter((p) => p.active);
+  const stopped = ordered.filter((p) => !p.active);
   const rewardCount = active.filter((p) => p.rewardTarget).length;
   const missing = active.filter(rewardMissing);
   const highest = active.reduce((max, p) => Math.max(max, p.price ?? 0), 0);
@@ -180,7 +235,7 @@ export default async function AdminProductsPage() {
         ) : (
           <>
             <Table>
-              <Head />
+              <Head sort={sort} params={params} />
               <tbody>
                 {active.map((p) => (
                   <ProductRow key={p.id} product={p} />
@@ -205,7 +260,7 @@ export default async function AdminProductsPage() {
         ) : (
           <>
             <Table>
-              <Head />
+              <Head sort={sort} params={params} />
               <tbody>
                 {stopped.map((p) => (
                   <ProductRow key={p.id} product={p} />

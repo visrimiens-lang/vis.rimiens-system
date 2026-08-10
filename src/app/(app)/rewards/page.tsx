@@ -88,6 +88,9 @@ export default async function RewardsPage({
   let rewardAvailable = true;
   let rankMissing = false;
   let errorMessage: string | null = null;
+  // スタッフ（コード区分 02）には報酬の金額を出さない。
+  // 2026-04-23 の打ち合わせで「金額が見えるのは親アカウントだけ」と決まっている。
+  let isStaff = false;
 
   try {
     const self = await findAgencyByCode(viewer.code);
@@ -99,6 +102,7 @@ export default async function RewardsPage({
       rankLabel = effectiveRank(self);
       rewardAvailable = canComputeReward(self);
       rankMissing = rankLabel === "";
+      isStaff = self.codeKind === "02";
 
       const { raw } = await listOrders(scopeCodes(self, descendants), {
         month,
@@ -115,10 +119,14 @@ export default async function RewardsPage({
         : "kintone からの読み込みに失敗しました。時間をおいて開き直してください。";
   }
 
+  // 金額を出してよいのは親アカウントだけ。スタッフには件数と売上だけ見せる。
+  const showReward = !isStaff;
+
   const units = sumUnits(rows);
   const salesTotal = rows.reduce((s, r) => s + r.amount, 0);
-  const rewardTotal = rewardAvailable ? sumReward(rows) : null;
-  const hasMissingUnit = !rewardAvailable || rows.some((r) => r.unitReward === null);
+  const rewardTotal = showReward && rewardAvailable ? sumReward(rows) : null;
+  const hasMissingUnit =
+    showReward && (!rewardAvailable || rows.some((r) => r.unitReward === null));
   const groups = groupByOwner(rows, names);
 
   // 「150台 × 62,700円」の形で見せられるのは、単価が1種類に揃っているときだけ。
@@ -133,7 +141,7 @@ export default async function RewardsPage({
       <div className="space-y-6">
         <PageHeader
           title="売上・報酬"
-          description="配送が完了した受注だけを集計しています。"
+          description="出荷が完了した受注だけを集計しています。"
         />
         <Notice tone="bad">売上・報酬を読み込めませんでした。{errorMessage}</Notice>
       </div>
@@ -143,37 +151,61 @@ export default async function RewardsPage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="売上・報酬"
-        description={`配送が完了した受注だけを集計しています。${jpMonthLabel(month)}に配送が完了したぶんが対象です。`}
+        title={showReward ? "売上・報酬" : "売上"}
+        description={
+          showReward
+            ? `出荷が完了した受注だけを集計しています。${jpMonthLabel(month)}に出荷が完了したぶんが対象です。`
+            : `ご自身が売った件数と売上金額です。${jpMonthLabel(month)}に出荷が完了したぶんが対象です。`
+        }
         actions={<MonthSelect months={monthOptions} value={month} />}
       />
 
       <Notice tone="info">
-        配送が完了した受注だけを集計しています。出荷完了日が{jpMonthLabel(month)}
+        出荷が完了した受注だけを集計しています。出荷完了日が{jpMonthLabel(month)}
         の受注が対象で、まだ出荷していない受注はここには出ません。
-        {rankLabel ? `報酬額は「${rankLabel}」としての単価で計算しています。` : null}
+        お客様のお手元に届く「配達完了」より前の段階で対象になるため、
+        顧客一覧の進み具合とは表示がずれることがあります。
+        {showReward && rankLabel
+          ? `報酬額は「${rankLabel}」としての単価で計算しています。`
+          : null}
       </Notice>
+
+      {showReward ? null : (
+        <Notice tone="info">
+          報酬の金額は所属先の代理店にお問い合わせください。
+          この画面では、ご自身が売った件数と売上金額のみ表示しています。
+        </Notice>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-3">
         <StatTile
-          label="配送完了台数"
+          label="出荷完了台数"
           value={units.toLocaleString("ja-JP")}
           unit="台"
           hint={`受注 ${rows.length.toLocaleString("ja-JP")} 件ぶん`}
         />
-        <StatTile label="売上合計" value={yen(salesTotal)} hint="配送完了ぶんの販売金額" />
-        <StatTile
-          label="報酬合計"
-          value={yen(rewardTotal)}
-          tone="gold"
-          hint={
-            singleUnitPrice !== null
-              ? `${units.toLocaleString("ja-JP")}台 × ${yen(singleUnitPrice)}`
-              : rewardTotal === null
-                ? "一部の単価が未設定のため算出できません"
-                : "この金額が振込対象です"
-          }
-        />
+        <StatTile label="売上合計" value={yen(salesTotal)} hint="出荷完了ぶんの販売金額" />
+        {showReward ? (
+          <StatTile
+            label="報酬合計"
+            value={yen(rewardTotal)}
+            tone="gold"
+            hint={
+              singleUnitPrice !== null
+                ? `${units.toLocaleString("ja-JP")}台 × ${yen(singleUnitPrice)}`
+                : rewardTotal === null
+                  ? "一部の単価が未設定のため算出できません"
+                  : "この金額が振込対象です"
+            }
+          />
+        ) : (
+          <StatTile
+            label="受注件数"
+            value={rows.length.toLocaleString("ja-JP")}
+            unit="件"
+            hint="出荷が完了した受注の件数"
+          />
+        )}
       </div>
 
       {hasMissingUnit ? (
@@ -184,22 +216,23 @@ export default async function RewardsPage({
         </Notice>
       ) : null}
 
-      <Card title={`配送完了の明細（${jpMonthLabel(month)}）`}>
+      <Card title={`出荷完了の明細（${jpMonthLabel(month)}）`}>
         {rows.length === 0 ? (
           <EmptyState
-            title="今月はまだ配送が完了した受注がありません"
-            description="報酬は商品の配送が完了した時点で確定します。出荷前の受注は顧客一覧でご確認いただけます。"
+            title="この月はまだ出荷が完了した受注がありません"
+            description="報酬は商品の出荷が完了した時点で確定します。出荷前の受注は顧客一覧でご確認いただけます。"
           />
         ) : (
           <Table>
             <thead>
               <tr>
-                <Th>配送完了日</Th>
+                <Th>出荷完了日</Th>
                 <Th>顧客名</Th>
                 <Th>商品名</Th>
                 <Th align="right">台数</Th>
-                <Th align="right">単価</Th>
-                <Th align="right">報酬額</Th>
+                <Th align="right">販売金額</Th>
+                {showReward ? <Th align="right">単価</Th> : null}
+                {showReward ? <Th align="right">報酬額</Th> : null}
                 <Th>担当コード</Th>
               </tr>
             </thead>
@@ -213,11 +246,18 @@ export default async function RewardsPage({
                     {(r.quantity || 1).toLocaleString("ja-JP")}
                   </Td>
                   <Td numeric align="right">
-                    {yen(r.unitReward)}
+                    {yen(r.amount)}
                   </Td>
-                  <Td numeric align="right" className="text-ink-50">
-                    {yen(r.reward)}
-                  </Td>
+                  {showReward ? (
+                    <Td numeric align="right">
+                      {yen(r.unitReward)}
+                    </Td>
+                  ) : null}
+                  {showReward ? (
+                    <Td numeric align="right" className="text-ink-50">
+                      {yen(r.reward)}
+                    </Td>
+                  ) : null}
                   <Td numeric>{r.ownerCode || "—"}</Td>
                 </tr>
               ))}
@@ -230,10 +270,15 @@ export default async function RewardsPage({
                 <Td numeric align="right" className="font-semibold text-ink-100">
                   {units.toLocaleString("ja-JP")}
                 </Td>
-                <Td>{null}</Td>
-                <Td numeric align="right" className="font-semibold text-gold-400">
-                  {yen(rewardTotal)}
+                <Td numeric align="right" className="font-semibold text-ink-100">
+                  {yen(salesTotal)}
                 </Td>
+                {showReward ? <Td>{null}</Td> : null}
+                {showReward ? (
+                  <Td numeric align="right" className="font-semibold text-gold-400">
+                    {yen(rewardTotal)}
+                  </Td>
+                ) : null}
                 <Td>{null}</Td>
               </tr>
             </tfoot>
@@ -242,14 +287,18 @@ export default async function RewardsPage({
       </Card>
 
       {rows.length > 0 ? (
-        <Card title="担当ごとの内訳（支払通知の作成用）">
+        <Card
+          title={
+            showReward ? "担当ごとの内訳（支払通知の作成用）" : "担当ごとの内訳（台数）"
+          }
+        >
           <Table>
             <thead>
               <tr>
                 <Th>代理店コード</Th>
                 <Th>名前</Th>
                 <Th align="right">台数</Th>
-                <Th align="right">報酬額</Th>
+                {showReward ? <Th align="right">報酬額</Th> : null}
               </tr>
             </thead>
             <tbody>
@@ -260,9 +309,11 @@ export default async function RewardsPage({
                   <Td numeric align="right">
                     {g.units.toLocaleString("ja-JP")}
                   </Td>
-                  <Td numeric align="right" className="text-ink-50">
-                    {yen(g.reward)}
-                  </Td>
+                  {showReward ? (
+                    <Td numeric align="right" className="text-ink-50">
+                      {yen(g.reward)}
+                    </Td>
+                  ) : null}
                 </tr>
               ))}
             </tbody>
@@ -273,9 +324,11 @@ export default async function RewardsPage({
                 <Td numeric align="right" className="font-semibold text-ink-100">
                   {units.toLocaleString("ja-JP")}
                 </Td>
-                <Td numeric align="right" className="font-semibold text-gold-400">
-                  {yen(rewardTotal)}
-                </Td>
+                {showReward ? (
+                  <Td numeric align="right" className="font-semibold text-gold-400">
+                    {yen(rewardTotal)}
+                  </Td>
+                ) : null}
               </tr>
             </tfoot>
           </Table>

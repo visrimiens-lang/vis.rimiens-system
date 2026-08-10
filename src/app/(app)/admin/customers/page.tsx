@@ -3,6 +3,18 @@ import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import { listAllAgencies } from "@/lib/agencies";
 import { select } from "@/lib/db";
+import {
+  ALL,
+  buildListHref,
+  buildOptions,
+  matchesKeyword,
+  parseSort,
+  readParam,
+  sortRows,
+  type Accessors,
+  type SearchParams,
+  type SortState,
+} from "@/lib/list-params";
 import type { Agency } from "@/lib/types";
 import {
   Card,
@@ -14,7 +26,17 @@ import {
   Th,
   cn,
 } from "@/components/ui";
-import { CustomerRow, CustomerSearch, type CustomerView } from "./CustomerForm";
+import {
+  FilterActions,
+  FilterBar,
+  FilterSelect,
+  FilterSummary,
+  FilterText,
+  SortableTh,
+} from "@/components/SortableTh";
+import { CustomerRow, type CustomerView } from "./CustomerForm";
+
+const BASE = "/admin/customers";
 
 export const metadata = { title: "顧客管理（本部）｜VIS 代理店ポータル" };
 
@@ -43,17 +65,24 @@ const TABS: { key: Kind; label: string }[] = [
   { key: "general", label: "一般" },
 ];
 
-function toKind(v: string | undefined): Kind {
+function toKind(v: string): Kind {
   return v === "introduced" || v === "general" ? v : "all";
 }
 
-function hrefFor(kind: Kind, keyword: string): string {
-  const params = new URLSearchParams();
-  if (kind !== "all") params.set("kind", kind);
-  if (keyword) params.set("keyword", keyword);
-  const qs = params.toString();
-  return qs ? `/admin/customers?${qs}` : "/admin/customers";
-}
+/** 並び替えに使える列。 */
+const SORT_COLUMNS = [
+  "name",
+  "phone",
+  "agency",
+  "referrer",
+  "review",
+  "payment",
+  "ship",
+  "contracted",
+];
+
+/** 既定はデータベースから受け取ったまま（登録の新しい順）。 */
+const DEFAULT_SORT: SortState = { column: "", desc: false };
 
 type Row = Record<string, unknown>;
 
@@ -96,23 +125,30 @@ function isIntroduced(c: CustomerView): boolean {
   return Boolean(v) && v !== "（直接）";
 }
 
-/** 電話番号はハイフンの有無で書き方がぶれるので、数字だけにして比べる。 */
-function digitsOf(v: string): string {
-  return v.replace(/[^0-9]/g, "");
-}
-
 export default async function AdminCustomersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ kind?: string; keyword?: string }>;
+  searchParams: Promise<{
+    kind?: string;
+    keyword?: string;
+    review?: string;
+    payment?: string;
+    ship?: string;
+    sort?: string;
+    dir?: string;
+  }>;
 }) {
   const viewer = await currentViewer();
   if (!viewer) redirect("/login");
   if (viewer.kind !== "hq") redirect("/dashboard");
 
-  const params = await searchParams;
-  const kind = toKind(params.kind);
-  const keyword = (params.keyword ?? "").trim();
+  const params: SearchParams = await searchParams;
+  const kind = toKind(readParam(params, "kind"));
+  const keyword = readParam(params, "keyword");
+  const review = readParam(params, "review") || ALL;
+  const payment = readParam(params, "payment") || ALL;
+  const ship = readParam(params, "ship") || ALL;
+  const sort = parseSort(params, DEFAULT_SORT, SORT_COLUMNS);
 
   let customers: CustomerView[] = [];
   let agencies: Agency[] = [];
@@ -135,7 +171,7 @@ export default async function AdminCustomersPage({
   const header = (
     <PageHeader
       title="顧客管理"
-      description="ご契約いただいたお客様の一覧です。お名前と電話番号で探せます。住所や連絡先の書き間違いは、この画面から直せます。"
+      description="ご契約いただいたお客様の一覧です。お名前と電話番号で探せ、審査・お支払い・出荷の状態でも絞り込めます。表の見出しを押すと並び替わります。住所や連絡先の書き間違いは、この画面から直せます。"
     />
   );
 
@@ -155,13 +191,13 @@ export default async function AdminCustomersPage({
   const nameByCode = new Map(agencies.map((a) => [a.code, a.name]));
 
   // 検索は、お名前・フリガナ・電話番号のどれかに含まれていれば当たりにする
-  const kw = keyword.toLowerCase();
-  const kwDigits = digitsOf(keyword);
-  const matches = (c: CustomerView) =>
-    !kw ||
-    c.name.toLowerCase().includes(kw) ||
-    c.nameKana.toLowerCase().includes(kw) ||
-    (kwDigits.length > 0 && digitsOf(c.phone).includes(kwDigits));
+  const matches = (c: CustomerView) => {
+    if (!matchesKeyword(keyword, [c.name, c.nameKana, c.phone])) return false;
+    if (review !== ALL && c.reviewStatus !== review) return false;
+    if (payment !== ALL && c.paymentStatus !== payment) return false;
+    if (ship !== ALL && c.shipStatus !== ship) return false;
+    return true;
+  };
 
   const found = customers.filter(matches);
   const introduced = found.filter(isIntroduced);
@@ -172,8 +208,42 @@ export default async function AdminCustomersPage({
     general: general.length,
   };
 
-  const rows =
-    kind === "introduced" ? introduced : kind === "general" ? general : found;
+  // 絞り込む前の件数。「◯名中◯名」の左側に使う。
+  const tabTotal =
+    kind === "introduced"
+      ? customers.filter(isIntroduced).length
+      : kind === "general"
+        ? customers.filter((c) => !isIntroduced(c)).length
+        : customers.length;
+
+  /* --- 並び替え --- */
+  const accessors: Accessors<CustomerView> = {
+    name: (c) => c.nameKana || c.name,
+    phone: (c) => c.phone,
+    agency: (c) => c.agencyCode,
+    referrer: (c) => c.referrerCode,
+    review: (c) => c.reviewStatus,
+    payment: (c) => c.paymentStatus,
+    ship: (c) => c.shipStatus,
+    contracted: (c) => c.contractedOn,
+  };
+  const rows = sortRows(
+    kind === "introduced" ? introduced : kind === "general" ? general : found,
+    sort.column,
+    sort.desc,
+    accessors,
+  );
+
+  const isFiltered = Boolean(keyword) || review !== ALL || payment !== ALL || ship !== ALL;
+  const clearHref = buildListHref(BASE, params, {
+    keyword: "",
+    review: "",
+    payment: "",
+    ship: "",
+  });
+  const reviewOptions = buildOptions(customers, (c) => c.reviewStatus, [], review);
+  const paymentOptions = buildOptions(customers, (c) => c.paymentStatus, [], payment);
+  const shipOptions = buildOptions(customers, (c) => c.shipStatus, [], ship);
 
   const beforeShipping = found.filter((c) => c.shipStatus !== "出荷済").length;
   const truncated = customers.length >= LIMIT;
@@ -223,63 +293,84 @@ export default async function AdminCustomersPage({
         </Notice>
       ) : null}
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <nav className="flex items-center gap-1 rounded-xl border border-ink-800 bg-ink-900/70 p-1">
-          {TABS.map((t) => {
-            const active = t.key === kind;
-            return (
-              <Link
-                key={t.key}
-                href={hrefFor(t.key, keyword)}
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition",
-                  active
-                    ? "bg-gold-500/12 text-gold-300"
-                    : "text-ink-300 hover:bg-ink-850 hover:text-ink-100",
-                )}
-              >
-                <span>{t.label}</span>
-                <span
-                  className={cn("tabnum text-xs", active ? "text-gold-400" : "text-ink-400")}
-                >
-                  {counts[t.key]}
-                </span>
-              </Link>
-            );
-          })}
-        </nav>
+      <nav className="flex flex-wrap items-center gap-1 rounded-xl border border-ink-800 bg-ink-900/70 p-1">
+        {TABS.map((t) => {
+          const active = t.key === kind;
+          return (
+            <Link
+              key={t.key}
+              href={buildListHref(BASE, params, { kind: t.key === "all" ? "" : t.key })}
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                "flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition",
+                active
+                  ? "bg-gold-500/12 text-gold-300"
+                  : "text-ink-300 hover:bg-ink-850 hover:text-ink-100",
+              )}
+            >
+              <span>{t.label}</span>
+              <span className={cn("tabnum text-xs", active ? "text-gold-400" : "text-ink-400")}>
+                {counts[t.key]}
+              </span>
+            </Link>
+          );
+        })}
+      </nav>
 
-        <CustomerSearch key={`${kind}:${keyword}`} keyword={keyword} kind={kind} />
-      </div>
+      <Card>
+        <FilterBar
+          action={BASE}
+          hidden={{
+            kind: kind === "all" ? "" : kind,
+            sort: sort.column,
+            dir: sort.column ? (sort.desc ? "desc" : "asc") : "",
+          }}
+        >
+          <FilterText
+            name="keyword"
+            label="お名前・電話番号で探す"
+            value={keyword}
+            placeholder="お名前・フリガナ・電話番号"
+            width="w-64"
+          />
+          <FilterSelect
+            name="review"
+            label="審査"
+            value={review}
+            options={reviewOptions}
+            allLabel={`すべて（${customers.length}）`}
+          />
+          <FilterSelect name="payment" label="お支払い" value={payment} options={paymentOptions} />
+          <FilterSelect name="ship" label="出荷" value={ship} options={shipOptions} />
+          <FilterActions clearHref={clearHref} filtered={isFiltered} />
+        </FilterBar>
+      </Card>
 
-      {keyword ? (
-        <p className="text-sm text-ink-300">
-          「{keyword}」で絞り込み中。お名前・フリガナ・電話番号のどれかに含まれる方を出しています。
-          <Link
-            href={hrefFor(kind, "")}
-            className="ml-1.5 underline underline-offset-2 hover:text-gold-300"
-          >
-            絞り込みを解除
-          </Link>
-        </p>
+      {isFiltered ? (
+        <FilterSummary
+          total={tabTotal}
+          shown={rows.length}
+          unit="名"
+          clearHref={clearHref}
+          note={`${current.label}のタブ`}
+        />
       ) : null}
 
       <Card title={`${current.label}　${rows.length} 名`}>
         {rows.length === 0 ? (
-          <EmptyState title={emptyTitle(kind, keyword)} description={emptyDescription(kind, keyword)} />
+          <EmptyState title={emptyTitle(kind, isFiltered)} description={emptyDescription(kind, isFiltered)} />
         ) : (
           <Table>
             <thead>
               <tr>
-                <Th>お名前</Th>
-                <Th>電話番号</Th>
-                <Th>担当代理店</Th>
-                <Th>紹介元</Th>
-                <Th>審査</Th>
-                <Th>お支払い</Th>
-                <Th>出荷</Th>
-                <Th>ご契約日</Th>
+                <SortableTh column="name" label="お名前" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="phone" label="電話番号" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="agency" label="担当代理店" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="referrer" label="紹介元" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="review" label="審査" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="payment" label="お支払い" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="ship" label="出荷" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="contracted" label="ご契約日" sort={sort} basePath={BASE} params={params} />
                 <Th align="right">修正</Th>
               </tr>
             </thead>
@@ -311,16 +402,16 @@ export default async function AdminCustomersPage({
 
 /* ---------- 空のときの文言 ---------- */
 
-function emptyTitle(kind: Kind, keyword: string): string {
-  if (keyword) return `「${keyword}」に一致するお客様は見つかりませんでした`;
+function emptyTitle(kind: Kind, filtered: boolean): string {
+  if (filtered) return "条件に合うものがありません";
   if (kind === "introduced") return "取次店から紹介されたお客様はまだいません";
   if (kind === "general") return "一般のお申し込みはまだありません";
   return "お客様がまだ登録されていません";
 }
 
-function emptyDescription(kind: Kind, keyword: string): string {
-  if (keyword) {
-    return "お名前は一部でも探せます。電話番号はハイフンの有無を問いません。別の区分に入っている可能性があるので、上のタブの件数もご確認ください。";
+function emptyDescription(kind: Kind, filtered: boolean): string {
+  if (filtered) {
+    return "条件を変えてお試しください。お名前は一部でも探せます。電話番号はハイフンの有無を問いません。別の区分に入っている可能性があるので、上のタブの件数もご確認ください。";
   }
   if (kind === "introduced") {
     return "トスアップされたお客様のご契約が決まり、紹介元の取次店コードが入ると、ここに表示されます。";

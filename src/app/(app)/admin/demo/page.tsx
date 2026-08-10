@@ -5,6 +5,18 @@ import { listAllAgencies } from "@/lib/agencies";
 import { select } from "@/lib/db";
 import { todayInJapan } from "@/lib/demo";
 import {
+  ALL,
+  buildListHref,
+  buildOptions,
+  matchesKeyword,
+  parseSort,
+  readParam,
+  sortRows,
+  type Accessors,
+  type SearchParams,
+  type SortState,
+} from "@/lib/list-params";
+import {
   Card,
   EmptyState,
   Notice,
@@ -14,7 +26,17 @@ import {
   Th,
   cn,
 } from "@/components/ui";
+import {
+  FilterActions,
+  FilterBar,
+  FilterSelect,
+  FilterSummary,
+  FilterText,
+  SortableTh,
+} from "@/components/SortableTh";
 import { DemoForm, DemoRow, type AgencyOption, type DemoView } from "./DemoForm";
+
+const BASE = "/admin/demo";
 
 export const metadata = { title: "デモ機管理（本部）｜VIS 代理店ポータル" };
 
@@ -72,14 +94,16 @@ function isOverdue(m: DemoView, today: string): boolean {
 }
 
 /** 絞り込みの合図。"all" か 6つの状態、または "overdue"。 */
-function toFilter(v: string | undefined): string {
+function toFilter(v: string): string {
   if (v === "overdue") return "overdue";
   return v && STATES.includes(v) ? v : "all";
 }
 
-function hrefFor(filter: string): string {
-  return filter === "all" ? "/admin/demo" : `/admin/demo?state=${encodeURIComponent(filter)}`;
-}
+/** 並び替えに使える列。 */
+const SORT_COLUMNS = ["serial", "model", "state", "holder", "lendTo", "returnDue"];
+
+/** 既定は取得したまま（登録の新しい順）。 */
+const DEFAULT_SORT: SortState = { column: "", desc: false };
 
 /** 状態ごとの台数タイルの色。手当てが要るものだけ色を変える。 */
 function tileTone(state: string, count: number): "default" | "gold" | "warn" {
@@ -101,14 +125,23 @@ function tileHint(state: string): string {
 export default async function AdminDemoPage({
   searchParams,
 }: {
-  searchParams: Promise<{ state?: string }>;
+  searchParams: Promise<{
+    state?: string;
+    model?: string;
+    keyword?: string;
+    sort?: string;
+    dir?: string;
+  }>;
 }) {
   const viewer = await currentViewer();
   if (!viewer) redirect("/login");
   if (viewer.kind !== "hq") redirect("/dashboard");
 
-  const params = await searchParams;
-  const filter = toFilter(params.state);
+  const params: SearchParams = await searchParams;
+  const filter = toFilter(readParam(params, "state"));
+  const model = readParam(params, "model") || ALL;
+  const keyword = readParam(params, "keyword");
+  const sort = parseSort(params, DEFAULT_SORT, SORT_COLUMNS);
   const today = todayInJapan();
 
   let machines: DemoView[] = [];
@@ -134,7 +167,7 @@ export default async function AdminDemoPage({
   const header = (
     <PageHeader
       title="デモ機管理"
-      description="デモ機の在庫と貸出の台帳です。貸し出すときと返してもらったときに記録すると、返却予定日を過ぎた台がひと目で分かります。"
+      description="デモ機の在庫と貸出の台帳です。貸し出すときと返してもらったときに記録すると、返却予定日を過ぎた台がひと目で分かります。製品番号や保有者でも探せ、表の見出しを押すと並び替わります。"
     />
   );
 
@@ -157,12 +190,44 @@ export default async function AdminDemoPage({
   }
   const overdue = machines.filter((m) => isOverdue(m, today));
 
-  const rows =
+  /* --- 状態のタブで分けたあと、キーワードと機種で絞り込む --- */
+  const inChip =
     filter === "all"
       ? machines
       : filter === "overdue"
         ? overdue
         : machines.filter((m) => m.state === filter);
+
+  const found = inChip.filter((m) => {
+    if (model !== ALL && m.model !== model) return false;
+    return matchesKeyword(keyword, [
+      m.serialNo,
+      m.model,
+      m.holderName,
+      m.holderCode,
+      m.lendTo,
+      m.customerName,
+    ]);
+  });
+
+  /* --- 並び替え --- */
+  const accessors: Accessors<DemoView> = {
+    serial: (m) => m.serialNo,
+    model: (m) => m.model,
+    // 状態は五十音順ではなく、タイルと同じ並び（在庫→設置済→…）で並べる
+    state: (m) => {
+      const i = STATES.indexOf(m.state);
+      return i < 0 ? null : i;
+    },
+    holder: (m) => m.holderName || m.holderCode,
+    lendTo: (m) => m.lendTo,
+    returnDue: (m) => m.returnDueOn,
+  };
+  const rows = sortRows(found, sort.column, sort.desc, accessors);
+
+  const isFiltered = Boolean(keyword) || model !== ALL;
+  const clearHref = buildListHref(BASE, params, { keyword: "", model: "" });
+  const modelOptions = buildOptions(inChip, (m) => m.model, [], model);
 
   const chips: { key: string; label: string; count: number }[] = [
     { key: "all", label: "すべて", count: machines.length },
@@ -196,7 +261,7 @@ export default async function AdminDemoPage({
           返却予定日を過ぎているデモ機が {overdue.length} 台あります。貸出先にご確認のうえ、
           回収するか、返却予定日を入れ直してください。
           <Link
-            href={hrefFor("overdue")}
+            href={buildListHref(BASE, params, { state: "overdue" })}
             className="ml-1.5 font-medium text-warn-100 underline underline-offset-2 hover:text-gold-300"
           >
             この {overdue.length} 台だけを見る
@@ -210,7 +275,7 @@ export default async function AdminDemoPage({
           return (
             <Link
               key={c.key}
-              href={hrefFor(c.key)}
+              href={buildListHref(BASE, params, { state: c.key === "all" ? "" : c.key })}
               aria-current={active ? "page" : undefined}
               className={cn(
                 "flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition",
@@ -228,19 +293,60 @@ export default async function AdminDemoPage({
         })}
       </nav>
 
+      <Card>
+        <FilterBar
+          action={BASE}
+          hidden={{
+            state: filter === "all" ? "" : filter,
+            sort: sort.column,
+            dir: sort.column ? (sort.desc ? "desc" : "asc") : "",
+          }}
+        >
+          <FilterText
+            name="keyword"
+            label="キーワード"
+            value={keyword}
+            placeholder="製品番号・保有者・貸出先"
+            width="w-64"
+          />
+          <FilterSelect
+            name="model"
+            label="機種"
+            value={model}
+            options={modelOptions}
+            allLabel={`すべて（${inChip.length}）`}
+            width="w-52"
+          />
+          <FilterActions clearHref={clearHref} filtered={isFiltered} />
+        </FilterBar>
+      </Card>
+
+      {isFiltered ? (
+        <FilterSummary
+          total={inChip.length}
+          shown={rows.length}
+          unit="台"
+          clearHref={clearHref}
+          note={`「${currentChip.label}」のうち`}
+        />
+      ) : null}
+
       <Card title={`${currentChip.label}　${rows.length} 台`}>
         {rows.length === 0 ? (
-          <EmptyState title={emptyTitle(filter)} description={emptyDescription(filter)} />
+          <EmptyState
+            title={emptyTitle(filter, isFiltered)}
+            description={emptyDescription(filter, isFiltered)}
+          />
         ) : (
           <Table>
             <thead>
               <tr>
-                <Th>製品番号</Th>
-                <Th>機種</Th>
-                <Th>状態</Th>
-                <Th>保有者（責任者）</Th>
-                <Th>貸出先</Th>
-                <Th>返却予定日</Th>
+                <SortableTh column="serial" label="製品番号" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="model" label="機種" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="state" label="状態" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="holder" label="保有者（責任者）" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="lendTo" label="貸出先" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="returnDue" label="返却予定日" sort={sort} basePath={BASE} params={params} />
                 <Th align="right">手続き</Th>
               </tr>
             </thead>
@@ -274,13 +380,17 @@ export default async function AdminDemoPage({
 
 /* ---------- 空のときの文言 ---------- */
 
-function emptyTitle(filter: string): string {
+function emptyTitle(filter: string, filtered: boolean): string {
+  if (filtered) return "条件に合うものがありません";
   if (filter === "overdue") return "返却予定日を過ぎているデモ機はありません";
   if (filter === "all") return "デモ機がまだ登録されていません";
   return `「${filter}」のデモ機はありません`;
 }
 
-function emptyDescription(filter: string): string {
+function emptyDescription(filter: string, filtered: boolean): string {
+  if (filtered) {
+    return "条件を変えてお試しください。キーワードは製品番号・機種・保有者・貸出先の一部で探せます。上のタブで「すべて」を選ぶと、台帳全体から探せます。";
+  }
   if (filter === "overdue") {
     return "貸出中の台はすべて返却予定日の前です。予定日を過ぎるとここに出てきます。";
   }

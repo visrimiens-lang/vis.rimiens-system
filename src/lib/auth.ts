@@ -5,6 +5,13 @@ import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
 import { APP, getRecords, q, str, updateRecord } from "./kintone";
 import type { Viewer, AgencyRank } from "./types";
+import { clearFailures, isLocked, recordFailure } from "./rate-limit";
+
+/**
+ * 応答時間の差から「そのコードが実在するか」を推測されないようにするための
+ * 捨てハッシュ。どの失敗経路でも必ず1回 bcrypt.compare を通す。
+ */
+const DUMMY_HASH = bcrypt.hashSync("dummy-password-for-timing", 10);
 
 const COOKIE = "vis_session";
 const MAX_AGE = 60 * 60 * 8; // 8時間
@@ -22,14 +29,19 @@ function sign(payload: string): string {
   return createHmac("sha256", secret()).update(payload).digest("base64url");
 }
 
-function encode(viewer: Viewer): string {
+/** パスワードハッシュから作る短い指紋。ハッシュ自体はトークンに入れない。 */
+function fingerprint(hash: string): string {
+  return createHmac("sha256", secret()).update(hash).digest("base64url").slice(0, 16);
+}
+
+function encode(viewer: Viewer, fp: string): string {
   const body = Buffer.from(
-    JSON.stringify({ v: viewer, exp: Date.now() + MAX_AGE * 1000 }),
+    JSON.stringify({ v: viewer, fp, exp: Date.now() + MAX_AGE * 1000 }),
   ).toString("base64url");
   return `${body}.${sign(body)}`;
 }
 
-function decode(token: string): Viewer | null {
+function decode(token: string): { viewer: Viewer; fp: string } | null {
   const [body, mac] = token.split(".");
   if (!body || !mac) return null;
   const expected = sign(body);
@@ -39,10 +51,11 @@ function decode(token: string): Viewer | null {
   try {
     const parsed = JSON.parse(Buffer.from(body, "base64url").toString()) as {
       v: Viewer;
+      fp?: string;
       exp: number;
     };
     if (!parsed.exp || parsed.exp < Date.now()) return null;
-    return parsed.v;
+    return { viewer: parsed.v, fp: parsed.fp ?? "" };
   } catch {
     return null;
   }
@@ -66,14 +79,25 @@ export const currentViewer = cache(async (): Promise<Viewer | null> => {
   const store = await cookies();
   const token = store.get(COOKIE)?.value;
   if (!token) return null;
-  const viewer = decode(token);
-  if (!viewer) return null;
-  if (viewer.kind === "hq") return viewer;
+  const decoded = decode(token);
+  if (!decoded) return null;
+  const { viewer, fp } = decoded;
+
+  if (viewer.kind === "hq") {
+    // 本部のパスワードを変えたら、既存のセッションも失効させる
+    const hqHash = process.env.HQ_PASSWORD_HASH;
+    if (hqHash && fp && fp !== fingerprint(hqHash)) return null;
+    return viewer;
+  }
 
   try {
     const record = await rawAgency(viewer.code);
     if (!record) return null;
     if (str(record, "稼働ステータス") !== "稼働中") return null;
+    // パスワードを変更・再発行したら、古いセッションはその時点で使えなくする
+    const hash = str(record, PASSWORD_FIELD);
+    if (!hash) return null;
+    if (fp && fp !== fingerprint(hash)) return null;
     // 表示名とランクは常に最新のものを使う
     return {
       kind: "agency",
@@ -89,9 +113,9 @@ export const currentViewer = cache(async (): Promise<Viewer | null> => {
   }
 });
 
-export async function startSession(viewer: Viewer): Promise<void> {
+export async function startSession(viewer: Viewer, fp = ""): Promise<void> {
   const store = await cookies();
-  store.set(COOKIE, encode(viewer), {
+  store.set(COOKIE, encode(viewer, fp), {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
@@ -105,7 +129,7 @@ export async function endSession(): Promise<void> {
   store.delete(COOKIE);
 }
 
-export type LoginResult = { ok: true; viewer: Viewer } | { ok: false };
+export type LoginResult = { ok: true; viewer: Viewer; fp: string } | { ok: false };
 
 /**
  * ログインする。
@@ -115,25 +139,47 @@ export type LoginResult = { ok: true; viewer: Viewer } | { ok: false };
  */
 export async function login(loginId: string, password: string): Promise<LoginResult> {
   const id = loginId.trim();
-  if (!id || !password) return { ok: false };
+  if (!id || !password) {
+    await bcrypt.compare(password || "x", DUMMY_HASH);
+    return { ok: false };
+  }
+
+  const key = `login:${id.toLowerCase()}`;
+  // ロック中でも、成功と同じだけ時間をかけてから同じ文面で返す
+  if (await isLocked(key)) {
+    await bcrypt.compare(password, DUMMY_HASH);
+    return { ok: false };
+  }
+
+  const fail = async (): Promise<LoginResult> => {
+    await recordFailure(key);
+    return { ok: false };
+  };
 
   // 本部アカウント
   const hqId = process.env.HQ_LOGIN_ID;
   const hqHash = process.env.HQ_PASSWORD_HASH;
   if (hqId && hqHash && id.toLowerCase() === hqId.toLowerCase()) {
     const ok = await bcrypt.compare(password, hqHash);
-    return ok ? { ok: true, viewer: { kind: "hq", label: "VIS 本部" } } : { ok: false };
+    if (!ok) return fail();
+    await clearFailures(key);
+    return {
+      ok: true,
+      viewer: { kind: "hq", label: "VIS 本部" },
+      fp: fingerprint(hqHash),
+    };
   }
 
   const record = await rawAgency(id);
-  if (!record) return { ok: false };
-  if (str(record, "稼働ステータス") !== "稼働中") return { ok: false };
+  const hash = record ? str(record, PASSWORD_FIELD) : "";
+  const active = record ? str(record, "稼働ステータス") === "稼働中" : false;
 
-  const hash = str(record, PASSWORD_FIELD);
-  if (!hash) return { ok: false };
-  const ok = await bcrypt.compare(password, hash);
-  if (!ok) return { ok: false };
+  // 実在しない・停止中・未発行のどれでも、必ず1回 bcrypt を通してから返す。
+  // ここで早期 return すると、応答時間の差でコードの実在を見分けられてしまう。
+  const ok = await bcrypt.compare(password, hash || DUMMY_HASH);
+  if (!record || !active || !hash || !ok) return fail();
 
+  await clearFailures(key);
   return {
     ok: true,
     viewer: {
@@ -143,6 +189,7 @@ export async function login(loginId: string, password: string): Promise<LoginRes
       rank: (str(record, "代理店ランク") || "") as AgencyRank | "",
       recordId: str(record, "レコード番号"),
     },
+    fp: fingerprint(hash),
   };
 }
 
@@ -227,9 +274,11 @@ export async function changeOwnPassword(
  */
 export async function listCodesWithPassword(): Promise<Set<string>> {
   try {
+    // 判定に要るのは2項目だけ。ハッシュを含む全フィールドを引かない。
     const rows = await getRecords(
       APP.agency,
       "order by 代理店コード asc limit 500",
+      ["代理店コード", PASSWORD_FIELD],
     );
     const out = new Set<string>();
     for (const r of rows) {

@@ -4,15 +4,18 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Building2,
+  ClipboardList,
   FileText,
   LayoutDashboard,
   LogOut,
   Map,
   Megaphone,
+  Monitor,
   Network,
   Settings,
   ShieldCheck,
   Users,
+  ShoppingCart,
   Wallet,
 } from "lucide-react";
 import { logoutAction } from "@/actions/auth-actions";
@@ -24,16 +27,21 @@ const AGENCY_ITEMS: Item[] = [
   { href: "/dashboard", label: "ダッシュボード", icon: LayoutDashboard },
   { href: "/customers", label: "顧客一覧", icon: Users },
   { href: "/organization", label: "組織と枠", icon: Network },
+  { href: "/leads", label: "トスアップ", icon: ClipboardList },
   { href: "/rewards", label: "売上・報酬", icon: Wallet },
+  { href: "/demo-machines", label: "デモ機", icon: Monitor },
   { href: "/announcements", label: "お知らせ", icon: Megaphone },
   { href: "/documents", label: "資料", icon: FileText },
   { href: "/settings", label: "アカウント設定", icon: Settings },
 ];
 
 const HQ_ITEMS: Item[] = [
+  { href: "/admin/orders", label: "受注一覧", icon: ShoppingCart },
   { href: "/admin/agencies", label: "代理店管理", icon: Building2 },
   { href: "/admin/areas", label: "エリア枠", icon: Map },
   { href: "/admin/requests", label: "増枠申請", icon: ShieldCheck },
+  { href: "/admin/notices", label: "お知らせ管理", icon: Megaphone },
+  { href: "/admin/documents", label: "資料管理", icon: FileText },
 ];
 
 export function Sidebar({

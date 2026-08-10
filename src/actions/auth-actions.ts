@@ -24,12 +24,9 @@ export async function loginAction(
   try {
     result = await login(id, password);
   } catch (e) {
-    return {
-      error:
-        e instanceof Error
-          ? `接続に失敗しました。${e.message}`
-          : "接続に失敗しました。しばらくしてからもう一度お試しください。",
-    };
+    // 例外の中身には kintone の応答や環境変数名が入りうる。未認証の相手には出さない。
+    console.error("[login]", e);
+    return { error: "接続に失敗しました。しばらくしてからもう一度お試しください。" };
   }
 
   // 失敗の理由は出し分けない。実在するコードかどうかを未認証の相手に教えないため。
@@ -40,7 +37,7 @@ export async function loginAction(
     };
   }
 
-  await startSession(result.viewer);
+  await startSession(result.viewer, result.fp);
   redirect("/dashboard");
 }
 
@@ -96,5 +93,10 @@ export async function changePasswordAction(
   }
   if (!result.ok) return { error: result.message };
 
-  return { ok: "パスワードを変更しました。" };
+  // 指紋が変わるので、いまのセッションを張り直しておく。
+  // 他の端末に残っている古いセッションはこの時点で使えなくなる。
+  const again = await login(viewer.code, next);
+  if (again.ok) await startSession(again.viewer, again.fp);
+
+  return { ok: "パスワードを変更しました。他の端末でログイン中の場合は、そちらはログアウトされます。" };
 }

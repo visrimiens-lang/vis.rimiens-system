@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState } from "react";
 import { loginAction, type FormState } from "@/actions/auth-actions";
 
@@ -64,9 +65,18 @@ export default function LoginPage() {
             </p>
           ) : null}
 
+          <p className="mt-4 text-center text-sm">
+            <Link
+              href="/forgot-password"
+              className="text-ink-300 underline underline-offset-4 transition hover:text-gold-300"
+            >
+              パスワードをお忘れの方
+            </Link>
+          </p>
+
           <p className="mt-5 border-t border-ink-800 pt-4 text-xs leading-relaxed text-ink-400">
             はじめてご利用の方へ。パスワードは本部が発行してお渡しします。
-            まだお持ちでない場合、またはお忘れの場合は本部にご連絡ください。
+            まだお持ちでない場合は本部にご連絡ください。
           </p>
         </div>
 

@@ -19,6 +19,7 @@ import {
 } from "@/components/ui";
 import { AgencySearch } from "./AgencySearch";
 import { IssuePassword } from "./IssuePassword";
+import { ResetRequests } from "./ResetRequests";
 
 type Tab = "agency" | "partner" | "staff";
 
@@ -237,6 +238,8 @@ export default async function AdminAgenciesPage({
           取次パートナーとスタッフは何社増えても枠を消費しません。
         </p>
       ) : null}
+
+      <ResetRequests />
 
       <Card title="ポータルのログイン情報を発行">
         <IssuePassword agencies={loginTargets} />

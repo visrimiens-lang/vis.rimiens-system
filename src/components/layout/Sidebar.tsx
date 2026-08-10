@@ -5,17 +5,20 @@ import { usePathname } from "next/navigation";
 import {
   Building2,
   ClipboardList,
+  Boxes,
   FileText,
   LayoutDashboard,
   LogOut,
   Map,
   Megaphone,
   Monitor,
+  Package,
   Network,
   Settings,
   ShieldCheck,
   Users,
   ShoppingCart,
+  UserRound,
   Wallet,
 } from "lucide-react";
 import { logoutAction } from "@/actions/auth-actions";
@@ -38,6 +41,9 @@ const AGENCY_ITEMS: Item[] = [
 const HQ_ITEMS: Item[] = [
   { href: "/admin/orders", label: "受注一覧", icon: ShoppingCart },
   { href: "/admin/agencies", label: "代理店管理", icon: Building2 },
+  { href: "/admin/customers", label: "顧客管理", icon: UserRound },
+  { href: "/admin/products", label: "商品マスタ", icon: Package },
+  { href: "/admin/demo", label: "デモ機管理", icon: Boxes },
   { href: "/admin/areas", label: "エリア枠", icon: Map },
   { href: "/admin/requests", label: "増枠申請", icon: ShieldCheck },
   { href: "/admin/notices", label: "お知らせ管理", icon: Megaphone },

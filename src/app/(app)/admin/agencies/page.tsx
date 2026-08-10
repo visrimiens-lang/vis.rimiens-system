@@ -279,7 +279,16 @@ function AgencyTable({
           return (
             <tr key={a.recordId || a.code}>
               <Td numeric className="whitespace-nowrap font-medium text-ink-100">
-                {a.code || "—"}
+                {a.code ? (
+                    <Link
+                      href={`/admin/agencies/${encodeURIComponent(a.code)}`}
+                      className="underline underline-offset-4 hover:text-gold-300"
+                    >
+                      {a.code}
+                    </Link>
+                  ) : (
+                    "—"
+                  )}
               </Td>
               <Td>
                 <div className="min-w-0">
@@ -341,7 +350,16 @@ function PeopleTable({ rows }: { rows: Agency[] }) {
         {rows.map((a) => (
           <tr key={a.recordId || a.code}>
             <Td numeric className="whitespace-nowrap font-medium text-ink-100">
-              {a.code || "—"}
+              {a.code ? (
+                    <Link
+                      href={`/admin/agencies/${encodeURIComponent(a.code)}`}
+                      className="underline underline-offset-4 hover:text-gold-300"
+                    >
+                      {a.code}
+                    </Link>
+                  ) : (
+                    "—"
+                  )}
             </Td>
             <Td>
               <div className="truncate text-ink-100">{a.name || "（名称未登録）"}</div>

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import { listAllAgencies } from "@/lib/agencies";
@@ -500,7 +501,14 @@ export default async function AdminOrdersPage({
                     <Td numeric className="whitespace-nowrap">
                       {orderDate(o.date, allPeriod)}
                     </Td>
-                    <Td>{o.customerName || "—"}</Td>
+                    <Td>
+                      <Link
+                        href={`/admin/orders/${encodeURIComponent(o.recordId)}`}
+                        className="underline underline-offset-4 hover:text-gold-300"
+                      >
+                        {o.customerName || "（お名前なし）"}
+                      </Link>
+                    </Td>
                     <Td>{o.productName || "—"}</Td>
                     <Td numeric align="right">
                       {(o.quantity || 1).toLocaleString("ja-JP")}

@@ -1,0 +1,291 @@
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { currentViewer } from "@/lib/auth";
+import { listAllAgencies } from "@/lib/agencies";
+import { select } from "@/lib/db";
+import { todayInJapan } from "@/lib/demo";
+import {
+  Card,
+  EmptyState,
+  Notice,
+  PageHeader,
+  StatTile,
+  Table,
+  Th,
+  cn,
+} from "@/components/ui";
+import { DemoForm, DemoRow, type AgencyOption, type DemoView } from "./DemoForm";
+
+export const metadata = { title: "デモ機管理（本部）｜VIS 代理店ポータル" };
+
+/* ------------------------------------------------------------------
+ * 本部のデモ機台帳。
+ *
+ * kintone の App13「VIS端末・デモ機管理」の代わりになる画面。
+ * 本部が知りたいのは「いまどこに何台あるか」と
+ * 「返却予定日を過ぎている台はどれか」の2つなので、
+ * 状態ごとの台数を上に、期限切れを目立つ色で一覧に出している。
+ * ------------------------------------------------------------------ */
+
+/** 表の列数。入力欄を表いっぱいに広げるのに使う。 */
+const COLUMN_COUNT = 7;
+
+/** 台数のタイルに並べる状態。保存先の設定と同じ並びにしてある。 */
+const STATES = ["在庫", "設置済", "貸出中", "返却済", "故障・修理", "廃棄"];
+
+type Row = Record<string, unknown>;
+
+const s_ = (r: Row, k: string): string => {
+  const v = r[k];
+  return v === null || v === undefined ? "" : String(v);
+};
+
+function toDemo(r: Row): DemoView {
+  return {
+    id: s_(r, "id"),
+    serialNo: s_(r, "serial_no"),
+    model: s_(r, "model"),
+    acquiredKind: s_(r, "acquired_kind"),
+    acquiredOn: s_(r, "acquired_on"),
+    state: s_(r, "state"),
+    holderCode: s_(r, "holder_code"),
+    holderName: s_(r, "holder_name"),
+    customerName: s_(r, "customer_name"),
+    lendTo: s_(r, "lend_to"),
+    lendOn: s_(r, "lend_on"),
+    returnDueOn: s_(r, "return_due_on"),
+    returnedOn: s_(r, "returned_on"),
+    purpose: s_(r, "purpose"),
+    converted: s_(r, "converted"),
+    note: s_(r, "note"),
+  };
+}
+
+/**
+ * 返却予定日を過ぎているか。
+ * すでに返却日が入っているもの、返却済・廃棄になっているものは数えない。
+ */
+function isOverdue(m: DemoView, today: string): boolean {
+  if (!m.returnDueOn || m.returnedOn) return false;
+  if (m.state === "返却済" || m.state === "廃棄") return false;
+  return m.returnDueOn < today;
+}
+
+/** 絞り込みの合図。"all" か 6つの状態、または "overdue"。 */
+function toFilter(v: string | undefined): string {
+  if (v === "overdue") return "overdue";
+  return v && STATES.includes(v) ? v : "all";
+}
+
+function hrefFor(filter: string): string {
+  return filter === "all" ? "/admin/demo" : `/admin/demo?state=${encodeURIComponent(filter)}`;
+}
+
+/** 状態ごとの台数タイルの色。手当てが要るものだけ色を変える。 */
+function tileTone(state: string, count: number): "default" | "gold" | "warn" {
+  if (state === "貸出中" && count > 0) return "gold";
+  if (state === "故障・修理" && count > 0) return "warn";
+  return "default";
+}
+
+/** 状態ごとの補足。件数だけでは何をすればよいか分からないため。 */
+function tileHint(state: string): string {
+  if (state === "在庫") return "貸し出せる台数";
+  if (state === "設置済") return "サロンなどに置いている台数";
+  if (state === "貸出中") return "いま手元を離れている台数";
+  if (state === "返却済") return "返ってきた台数。在庫に戻すと貸し出せます";
+  if (state === "故障・修理") return "修理に出している台数";
+  return "使わなくなった台数";
+}
+
+export default async function AdminDemoPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ state?: string }>;
+}) {
+  const viewer = await currentViewer();
+  if (!viewer) redirect("/login");
+  if (viewer.kind !== "hq") redirect("/dashboard");
+
+  const params = await searchParams;
+  const filter = toFilter(params.state);
+  const today = todayInJapan();
+
+  let machines: DemoView[] = [];
+  let agencyOptions: AgencyOption[] = [];
+  let loadError: string | null = null;
+
+  try {
+    const [rows, agencies] = await Promise.all([
+      select<Row>("demo_machines?select=*&order=acquired_on.desc.nullslast,id.desc"),
+      listAllAgencies(),
+    ]);
+    machines = rows.map(toDemo);
+    agencyOptions = agencies
+      .filter((a) => a.code)
+      .map((a) => ({ code: a.code, name: a.name || "（名称未登録）" }));
+  } catch (e) {
+    loadError =
+      e instanceof Error
+        ? e.message
+        : "デモ機の台帳を読み込めませんでした。時間をおいて画面を読み込み直してください。";
+  }
+
+  const header = (
+    <PageHeader
+      title="デモ機管理"
+      description="デモ機の在庫と貸出の台帳です。貸し出すときと返してもらったときに記録すると、返却予定日を過ぎた台がひと目で分かります。"
+    />
+  );
+
+  if (loadError) {
+    return (
+      <div className="space-y-6">
+        {header}
+        <Notice tone="bad">
+          デモ機の台帳を読み込めませんでした。{loadError}
+          <br />
+          しばらく待っても直らない場合は、保存先（Supabase）の接続設定をご確認ください。
+        </Notice>
+      </div>
+    );
+  }
+
+  const countByState = new Map<string, number>();
+  for (const m of machines) {
+    countByState.set(m.state, (countByState.get(m.state) ?? 0) + 1);
+  }
+  const overdue = machines.filter((m) => isOverdue(m, today));
+
+  const rows =
+    filter === "all"
+      ? machines
+      : filter === "overdue"
+        ? overdue
+        : machines.filter((m) => m.state === filter);
+
+  const chips: { key: string; label: string; count: number }[] = [
+    { key: "all", label: "すべて", count: machines.length },
+    ...STATES.map((s) => ({ key: s, label: s, count: countByState.get(s) ?? 0 })),
+    { key: "overdue", label: "返却予定日を過ぎている", count: overdue.length },
+  ];
+  const currentChip = chips.find((c) => c.key === filter)!;
+
+  return (
+    <div className="space-y-6">
+      {header}
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        {STATES.map((s) => {
+          const count = countByState.get(s) ?? 0;
+          return (
+            <StatTile
+              key={s}
+              label={s}
+              value={String(count)}
+              unit="台"
+              tone={tileTone(s, count)}
+              hint={tileHint(s)}
+            />
+          );
+        })}
+      </div>
+
+      {overdue.length > 0 ? (
+        <Notice tone="warn">
+          返却予定日を過ぎているデモ機が {overdue.length} 台あります。貸出先にご確認のうえ、
+          回収するか、返却予定日を入れ直してください。
+          <Link
+            href={hrefFor("overdue")}
+            className="ml-1.5 font-medium text-warn-100 underline underline-offset-2 hover:text-gold-300"
+          >
+            この {overdue.length} 台だけを見る
+          </Link>
+        </Notice>
+      ) : null}
+
+      <nav className="flex flex-wrap items-center gap-1 rounded-xl border border-ink-800 bg-ink-900/70 p-1">
+        {chips.map((c) => {
+          const active = c.key === filter;
+          return (
+            <Link
+              key={c.key}
+              href={hrefFor(c.key)}
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                "flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition",
+                active
+                  ? "bg-gold-500/12 text-gold-300"
+                  : "text-ink-300 hover:bg-ink-850 hover:text-ink-100",
+              )}
+            >
+              <span>{c.label}</span>
+              <span className={cn("tabnum text-xs", active ? "text-gold-400" : "text-ink-400")}>
+                {c.count}
+              </span>
+            </Link>
+          );
+        })}
+      </nav>
+
+      <Card title={`${currentChip.label}　${rows.length} 台`}>
+        {rows.length === 0 ? (
+          <EmptyState title={emptyTitle(filter)} description={emptyDescription(filter)} />
+        ) : (
+          <Table>
+            <thead>
+              <tr>
+                <Th>製品番号</Th>
+                <Th>機種</Th>
+                <Th>状態</Th>
+                <Th>保有者（責任者）</Th>
+                <Th>貸出先</Th>
+                <Th>返却予定日</Th>
+                <Th align="right">手続き</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((m) => (
+                <DemoRow
+                  key={m.id}
+                  machine={m}
+                  agencies={agencyOptions}
+                  today={today}
+                  overdue={isOverdue(m, today)}
+                  columnCount={COLUMN_COUNT}
+                />
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </Card>
+
+      <Card title="デモ機を登録する">
+        <DemoForm agencies={agencyOptions} />
+      </Card>
+
+      <Notice tone="info">
+        「保有者（責任者）」は、その台を預かって管理している方のお名前です（デモ機登録フォームの
+        「使用者名」にあたります）。代理店の「デモ機」の画面にも、同じ内容が表示されます。
+      </Notice>
+    </div>
+  );
+}
+
+/* ---------- 空のときの文言 ---------- */
+
+function emptyTitle(filter: string): string {
+  if (filter === "overdue") return "返却予定日を過ぎているデモ機はありません";
+  if (filter === "all") return "デモ機がまだ登録されていません";
+  return `「${filter}」のデモ機はありません`;
+}
+
+function emptyDescription(filter: string): string {
+  if (filter === "overdue") {
+    return "貸出中の台はすべて返却予定日の前です。予定日を過ぎるとここに出てきます。";
+  }
+  if (filter === "all") {
+    return "下の「デモ機を登録する」から、製品番号を入れて登録してください。デモ機登録フォームから届いた申請も、ここに表示されます。";
+  }
+  return "上のタブから別の状態を選ぶか、「すべて」で台帳全体をご確認ください。";
+}

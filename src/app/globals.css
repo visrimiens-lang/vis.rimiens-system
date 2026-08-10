@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+/*
+  VIS 代理店ポータル デザイントークン
+  ブランド: 黒 × ゴールド（QR2 決済ページと同系統）
+*/
+@theme {
+  --color-ink-950: #0a0a0b;
+  --color-ink-900: #101012;
+  --color-ink-850: #16161a;
+  --color-ink-800: #1d1d22;
+  --color-ink-700: #2a2a31;
+  --color-ink-600: #3a3a44;
+  --color-ink-400: #6b6b78;
+  --color-ink-300: #9a9aa6;
+  --color-ink-200: #c7c7d0;
+  --color-ink-50: #efece4;
+
+  --color-gold-500: #c9a227;
+  --color-gold-400: #d8b64a;
+  --color-gold-300: #e5cd82;
+  --color-gold-100: #f3e7bf;
+
+  --color-good-500: #3f9d6a;
+  --color-good-100: #d5ebdf;
+  --color-warn-500: #cf8a1f;
+  --color-warn-100: #f6e7c9;
+  --color-bad-500: #c2503f;
+  --color-bad-100: #f2d9d5;
+
+  --font-sans: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP",
+    system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+html,
+body {
+  background: var(--color-ink-950);
+  color: var(--color-ink-50);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 数字を桁で揃える（金額・件数の一覧で効く） */
+.tabnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* 横に長い表は、その中だけ横スクロールさせる */
+.scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+::selection {
+  background: var(--color-gold-500);
+  color: var(--color-ink-950);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-gold-400);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import { listAllAgencies } from "@/lib/agencies";
-import { APP, getRecords, num, str, type KintoneRecord } from "@/lib/kintone";
+import { select } from "@/lib/db";
 import { currentMonth, recentMonths, unitRewardFor } from "@/lib/orders";
 import type { Agency, Order } from "@/lib/types";
 import {
@@ -32,28 +32,6 @@ export const metadata = { title: "受注一覧（本部）｜VIS 代理店ポー
  * この画面だけは絞り込みなしで取得する。lib 側は変更しない。
  * ------------------------------------------------------------------ */
 
-const ORDER_FIELDS = [
-  "レコード番号",
-  "日付",
-  "注文者名",
-  "商品名",
-  "販売金額",
-  "数量",
-  "電話番号",
-  "出荷状況",
-  "出荷完了日",
-  "決済方法",
-  "照合ステータス",
-  "代理店コード",
-  "_2次代理店コード",
-  "ゼロ次代理店コード",
-  "取次紹介コード",
-  "ヤマト送り状番号",
-  "総販売代理店報酬用",
-  "_2次代理店報酬用",
-  "取次店報酬用",
-];
-
 /** App10「出荷状況」の選択肢。受注が1件も無い状態でも絞り込めるように持っておく。 */
 const SHIPPING_STATUSES = ["出荷待ち", "出荷手配中", "出荷済", "キャンセル"];
 
@@ -69,30 +47,40 @@ type AdminOrder = Order & {
   secondaryTotal: number | null;
 };
 
-function toAdminOrder(r: KintoneRecord): AdminOrder {
-  const referrer = str(r, "取次紹介コード");
-  const agencyCode = str(r, "代理店コード");
-  const quantity = num(r, "数量") || 1;
+type Row = Record<string, unknown>;
+const str = (r: Row, k: string): string => {
+  const v = r[k];
+  return v === null || v === undefined ? "" : String(v);
+};
+const num = (r: Row, k: string): number => {
+  const v = r[k];
+  return typeof v === "number" ? v : Number(v ?? 0) || 0;
+};
+
+function toAdminOrder(r: Row): AdminOrder {
+  const referrer = str(r, "referrer_code");
+  const agencyCode = str(r, "agency_code");
+  const quantity = num(r, "quantity") || 1;
   // 空欄と 0 円は意味が違う。空欄なら「まだ決まっていない」ので金額を出さない。
-  const unit = str(r, "_2次代理店報酬用") === "" ? null : unitRewardFor(r, "2次代理店");
+  const unit = unitRewardFor(r, "2次代理店");
   return {
-    recordId: str(r, "レコード番号"),
-    date: str(r, "日付"),
-    customerName: str(r, "注文者名"),
-    productName: str(r, "商品名"),
-    amount: num(r, "販売金額"),
+    recordId: str(r, "id"),
+    date: str(r, "ordered_on"),
+    customerName: str(r, "customer_name"),
+    productName: str(r, "product_name"),
+    amount: num(r, "amount"),
     quantity,
-    phone: str(r, "電話番号"),
-    shippingStatus: str(r, "出荷状況"),
-    shippedAt: str(r, "出荷完了日"),
-    paymentMethod: str(r, "決済方法"),
-    matchStatus: str(r, "照合ステータス"),
+    phone: str(r, "phone"),
+    shippingStatus: str(r, "ship_status"),
+    shippedAt: str(r, "shipped_on"),
+    paymentMethod: str(r, "payment_method"),
+    matchStatus: str(r, "match_status"),
     agencyCode,
-    secondaryCode: str(r, "_2次代理店コード"),
+    secondaryCode: str(r, "niji_code"),
     referrerCode: referrer,
-    trackingNo: str(r, "ヤマト送り状番号"),
+    trackingNo: str(r, "tracking_no"),
     ownerCode: referrer || agencyCode,
-    zeroCode: str(r, "ゼロ次代理店コード"),
+    zeroCode: str(r, "zeroth_code"),
     secondaryUnit: unit,
     secondaryTotal: unit === null ? null : unit * quantity,
   };
@@ -110,23 +98,30 @@ function monthRange(month: string): { from: string; to: string } {
 async function fetchAllOrders(
   month: string | null,
 ): Promise<{ rows: AdminOrder[]; truncated: boolean }> {
-  const conds: string[] = [];
+  const filters = ["order=ordered_on.desc,id.desc"];
   if (month) {
     const { from, to } = monthRange(month);
-    conds.push(`日付 >= "${from}"`, `日付 <= "${to}"`);
+    filters.push(`ordered_on=gte.${from}`, `ordered_on=lte.${to}`);
   }
-  const where = conds.length ? `${conds.join(" and ")} ` : "";
+  const [rows, products] = await Promise.all([
+    select<Row>(`orders?select=*&${filters.join("&")}`),
+    select<Row>("products?select=name,amount_so,amount_niji,amount_hanbai,amount_toritsugi,reward_target"),
+  ]);
+  const priceOf = new Map<string, Row>();
+  for (const p of products) priceOf.set(str(p, "name"), p);
 
-  const records: KintoneRecord[] = [];
-  let truncated = false;
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const query = `${where}order by 日付 desc, レコード番号 desc limit ${PAGE_SIZE} offset ${page * PAGE_SIZE}`;
-    const batch = await getRecords(APP.order, query, ORDER_FIELDS);
-    records.push(...batch);
-    if (batch.length < PAGE_SIZE) break;
-    if (page === MAX_PAGES - 1) truncated = true;
-  }
-  return { rows: records.map(toAdminOrder), truncated };
+  const enriched = rows.map((r) => {
+    const p = priceOf.get(str(r, "product_name"));
+    const off = !p || str(p, "reward_target") === "対象外";
+    return {
+      ...r,
+      _unit_so: off ? null : p!["amount_so"] ?? null,
+      _unit_niji: off ? null : p!["amount_niji"] ?? null,
+      _unit_hanbai: off ? null : p!["amount_hanbai"] ?? null,
+      _unit_toritsugi: off ? null : p!["amount_toritsugi"] ?? null,
+    } as Row;
+  });
+  return { rows: enriched.map(toAdminOrder), truncated: false };
 }
 
 /** 受注に記録されている代理店コードすべて（重複を除く）。 */
@@ -249,7 +244,7 @@ export default async function AdminOrdersPage({
         <Notice tone="bad">
           受注を読み込めませんでした。{error}
           <br />
-          しばらく待っても直らない場合は、kintone の接続設定（接続先URLと認証情報）をご確認ください。
+          しばらく待っても直らない場合は、本部にお問い合わせください。
         </Notice>
       </div>
     );
@@ -372,7 +367,7 @@ export default async function AdminOrdersPage({
         <Notice tone="warn">
           紹介元が特定できていない受注が {needsCheck.length} 件あります（照合ステータスが「要確認」）。
           このぶんは報酬の支払先が決まっていないため、下の表では色を付けています。
-          kintone の受注管理で紹介元をご確認のうえ、照合ステータスを更新してください。
+          受注の紹介元をご確認のうえ、照合ステータスを更新してください。
         </Notice>
       ) : null}
 

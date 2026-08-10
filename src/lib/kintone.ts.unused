@@ -121,6 +121,35 @@ export async function getRecords(
   return data.records ?? [];
 }
 
+/**
+ * 条件に合うレコードを「全部」取る。
+ *
+ * kintone の 1 回の取得は 500 件が上限で、それを超えると黙って切り捨てられる。
+ * 代理店や受注が増えたときに、画面から静かに消えるのを防ぐため、
+ * 500 件ずつ最後まで読み進める。
+ *
+ * query に limit / offset を入れてはいけない（ここで付けるため）。
+ * order by は付けてよい。安定した並びのために、呼ぶ側で必ず指定すること。
+ */
+export async function getAllRecords(
+  app: number,
+  query: string,
+  fields?: string[],
+  opts: FetchOpts = {},
+): Promise<KintoneRecord[]> {
+  const PAGE = 500;
+  // kintone は offset の上限が 10000。それ以上は取りに行かない。
+  const MAX = 10000;
+  const out: KintoneRecord[] = [];
+  for (let offset = 0; offset < MAX; offset += PAGE) {
+    const paged = `${query} limit ${PAGE} offset ${offset}`.trim();
+    const rows = await getRecords(app, paged, fields, opts);
+    out.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  return out;
+}
+
 /** 件数だけを取得する（レコード本体を転送しないので速い）。 */
 export async function countRecords(
   app: number,

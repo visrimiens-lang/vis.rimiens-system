@@ -1,0 +1,174 @@
+import { NextRequest, NextResponse } from "next/server";
+import {
+  markProcessed,
+  receive,
+  registerAgency,
+  registerLead,
+  type AgencyApplication,
+} from "@/lib/intake";
+
+/**
+ * JotForm からの申込を受け取る。
+ *
+ * これまで Make が受けていたものを、ここで直接受ける。
+ * JotForm のフォーム設定で、送信先（Webhook）をこの URL にする:
+ *   https://vis-rimiens-system.vercel.app/api/webhooks/jotform?token=＜合言葉＞&kind=＜種類＞
+ *
+ * kind に入れる値:
+ *   agency   … 代理店システム登録（会社としての登録）
+ *   referrer … 取次パートナー登録
+ *   staff    … スタッフ／販売ライセンス認定登録
+ *   lead     … トスアップ（お客様のご紹介）
+ *
+ * 届いたものは必ず受信箱に丸ごと残してから処理する。
+ * 途中で失敗しても申込が消えないようにするため。
+ */
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+/** JotForm は項目名がフォームごとに違うので、よくある言い方をまとめて探す。 */
+function pick(data: Record<string, unknown>, ...names: string[]): string {
+  for (const n of names) {
+    for (const [k, v] of Object.entries(data)) {
+      if (k === n || k.includes(n)) {
+        if (v === null || v === undefined) continue;
+        if (typeof v === "object") {
+          // JotForm の氏名欄は {first, last} の形で届くことがある
+          const o = v as Record<string, unknown>;
+          const joined = [o.last, o.first, o.第一, o.姓, o.名]
+            .filter(Boolean)
+            .join(" ")
+            .trim();
+          if (joined) return joined;
+          const flat = Object.values(o).filter(Boolean).join(" ").trim();
+          if (flat) return flat;
+          continue;
+        }
+        const s = String(v).trim();
+        if (s) return s;
+      }
+    }
+  }
+  return "";
+}
+
+/** JotForm の送信内容を取り出す。form-data でも JSON でも受けられるようにする。 */
+async function readPayload(req: NextRequest): Promise<Record<string, unknown>> {
+  const type = req.headers.get("content-type") ?? "";
+  if (type.includes("application/json")) {
+    return (await req.json()) as Record<string, unknown>;
+  }
+  const form = await req.formData();
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of form.entries()) out[k] = typeof v === "string" ? v : String(v);
+
+  // JotForm は中身を rawRequest という1つの項目に JSON で詰めて送ってくる
+  const raw = out["rawRequest"];
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      return { ...out, ...parsed };
+    } catch {
+      // JSON でなければそのまま使う
+    }
+  }
+  return out;
+}
+
+export async function POST(req: NextRequest) {
+  // 合言葉の確認。第三者に偽の申込を送られないようにする。
+  const secret = process.env.WEBHOOK_TOKEN ?? "";
+  const given = req.nextUrl.searchParams.get("token") ?? "";
+  if (!secret || given !== secret) {
+    return NextResponse.json({ ok: false, error: "認証に失敗しました。" }, { status: 401 });
+  }
+
+  const kind = (req.nextUrl.searchParams.get("kind") ?? "").toLowerCase();
+
+  let data: Record<string, unknown>;
+  try {
+    data = await readPayload(req);
+  } catch {
+    return NextResponse.json({ ok: false, error: "内容を読み取れませんでした。" }, { status: 400 });
+  }
+
+  const submissionId =
+    pick(data, "submissionID", "submission_id", "submissionId") || null;
+  const formId = pick(data, "formID", "form_id") || null;
+
+  // まず丸ごと保存する
+  const box = await receive("jotform", submissionId, formId, data);
+  if (box.duplicate) {
+    return NextResponse.json({ ok: true, message: "受付済みです。" });
+  }
+
+  try {
+    if (kind === "lead") {
+      const r = await registerLead({
+        customerName: pick(data, "お客様氏名", "お名前", "氏名", "name", "customerName"),
+        phone: pick(data, "電話", "phone", "tel"),
+        referrerCode: pick(data, "取次店コード", "紹介コード", "referrerCode", "code"),
+        note: pick(data, "備考", "note"),
+      });
+      await markProcessed(box.id, r.ok ? undefined : r.message);
+      return NextResponse.json(r, { status: r.ok ? 200 : 202 });
+    }
+
+    const formKind: AgencyApplication["formKind"] =
+      kind === "referrer" ? "取次パートナー登録"
+      : kind === "staff" ? "スタッフ登録"
+      : "代理店システム登録";
+
+    const r = await registerAgency({
+      formKind,
+      name: pick(data, "法人名", "会社名", "お名前", "氏名", "name"),
+      repName: pick(data, "代表者", "代表者名", "representative"),
+      email: pick(data, "メール", "email", "mail"),
+      phone: pick(data, "電話", "phone", "tel"),
+      zip: pick(data, "郵便番号", "zip", "postal"),
+      address: pick(data, "住所", "address"),
+      shopName: pick(data, "店舗名", "屋号", "shop"),
+      birthday: pick(data, "生年月日", "birthday"),
+      inviteCode: pick(data, "招待コード", "紹介コード", "上位代理店コード", "inviteCode"),
+      channel: pick(data, "販路種別", "channel") || undefined,
+      areaClass: pick(data, "エリア", "area") || undefined,
+      bank: {
+        name: pick(data, "銀行名", "bankName"),
+        branch: pick(data, "支店名", "branch"),
+        type: pick(data, "口座種別", "accountType"),
+        number: pick(data, "口座番号", "accountNumber"),
+        holder: pick(data, "口座名義", "accountHolder"),
+      },
+      jotformId: submissionId ?? undefined,
+      ip: pick(data, "ip") || undefined,
+      userAgent: req.headers.get("user-agent") ?? undefined,
+    });
+
+    await markProcessed(box.id, r.ok ? undefined : r.message);
+    // 登録できなかった場合も 202 で返す。JotForm 側でエラー扱いにさせず、
+    // 本部が受信箱を見て手当てできるようにするため。
+    return NextResponse.json(r, { status: r.ok ? 200 : 202 });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "不明なエラー";
+    await markProcessed(box.id, msg);
+    console.error("[jotform]", e);
+    return NextResponse.json(
+      { ok: false, error: "登録に失敗しました。本部で確認します。" },
+      { status: 202 },
+    );
+  }
+}
+
+/** 設定確認用。ブラウザで開いたときに、繋がっているかだけ分かるようにする。 */
+export async function GET(req: NextRequest) {
+  const secret = process.env.WEBHOOK_TOKEN ?? "";
+  const given = req.nextUrl.searchParams.get("token") ?? "";
+  if (!secret) {
+    return NextResponse.json({ ok: false, error: "WEBHOOK_TOKEN が未設定です。" }, { status: 500 });
+  }
+  if (given !== secret) {
+    return NextResponse.json({ ok: false, error: "合言葉が違います。" }, { status: 401 });
+  }
+  return NextResponse.json({ ok: true, message: "受け口は正常です。" });
+}

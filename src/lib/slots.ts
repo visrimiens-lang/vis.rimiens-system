@@ -135,12 +135,19 @@ export function breakdownSlots(
     };
   });
 
+  // 販路種別が入っていない配下も、実在する代理店なので枠は消費している。
+  // どこにも数えないと上限が働かず、100枠を超えて登録できてしまう。
+  const unclassified = active.filter((a) => !claimed.has(a.code));
+
+  const totalLimit = lines.reduce((s, l) => s + l.limit, 0);
+  const totalUsed = lines.reduce((s, l) => s + l.used, 0) + unclassified.length;
+
   return {
     lines,
-    totalLimit: lines.reduce((s, l) => s + l.limit, 0),
-    totalUsed: lines.reduce((s, l) => s + l.used, 0),
-    anyFull: lines.some((l) => l.isFull),
-    unclassified: active.filter((a) => !claimed.has(a.code)),
+    totalLimit,
+    totalUsed,
+    anyFull: lines.some((l) => l.isFull) || totalUsed >= totalLimit,
+    unclassified,
     staff: directChildren.filter((a) => isActive(a) && a.codeKind === "02"),
   };
 }
@@ -200,6 +207,20 @@ export function areaUsage(all: Agency[]): {
  *
  * 階層が違えば枠の意味も違う。取り違えると本部と代理店で見える数字がずれる。
  */
-export function slotModelOf(agency: Agency): "area" | "channel" {
+export function slotModelOf(agency: Agency): "area" | "channel" | "none" {
+  // 取次パートナーとスタッフは配下を持たない。枠の画面自体が意味をなさない。
+  if (agency.codeKind === "01" || agency.codeKind === "02") return "none";
+  if (agency.rank === "取次店") return "none";
   return agency.rank === "総販売代理店" ? "area" : "channel";
+}
+
+/** 販路種別の名前から、その枠の上限フィールド名を引く。 */
+export function limitFieldOf(kind: string): string | null {
+  const found = SLOT_KINDS.find((k) => k.key === kind);
+  return found ? found.limitField : null;
+}
+
+/** 画面から送られてきた枠の種別が、扱ってよい値かを確かめる。 */
+export function isSlotKind(v: string): v is SlotKindKey {
+  return SLOT_KINDS.some((k) => k.key === v);
 }

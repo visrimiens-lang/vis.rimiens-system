@@ -1,94 +1,74 @@
 import "server-only";
-import { APP, getRecords, num, q, str, updateRecord, type KintoneRecord } from "./kintone";
+import { select, selectOne, update, val } from "./db";
 import type { Agency, AgencyRank, CodeKind, OrgNode, SalesChannel } from "./types";
-
-const FIELDS = [
-  "$id",
-  "レコード番号",
-  "代理店コード",
-  "法人名または氏名",
-  "代表者名",
-  "代理店ランク",
-  "販路種別",
-  "コード区分",
-  "上位代理店コード",
-  "上位代理店",
-  "エリア区分",
-  "メールアドレス",
-  "電話番号",
-  "稼働ステータス",
-  "販売代理店枠上限",
-  "サロン代理店枠上限",
-  "個人代理店枠上限",
-  "取次店枠上限",
-  "登録済件数",
-  "増枠申請ステータス",
-  "特別枠フラグ",
-  "登録経路",
-  "作成日時",
-  "紹介URL_QR1",
-  "紹介URL_QR2",
-];
 
 /** 枠の既定値。App9 側が未設定でもこの値で扱う。 */
 export const DEFAULT_SLOT_LIMIT = 10;
 
-function toAgency(r: KintoneRecord): Agency {
+/** データベースの1行を、画面が使う形に直す。 */
+type Row = Record<string, unknown>;
+const s_ = (r: Row, k: string): string => {
+  const v = r[k];
+  return v === null || v === undefined ? "" : String(v);
+};
+const n_ = (r: Row, k: string): number => {
+  const v = r[k];
+  return typeof v === "number" ? v : Number(v ?? 0) || 0;
+};
+
+function toAgency(r: Row): Agency {
   return {
-    recordId: str(r, "レコード番号") || str(r, "$id"),
-    code: str(r, "代理店コード"),
-    name: str(r, "法人名または氏名"),
-    representative: str(r, "代表者名"),
-    rank: (str(r, "代理店ランク") || "") as AgencyRank | "",
-    channel: (str(r, "販路種別") || "") as SalesChannel | "",
-    codeKind: (str(r, "コード区分") || "") as CodeKind,
-    parentCode: str(r, "上位代理店コード"),
-    parentName: str(r, "上位代理店"),
-    area: str(r, "エリア区分"),
-    email: str(r, "メールアドレス"),
-    phone: str(r, "電話番号"),
-    status: str(r, "稼働ステータス"),
-    slotLimit: num(r, "販売代理店枠上限") || DEFAULT_SLOT_LIMIT,
+    recordId: s_(r, "id"),
+    code: s_(r, "code"),
+    name: s_(r, "name"),
+    representative: s_(r, "rep_name"),
+    rank: (s_(r, "rank") || "") as AgencyRank | "",
+    channel: (s_(r, "channel") || "") as SalesChannel | "",
+    codeKind: (s_(r, "code_kind") || "") as CodeKind,
+    parentCode: s_(r, "parent_code"),
+    parentName: s_(r, "parent_name"),
+    area: s_(r, "area_class") || s_(r, "area"),
+    email: s_(r, "email"),
+    phone: s_(r, "phone"),
+    status: s_(r, "status"),
+    slotLimit: n_(r, "limit_hanbai") || DEFAULT_SLOT_LIMIT,
     slotLimits: {
-      販売代理店枠上限: num(r, "販売代理店枠上限") || 0,
-      サロン代理店枠上限: num(r, "サロン代理店枠上限") || 0,
-      個人代理店枠上限: num(r, "個人代理店枠上限") || 0,
-      取次店枠上限: num(r, "取次店枠上限") || 0,
+      販売代理店枠上限: n_(r, "limit_hanbai"),
+      サロン代理店枠上限: n_(r, "limit_salon"),
+      個人代理店枠上限: n_(r, "limit_kojin"),
+      取次店枠上限: n_(r, "limit_toritsugi"),
     },
-    slotUsed: num(r, "登録済件数"),
-    slotRequestStatus: str(r, "増枠申請ステータス") || "なし",
-    specialSlot: str(r, "特別枠フラグ") === "特別枠",
-    registeredVia: str(r, "登録経路"),
-    createdAt: str(r, "作成日時"),
-    qr1Url: str(r, "紹介URL_QR1"),
-    qr2Url: str(r, "紹介URL_QR2"),
+    slotUsed: 0, // 実際の配下数から数える（登録済件数は持たない）
+    slotRequestStatus: s_(r, "slot_request"),
+    specialSlot: r["special_slot"] === true,
+    registeredVia: s_(r, "registered_via"),
+    createdAt: s_(r, "created_at"),
+    qr1Url: s_(r, "qr1_url"),
+    qr2Url: s_(r, "qr2_url"),
   };
 }
 
 
-/**
- * App9 からレコードを取る。
- * 枠フィールドがまだ作られていない環境ではフィールド指定が 400 になるため、
- * その場合は全フィールド取得に落として動かし続ける。
- */
-async function fetchAgencies(query: string): Promise<Agency[]> {
-  try {
-    return (await getRecords(APP.agency, query, FIELDS)).map(toAgency);
-  } catch {
-    return (await getRecords(APP.agency, query)).map(toAgency);
-  }
+/** 代理店を取る。並び順は必ず指定する（表示のたびに順序が変わらないように）。 */
+async function fetchAgencies(filter: string): Promise<Agency[]> {
+  const rows = await select<Row>(
+    `agencies?select=*&${filter}`,
+  );
+  return rows.map(toAgency);
 }
 
 /** 代理店コードで1件引く。 */
 export async function findAgencyByCode(code: string): Promise<Agency | null> {
-  if (!code.trim()) return null;
-  const rows = await fetchAgencies(`代理店コード = ${q(code.trim())} limit 1`);
-  return rows[0] ?? null;
+  const c = code.trim();
+  if (!c) return null;
+  const row = await selectOne<Row>(`agencies?select=*&code=eq.${encodeURIComponent(c)}`);
+  return row ? toAgency(row) : null;
 }
 
 /** 全代理店を取得する（本部用）。 */
 export async function listAllAgencies(): Promise<Agency[]> {
-  return fetchAgencies("order by 代理店コード asc limit 500");
+  // 枠の計算と組織図の土台になるので、必ず全件取る。
+  return fetchAgencies("order=code.asc");
 }
 
 /**
@@ -186,34 +166,46 @@ export async function getSlotSummary(agency: Agency): Promise<SlotSummary> {
   };
 }
 
-/** 増枠を申請する（App9 の増枠申請ステータスを「申請中」にする）。 */
+/** 増枠を申請する。 */
 export async function requestSlotIncrease(recordId: string): Promise<void> {
-  await updateRecord(APP.agency, recordId, {
-    増枠申請ステータス: { value: "申請中" },
+  await update(`agencies?id=eq.${encodeURIComponent(recordId)}`, {
+    slot_request: "申請中",
   });
 }
 
-/** 本部が増枠申請を承認する。上限を増やしたうえでステータスを承認済にする。 */
+/**
+ * 本部が増枠申請を承認する。
+ *
+ * どの枠を増やすかは kind で指定する。指定が無ければ販売代理店枠。
+ * 以前は必ず販売代理店枠だけを書き換えていたため、
+ * サロン枠や取次枠が埋まって申請しても増えなかった。
+ */
 export async function approveSlotIncrease(
   recordId: string,
   newLimit: number,
+  kind?: string,
 ): Promise<void> {
-  await updateRecord(APP.agency, recordId, {
-    販売代理店枠上限: { value: String(newLimit) },
-    増枠申請ステータス: { value: "承認済" },
+  const column =
+    kind === "サロン代理店" ? "limit_salon"
+    : kind === "個人販売パートナー" ? "limit_kojin"
+    : kind === "サロン提携パートナー（取次）" ? "limit_toritsugi"
+    : "limit_hanbai";
+  await update(`agencies?id=eq.${encodeURIComponent(recordId)}`, {
+    [column]: newLimit,
+    slot_request: "承認済",
   });
 }
 
 /** 本部が増枠申請を却下する。 */
 export async function rejectSlotIncrease(recordId: string): Promise<void> {
-  await updateRecord(APP.agency, recordId, {
-    増枠申請ステータス: { value: "却下" },
+  await update(`agencies?id=eq.${encodeURIComponent(recordId)}`, {
+    slot_request: "却下",
   });
 }
 
 /** 増枠申請が出ている代理店を集める（本部の承認画面用）。 */
 export async function listPendingSlotRequests(): Promise<Agency[]> {
-  return fetchAgencies(`増枠申請ステータス in ("申請中") order by 更新日時 asc limit 200`);
+  return fetchAgencies("slot_request=eq." + encodeURIComponent("申請中") + "&order=updated_at.asc");
 }
 
 

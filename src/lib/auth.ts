@@ -3,7 +3,7 @@ import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
 import { cache } from "react";
 import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
-import { APP, getRecords, q, str, updateRecord } from "./kintone";
+import { select, selectOne, update } from "./db";
 import type { Viewer, AgencyRank } from "./types";
 import { clearFailures, isLocked, recordFailure } from "./rate-limit";
 
@@ -17,7 +17,7 @@ const COOKIE = "vis_session";
 const MAX_AGE = 60 * 60 * 8; // 8時間
 
 /** App9 に用意するパスワード保存用フィールド。 */
-export const PASSWORD_FIELD = "ポータルパスワード";
+export const PASSWORD_FIELD = "portal_password";
 
 function secret(): string {
   const s = process.env.AUTH_SECRET;
@@ -61,10 +61,29 @@ function decode(token: string): { viewer: Viewer; fp: string } | null {
   }
 }
 
-/** 代理店コードで App9 の生レコードを引く（全フィールド）。 */
-async function rawAgency(code: string) {
-  const rows = await getRecords(APP.agency, `代理店コード = ${q(code)} limit 1`);
-  return rows[0] ?? null;
+type Row = Record<string, unknown>;
+
+/** データベースの値を文字列にする。null や undefined は空文字。 */
+function str(r: Row | null, k: string): string {
+  if (!r) return "";
+  const v = r[k];
+  return v === null || v === undefined ? "" : String(v);
+}
+
+/** 代理店コードで1件引く。 */
+async function rawAgency(code: string): Promise<Row | null> {
+  return selectOne<Row>(`agencies?select=*&code=eq.${encodeURIComponent(code)}`);
+}
+
+/**
+ * ポータルにログインしてよい状態か。
+ *
+ * kintone の稼働ステータスは「未稼働 / 稼働中 / 停止・解約」の3つ。
+ * 「未稼働」は登録は済んでいるがまだ販売を始めていない状態で、実データの6割を占める。
+ * 契約が切れた「停止・解約」だけを締め出す。
+ */
+export function canSignIn(status: string): boolean {
+  return status !== "停止・解約";
 }
 
 /**
@@ -93,7 +112,7 @@ export const currentViewer = cache(async (): Promise<Viewer | null> => {
   try {
     const record = await rawAgency(viewer.code);
     if (!record) return null;
-    if (str(record, "稼働ステータス") !== "稼働中") return null;
+    if (!canSignIn(str(record, "status"))) return null;
     // パスワードを変更・再発行したら、古いセッションはその時点で使えなくする
     const hash = str(record, PASSWORD_FIELD);
     if (!hash) return null;
@@ -101,10 +120,10 @@ export const currentViewer = cache(async (): Promise<Viewer | null> => {
     // 表示名とランクは常に最新のものを使う
     return {
       kind: "agency",
-      label: str(record, "法人名または氏名") || viewer.code,
-      code: str(record, "代理店コード"),
-      rank: (str(record, "代理店ランク") || "") as AgencyRank | "",
-      recordId: str(record, "レコード番号"),
+      label: str(record, "name") || viewer.code,
+      code: str(record, "code"),
+      rank: (str(record, "rank") || "") as AgencyRank | "",
+      recordId: str(record, "id"),
     };
   } catch {
     // kintone に繋がらないときにログアウト扱いにすると何も見えなくなるため、
@@ -172,7 +191,7 @@ export async function login(loginId: string, password: string): Promise<LoginRes
 
   const record = await rawAgency(id);
   const hash = record ? str(record, PASSWORD_FIELD) : "";
-  const active = record ? str(record, "稼働ステータス") === "稼働中" : false;
+  const active = record ? canSignIn(str(record, "status")) : false;
 
   // 実在しない・停止中・未発行のどれでも、必ず1回 bcrypt を通してから返す。
   // ここで早期 return すると、応答時間の差でコードの実在を見分けられてしまう。
@@ -184,10 +203,10 @@ export async function login(loginId: string, password: string): Promise<LoginRes
     ok: true,
     viewer: {
       kind: "agency",
-      label: str(record, "法人名または氏名") || id,
-      code: str(record, "代理店コード"),
-      rank: (str(record, "代理店ランク") || "") as AgencyRank | "",
-      recordId: str(record, "レコード番号"),
+      label: str(record, "name") || id,
+      code: str(record, "code"),
+      rank: (str(record, "rank") || "") as AgencyRank | "",
+      recordId: str(record, "id"),
     },
     fp: fingerprint(hash),
   };
@@ -219,17 +238,17 @@ export async function issueTemporaryPassword(code: string): Promise<IssueResult>
   const password = generateTempPassword();
   const hash = await bcrypt.hash(password, 10);
   try {
-    await updateRecord(APP.agency, str(record, "レコード番号"), {
-      [PASSWORD_FIELD]: { value: hash },
+    await update(`agencies?id=eq.${encodeURIComponent(str(record, "id"))}`, {
+      [PASSWORD_FIELD]: hash,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "不明なエラー";
     return {
       ok: false,
-      message: `パスワードを保存できませんでした。${msg}（代理店マスタに「ポータルパスワード」フィールドがあるかご確認ください）`,
+      message: `パスワードを保存できませんでした。${msg}`,
     };
   }
-  return { ok: true, password, agencyName: str(record, "法人名または氏名") || code };
+  return { ok: true, password, agencyName: str(record, "name") || code };
 }
 
 export type ChangeResult = { ok: true } | { ok: false; message: string };
@@ -256,8 +275,8 @@ export async function changeOwnPassword(
   }
 
   try {
-    await updateRecord(APP.agency, str(record, "レコード番号"), {
-      [PASSWORD_FIELD]: { value: await bcrypt.hash(newPassword, 10) },
+    await update(`agencies?id=eq.${encodeURIComponent(str(record, "id"))}`, {
+      [PASSWORD_FIELD]: await bcrypt.hash(newPassword, 10),
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "不明なエラー";
@@ -275,14 +294,12 @@ export async function changeOwnPassword(
 export async function listCodesWithPassword(): Promise<Set<string>> {
   try {
     // 判定に要るのは2項目だけ。ハッシュを含む全フィールドを引かない。
-    const rows = await getRecords(
-      APP.agency,
-      "order by 代理店コード asc limit 500",
-      ["代理店コード", PASSWORD_FIELD],
+    const rows = await select<Row>(
+      `agencies?select=code,${PASSWORD_FIELD}&order=code.asc`,
     );
     const out = new Set<string>();
     for (const r of rows) {
-      if (str(r, PASSWORD_FIELD)) out.add(str(r, "代理店コード"));
+      if (str(r, PASSWORD_FIELD)) out.add(str(r, "code"));
     }
     return out;
   } catch {

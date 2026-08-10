@@ -1,5 +1,5 @@
 import "server-only";
-import { APP, getRecords, q, str, type KintoneRecord } from "./kintone";
+import { select } from "./db";
 
 /**
  * デモ機（App13「VIS端末・デモ機管理」）の読み取り。
@@ -11,25 +11,6 @@ import { APP, getRecords, q, str, type KintoneRecord } from "./kintone";
  * 「製造番号」と呼ばれている項目は、kintone 上のフィールドコードは
  * 製品番号_シリアル。画面では業務で使われている「製造番号」で表示する。
  */
-
-const FIELDS = [
-  "レコード番号",
-  "保有代理店コード",
-  "保有代理店名",
-  "製品番号_シリアル",
-  "機種",
-  "端末状態",
-  "取得区分",
-  "取得日",
-  "貸出先",
-  "貸出日",
-  "返却予定日",
-  "返却日",
-  "貸与目的",
-  "保有顧客名",
-  "デモ機転用フラグ",
-  "備考",
-];
 
 export type DemoMachine = {
   recordId: string;
@@ -56,39 +37,35 @@ export type DemoMachine = {
   note: string;
 };
 
-function toDemoMachine(r: KintoneRecord): DemoMachine {
+type Row = Record<string, unknown>;
+const s_ = (r: Row, k: string): string => {
+  const v = r[k];
+  return v === null || v === undefined ? "" : String(v);
+};
+const inList = (codes: string[]): string =>
+  "(" + codes.map((c) => '"' + c.replace(/"/g, '\\"') + '"').join(",") + ")";
+
+function toDemoMachine(r: Row): DemoMachine {
   return {
-    recordId: str(r, "レコード番号") || str(r, "$id"),
-    holderCode: str(r, "保有代理店コード"),
-    holderName: str(r, "保有代理店名"),
-    serial: str(r, "製品番号_シリアル"),
-    model: str(r, "機種"),
-    condition: str(r, "端末状態"),
-    acquisition: str(r, "取得区分"),
-    acquiredOn: str(r, "取得日"),
-    lentTo: str(r, "貸出先"),
-    lentOn: str(r, "貸出日"),
-    dueOn: str(r, "返却予定日"),
-    returnedOn: str(r, "返却日"),
-    purpose: str(r, "貸与目的"),
-    customerName: str(r, "保有顧客名"),
-    reuseFlag: str(r, "デモ機転用フラグ"),
-    note: str(r, "備考"),
+    recordId: s_(r, "id"),
+    holderCode: s_(r, "holder_code"),
+    holderName: s_(r, "holder_name"),
+    serial: s_(r, "serial_no"),
+    model: s_(r, "model"),
+    condition: s_(r, "state"),
+    acquisition: s_(r, "acquired_kind"),
+    acquiredOn: s_(r, "acquired_on"),
+    lentTo: s_(r, "lend_to"),
+    lentOn: s_(r, "lend_on"),
+    dueOn: s_(r, "return_due_on"),
+    returnedOn: s_(r, "returned_on"),
+    purpose: s_(r, "purpose"),
+    customerName: s_(r, "customer_name"),
+    reuseFlag: s_(r, "converted"),
+    note: s_(r, "note"),
   };
 }
 
-/**
- * App13 からレコードを取る。
- * 項目がまだ揃っていない環境ではフィールド指定が 400 になるため、
- * その場合は全フィールド取得に落として動かし続ける。
- */
-async function fetchDemoRecords(query: string): Promise<KintoneRecord[]> {
-  try {
-    return await getRecords(APP.demo, query, FIELDS);
-  } catch {
-    return await getRecords(APP.demo, query);
-  }
-}
 
 /** 取得日の新しい順。取得日が空のものは後ろに回す。 */
 function byAcquiredDesc(a: DemoMachine, b: DemoMachine): number {
@@ -110,14 +87,13 @@ export async function listDemoMachines(codes: string[]): Promise<DemoMachine[]> 
   const unique = [...new Set(codes.map((c) => c.trim()).filter(Boolean))];
   if (unique.length === 0) return [];
 
+  const rows = await select<Row>(
+    `demo_machines?select=*&holder_code=in.${inList(unique)}&order=acquired_on.desc`,
+  );
   const found = new Map<string, DemoMachine>();
-  for (let i = 0; i < unique.length; i += 100) {
-    const chunk = unique.slice(i, i + 100);
-    const query = `保有代理店コード in (${chunk.map(q).join(", ")}) order by 取得日 desc limit 500`;
-    for (const r of await fetchDemoRecords(query)) {
-      const machine = toDemoMachine(r);
-      found.set(machine.recordId, machine);
-    }
+  for (const r of rows) {
+    const m = toDemoMachine(r);
+    found.set(m.recordId, m);
   }
   return [...found.values()].sort(byAcquiredDesc);
 }

@@ -1,5 +1,5 @@
 import "server-only";
-import { APP, getRecords, q, str, type KintoneRecord } from "./kintone";
+import { select } from "./db";
 
 /**
  * トスアップ（取次店からのお客様紹介）。
@@ -21,17 +21,6 @@ export const LEAD_LIMIT = 500;
 /** 成約を表すトスアップステータスの値。 */
 export const CLOSED_STATUS = "成約";
 
-const FIELDS = [
-  "レコード番号",
-  "お客様氏名",
-  "電話番号",
-  "取次店コード",
-  "トスアップステータス",
-  "トスアップ日時",
-  "受注レコード番号",
-  "成約日",
-];
-
 export type Lead = {
   recordId: string;
   customerName: string;
@@ -46,16 +35,24 @@ export type Lead = {
   closedAt: string;
 };
 
-function toLead(r: KintoneRecord): Lead {
+type Row = Record<string, unknown>;
+const s_ = (r: Row, k: string): string => {
+  const v = r[k];
+  return v === null || v === undefined ? "" : String(v);
+};
+const inList = (codes: string[]): string =>
+  "(" + codes.map((c) => '"' + c.replace(/"/g, '\\"') + '"').join(",") + ")";
+
+function toLead(r: Row): Lead {
   return {
-    recordId: str(r, "レコード番号"),
-    customerName: str(r, "お客様氏名"),
-    phone: str(r, "電話番号"),
-    referrerCode: str(r, "取次店コード"),
-    status: str(r, "トスアップステータス"),
-    tossedAt: str(r, "トスアップ日時"),
-    orderNo: str(r, "受注レコード番号"),
-    closedAt: str(r, "成約日"),
+    recordId: s_(r, "id"),
+    customerName: s_(r, "customer_name"),
+    phone: s_(r, "phone"),
+    referrerCode: s_(r, "referrer_code"),
+    status: s_(r, "status"),
+    tossedAt: s_(r, "tossed_at"),
+    orderNo: s_(r, "order_id"),
+    closedAt: s_(r, "closed_on"),
   };
 }
 
@@ -110,17 +107,9 @@ export async function listLeads(
   const targets = [...new Set(codes.map((c) => c.trim()).filter(Boolean))];
   if (targets.length === 0) return [];
 
-  const tail = `order by トスアップ日時 desc limit ${LEAD_LIMIT}`;
-  const codeCondition = `取次店コード in (${targets.map(q).join(", ")})`;
-
-  let rows: KintoneRecord[];
-  try {
-    rows = await getRecords(APP.lead, `${codeCondition} ${tail}`, FIELDS);
-  } catch {
-    // 紹介元コードでの絞り込みが使えない状態でも画面を止めない。
-    // 取得しなおしたうえで、見てよいコードかどうかは下でもう一度必ず確かめる。
-    rows = await getRecords(APP.lead, tail, FIELDS);
-  }
+  const rows = await select<Row>(
+    `leads?select=*&referrer_code=in.${inList(targets)}&order=tossed_at.desc&limit=${LEAD_LIMIT}`,
+  );
 
   const allowed = new Set(targets);
   const leads = rows

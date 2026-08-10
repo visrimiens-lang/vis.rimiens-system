@@ -1,64 +1,60 @@
 import "server-only";
-import { APP, getRecords, num, str, type KintoneRecord } from "./kintone";
+import { select } from "./db";
 import type { Agency, Order } from "./types";
 
-const FIELDS = [
-  "レコード番号",
-  "日付",
-  "注文者名",
-  "商品名",
-  "販売金額",
-  "数量",
-  "電話番号",
-  "出荷状況",
-  "出荷完了日",
-  "決済方法",
-  "照合ステータス",
-  "代理店コード",
-  "_2次代理店コード",
-  "取次紹介コード",
-  "ヤマト送り状番号",
-  "総販売代理店報酬用",
-  "_2次代理店報酬用",
-  "取次店報酬用",
-];
+type Row = Record<string, unknown>;
+const s_ = (r: Row, k: string): string => {
+  const v = r[k];
+  return v === null || v === undefined ? "" : String(v);
+};
+const n_ = (r: Row, k: string): number => {
+  const v = r[k];
+  return typeof v === "number" ? v : Number(v ?? 0) || 0;
+};
+/** PostgREST の in.() に渡す値を組み立てる。 */
+const inList = (codes: string[]): string =>
+  "(" + codes.map((c) => '"' + c.replace(/"/g, '\\"') + '"').join(",") + ")";
 
-function toOrder(r: KintoneRecord): Order {
-  const referrer = str(r, "取次紹介コード");
-  const agencyCode = str(r, "代理店コード");
+function toOrder(r: Row): Order {
+  const referrer = s_(r, "referrer_code");
+  const agencyCode = s_(r, "agency_code");
   return {
-    recordId: str(r, "レコード番号"),
-    date: str(r, "日付"),
-    customerName: str(r, "注文者名"),
-    productName: str(r, "商品名"),
-    amount: num(r, "販売金額"),
-    quantity: num(r, "数量") || 1,
-    phone: str(r, "電話番号"),
-    shippingStatus: str(r, "出荷状況"),
-    shippedAt: str(r, "出荷完了日"),
-    paymentMethod: str(r, "決済方法"),
-    matchStatus: str(r, "照合ステータス"),
+    recordId: s_(r, "id"),
+    date: s_(r, "ordered_on"),
+    customerName: s_(r, "customer_name"),
+    productName: s_(r, "product_name"),
+    amount: n_(r, "amount"),
+    quantity: n_(r, "quantity") || 1,
+    phone: s_(r, "phone"),
+    shippingStatus: s_(r, "ship_status"),
+    shippedAt: s_(r, "shipped_on"),
+    paymentMethod: s_(r, "payment_method"),
+    matchStatus: s_(r, "match_status"),
     agencyCode,
-    secondaryCode: str(r, "_2次代理店コード"),
+    secondaryCode: s_(r, "niji_code"),
     referrerCode: referrer,
-    trackingNo: str(r, "ヤマト送り状番号"),
+    trackingNo: s_(r, "tracking_no"),
     ownerCode: referrer || agencyCode,
   };
 }
 
-/** 1件の受注につき、指定ランクの人が受け取る単価。 */
-export function unitRewardFor(r: KintoneRecord, rank: string): number | null {
-  switch (rank) {
-    case "総販売代理店":
-      return num(r, "総販売代理店報酬用");
-    case "2次代理店":
-      return num(r, "_2次代理店報酬用");
-    case "取次店":
-      return num(r, "取次店報酬用");
-    default:
-      // 「販売代理店」ぶんの受け皿フィールドが App10 に無いため、金額を出せない。
-      return null;
-  }
+/**
+ * 1件の受注につき、指定ランクの人が受け取る単価。
+ *
+ * 単価は商品マスタ（products）に入っている。
+ * listOrders が受注1件ごとに単価を引いて行に載せてくるので、ここではそれを読むだけ。
+ * 商品名が商品マスタに無いときは null（金額を出さず、画面には「—」と出す）。
+ */
+export function unitRewardFor(r: Row, rank: string): number | null {
+  const key =
+    rank === "総販売代理店" ? "_unit_so"
+    : rank === "2次代理店" ? "_unit_niji"
+    : rank === "取次店" ? "_unit_toritsugi"
+    : rank === "販売代理店" ? "_unit_hanbai"
+    : "";
+  if (!key) return null;
+  const v = r[key];
+  return v === null || v === undefined ? null : Number(v);
 }
 
 export type OrderWithReward = Order & { unitReward: number | null; reward: number | null };
@@ -85,22 +81,46 @@ function monthRange(month: string): { from: string; to: string } {
 export async function listOrders(
   codes: string[],
   opts: OrderQuery = {},
-): Promise<{ orders: OrderWithReward[]; raw: KintoneRecord[] }> {
+): Promise<{ orders: OrderWithReward[]; raw: Row[] }> {
   const basisField = opts.basis === "shipped" ? "出荷完了日" : "日付";
   const conds: string[] = [];
   if (opts.month) {
     const { from, to } = monthRange(opts.month);
     conds.push(`${basisField} >= "${from}"`, `${basisField} <= "${to}"`);
   }
-  const query = `${conds.join(" and ")}${conds.length ? " " : ""}order by 日付 desc limit 500`;
-  const rows = await getRecords(APP.order, query, FIELDS);
+  // 自分に関係する受注だけをデータベース側で絞る。
+  const wanted = codes.map((c) => c.trim()).filter(Boolean);
+  if (wanted.length === 0) return { orders: [], raw: [] };
+  const list = inList(wanted);
 
-  const set = new Set(codes.filter(Boolean));
-  const matched = rows.filter((r) => {
-    const a = str(r, "代理店コード");
-    const s = str(r, "_2次代理店コード");
-    const t = str(r, "取次紹介コード");
-    return set.has(a) || set.has(s) || set.has(t);
+  const filters = [
+    `or=(agency_code.in.${list},niji_code.in.${list},referrer_code.in.${list})`,
+    "order=ordered_on.desc",
+  ];
+  if (opts.month) {
+    const { from, to } = monthRange(opts.month);
+    const col = opts.basis === "shipped" ? "shipped_on" : "ordered_on";
+    filters.push(`${col}=gte.${from}`, `${col}=lte.${to}`);
+  }
+  const [rows, products] = await Promise.all([
+    select<Row>(`orders?select=*&${filters.join("&")}`),
+    select<Row>("products?select=name,amount_so,amount_niji,amount_hanbai,amount_toritsugi,reward_target"),
+  ]);
+
+  // 商品名から単価を引けるようにする
+  const priceOf = new Map<string, Row>();
+  for (const p of products) priceOf.set(s_(p, "name"), p);
+
+  const matched = rows.map((r) => {
+    const p = priceOf.get(s_(r, "product_name"));
+    const off = !p || s_(p, "reward_target") === "対象外";
+    return {
+      ...r,
+      _unit_so: off ? null : p!["amount_so"] ?? null,
+      _unit_niji: off ? null : p!["amount_niji"] ?? null,
+      _unit_hanbai: off ? null : p!["amount_hanbai"] ?? null,
+      _unit_toritsugi: off ? null : p!["amount_toritsugi"] ?? null,
+    } as Row;
   });
 
   return { orders: matched.map(toOrder) as OrderWithReward[], raw: matched };
@@ -108,7 +128,7 @@ export async function listOrders(
 
 /** 受注一覧に、指定ランクでの報酬額を付ける。 */
 export function attachRewards(
-  raw: KintoneRecord[],
+  raw: Row[],
   rank: string,
 ): OrderWithReward[] {
   return raw.map((r) => {
@@ -185,5 +205,6 @@ export function effectiveRank(agency: Agency): string {
 
 /** そのランクで1台あたりの報酬額を出せるかどうか。受注が0件でも判定できる。 */
 export function canComputeReward(agency: Agency): boolean {
-  return unitRewardFor({}, effectiveRank(agency)) !== null;
+  // 商品マスタに4ランクぶんの単価があるので、どのランクでも計算できる。
+  return ["総販売代理店", "2次代理店", "取次店", "販売代理店"].includes(effectiveRank(agency));
 }

@@ -171,14 +171,16 @@ export default async function OrganizationPage() {
       ]);
       slots = s1;
       tree = t1;
-      if (slotModelOf(me) === "area") {
+      const model = slotModelOf(me);
+      if (model === "area") {
         // 総販売代理店の配下は統括代理店。全国60社のエリア枠で見る。
         const usage = areaUsage(await listAllAgencies());
         areaRows = usage.rows;
         areaTotal = usage.total;
-      } else {
+      } else if (model === "channel") {
         breakdown = breakdownSlots(me, direct, slotLimitsOf(me));
       }
+      // model === "none"（取次パートナー・スタッフ）は配下を持たないため枠を出さない
     }
   } catch (e) {
     loadError =
@@ -239,7 +241,8 @@ export default async function OrganizationPage() {
     <div className="space-y-6">
       {header}
 
-      {/* 枠 */}
+      {/* 枠。取次パートナーとスタッフは配下を持たないので出さない */}
+      {breakdown || areaRows ? (
       <Card
         title={areaRows ? "エリア枠（統括代理店）" : "配下の枠"}
         action={
@@ -290,6 +293,7 @@ export default async function OrganizationPage() {
           <SlotStateNotice slots={slots} />
         </div>
       </Card>
+      ) : null}
 
       {/* 組織図 */}
       <Card title="組織図">

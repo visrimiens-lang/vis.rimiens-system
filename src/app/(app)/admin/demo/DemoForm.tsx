@@ -307,15 +307,18 @@ export function DemoRow({
   machine,
   agencies,
   today,
-  overdue,
+  overdueDays,
   columnCount,
 }: {
   machine: DemoView;
   agencies: AgencyOption[];
   /** 日本時間の今日。貸出日・返却日の初期値に使う。 */
   today: string;
-  /** 返却予定日を過ぎているか。 */
-  overdue: boolean;
+  /**
+   * 返却予定日を何日過ぎているか。過ぎていなければ 0。
+   * 日数の計算は一覧側（page.tsx）でまとめて行っている。
+   */
+  overdueDays: number;
   /** 入力欄を表いっぱいに広げるための列数。 */
   columnCount: number;
 }) {
@@ -326,6 +329,7 @@ export function DemoRow({
   const listId = useId();
 
   const busy = saving || lending || returning;
+  const overdue = overdueDays > 0;
   const onLoan = machine.state === "貸出中";
   const canLend = machine.state !== "貸出中" && machine.state !== "廃棄";
   const canReturn = onLoan || (Boolean(machine.lendOn) && !machine.returnedOn);
@@ -344,26 +348,36 @@ export function DemoRow({
             <span className="tabnum font-medium text-ink-50">{machine.serialNo || "—"}</span>
             {machine.converted === "転用済" ? <Badge tone="gold">転用済</Badge> : null}
           </div>
-          {machine.acquiredKind || machine.acquiredOn ? (
-            <div className="mt-1 text-xs text-ink-400">
-              {machine.acquiredKind || "取得のしかた未設定"}
-              {machine.acquiredOn ? `　${fullDate(machine.acquiredOn)}` : ""}
+          {machine.acquiredOn ? (
+            <div className="tabnum mt-1 text-xs text-ink-400">
+              {fullDate(machine.acquiredOn)} 取得
             </div>
           ) : null}
         </Td>
         <Td>{machine.model || "—"}</Td>
+        {/* 取得区分（個人購入／デモ機購入／無料貸与）。
+            買っていただいた台か、本部からお預けしている台かで、返却のお願いのしかたが変わる。 */}
+        <Td>
+          {machine.acquiredKind ? (
+            <span className="whitespace-nowrap text-ink-200">{machine.acquiredKind}</span>
+          ) : (
+            <span className="text-ink-500">未設定</span>
+          )}
+        </Td>
         <Td>
           <Badge tone={stateTone(machine.state)}>{machine.state || "未設定"}</Badge>
         </Td>
+        {/* どの代理店の持ち物かを、責任者名とは別の列で出す。
+            責任者名だけでは、同じ苗字の方がいるとどちらの代理店か分からないため。 */}
         <Td>
-          <div className="min-w-0">
-            <div className="truncate text-ink-200">{machine.holderName || "—"}</div>
-            {machine.holderCode ? (
-              <div className="tabnum truncate text-xs text-ink-400">{machine.holderCode}</div>
-            ) : (
-              <div className="truncate text-xs text-ink-500">保有代理店コード未設定</div>
-            )}
-          </div>
+          {machine.holderCode ? (
+            <span className="tabnum whitespace-nowrap text-ink-200">{machine.holderCode}</span>
+          ) : (
+            <span className="text-ink-500">未設定</span>
+          )}
+        </Td>
+        <Td>
+          <div className="min-w-0 truncate text-ink-200">{machine.holderName || "—"}</div>
         </Td>
         <Td>
           <div className="min-w-0">
@@ -386,7 +400,7 @@ export function DemoRow({
               {fullDate(machine.returnDueOn)}
               {overdue ? (
                 <div className="mt-1 text-xs font-medium text-warn-500">
-                  返却予定日を過ぎています
+                  返却予定日を {overdueDays.toLocaleString("ja-JP")} 日超過
                 </div>
               ) : null}
             </>

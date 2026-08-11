@@ -46,7 +46,7 @@ import {
   yen,
 } from "@/components/ui";
 import { Progress } from "@/components/Progress";
-import { SlotGrid } from "./SlotGrid";
+import { rankLabel } from "@/lib/labels";
 
 /** 直近の受注1件。進み具合を出すために審査結果と配達完了日も持たせる。 */
 type RecentOrder = OrderWithReward & { reviewResult: string; deliveredOn: string };
@@ -58,9 +58,22 @@ const text = (r: Row, k: string): string => {
   return v === null || v === undefined ? "" : String(v);
 };
 
+/**
+ * 売上にも報酬の見込みにも数えない受注か。
+ *
+ * キャンセルされた受注と、信販の審査が通らなかった受注は入金にならない。
+ * 数に入れたままだと、月末に本部から届く金額と画面の金額が食い違う。
+ * 件数だけは別に出して、消えたことに気づけるようにする。
+ */
+function isStopped(r: Row): boolean {
+  return text(r, "ship_status") === "キャンセル" || text(r, "review_result") === "否決";
+}
+
 type Loaded = {
   self: Agency;
   summary: MonthlySummary;
+  /** 今月ぶんのうち、キャンセル・審査否決で集計から外した件数。 */
+  stoppedCount: number;
   slot: SlotSummary;
   breakdown: SlotBreakdownData;
   recent: RecentOrder[];
@@ -105,7 +118,9 @@ async function load(code: string, month: string): Promise<Loaded | null> {
     listOrders(codes),
   ]);
 
-  const orders = attachRewards(thisMonth.raw, effectiveRank(self));
+  // 今月ぶんの集計は、キャンセルと審査否決を除いた受注だけで行う。
+  const live = thisMonth.raw.filter((r) => !isStopped(r));
+  const orders = attachRewards(live, effectiveRank(self));
 
   // 審査結果とお客様の紐づけは Order には入っていないので、
   // 元の行から拾って進み具合の判定に回す。
@@ -150,6 +165,7 @@ async function load(code: string, month: string): Promise<Loaded | null> {
     breakdown,
     self,
     summary: summarize(orders, month),
+    stoppedCount: thisMonth.raw.length - live.length,
     slot,
     recent: latest.map((o) => ({
       ...o,
@@ -200,7 +216,7 @@ export default async function DashboardPage() {
     );
   }
 
-  const { self, summary, slot, breakdown, recent } = data;
+  const { self, summary, stoppedCount, slot, breakdown, recent } = data;
 
   // スタッフ（コード区分 02）には報酬の金額を出さない。
   // 2026-04-23 の打ち合わせで「金額が見えるのは親アカウントだけ」と決まっている。
@@ -212,14 +228,18 @@ export default async function DashboardPage() {
   const rewardAvailable = canComputeReward(self);
   const rankMissing = effectiveRank(self) === "";
   const rewardTotal = rewardAvailable ? summary.rewardTotal : null;
-  const rankLabel = self.rank || self.channel || "ランク未設定";
+
+  // 画面に出す呼び方は labels.ts に寄せる（データベースの値は「2次代理店」のまま）。
+  const rankText = rankLabel(self.rank || self.channel, self.codeKind);
+  // 報酬の単価を引くときのランク。販路種別が「販売代理店」ならそちらが使われる。
+  const rewardRankText = rankLabel(effectiveRank(self));
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="ダッシュボード"
         description={`${self.name}（${self.code}）／ ${jpMonthLabel(month)}の状況です。自分ぶんと配下ぶんを合わせて集計しています。`}
-        actions={<Badge tone="gold">{rankLabel}</Badge>}
+        actions={<Badge tone="gold">{rankText}</Badge>}
       />
 
       {/* 1. 今月の要約 */}
@@ -228,12 +248,18 @@ export default async function DashboardPage() {
           label="今月の受注"
           value={String(summary.orderCount)}
           unit="件"
-          hint={`${summary.unitCount}台 ／ 出荷済 ${summary.shippedCount}件`}
+          hint={`${summary.unitCount}台 ／ 出荷済 ${summary.shippedCount}件${
+            stoppedCount > 0 ? ` ／ 中止 ${stoppedCount}件は除く` : ""
+          }`}
         />
         <StatTile
           label="今月の売上"
           value={yen(summary.salesTotal)}
-          hint="ご自身と配下の販売金額の合計"
+          hint={
+            stoppedCount > 0
+              ? "ご自身と配下の販売金額の合計（中止ぶんを除く）"
+              : "ご自身と配下の販売金額の合計"
+          }
         />
         {showReward ? (
           <StatTile
@@ -242,7 +268,7 @@ export default async function DashboardPage() {
             tone="gold"
             hint={
               rewardAvailable
-                ? `${rankLabel}としての単価 × 台数。確定額は本部の締め後に確定します。`
+                ? `${rewardRankText}としての単価 × 台数。確定額は本部の締め後に確定します。`
                 : "単価が未設定のため計算できません"
             }
           />
@@ -277,6 +303,19 @@ export default async function DashboardPage() {
           この画面では、件数と売上金額、配送の進み具合のみ表示しています。
         </Notice>
       )}
+
+      {stoppedCount > 0 ? (
+        <Notice tone="warn">
+          今月の受注のうち {stoppedCount} 件は、キャンセルまたは信販の審査が通らなかったため、
+          上の件数・売上{showReward ? "・報酬見込み" : ""}には数えていません。
+          <Link
+            href="/customers"
+            className="ml-1.5 font-medium underline underline-offset-2 hover:text-gold-300"
+          >
+            顧客一覧で内容を確認する
+          </Link>
+        </Notice>
+      ) : null}
 
       {/* 2. 枠の状況 */}
       <Card

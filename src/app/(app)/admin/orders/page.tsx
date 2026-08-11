@@ -1,13 +1,16 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import { listAllAgencies } from "@/lib/agencies";
 import { select } from "@/lib/db";
+import { rankLabel } from "@/lib/labels";
 import { currentMonth, recentMonths, unitRewardFor } from "@/lib/orders";
 import {
   ALL,
   buildListHref,
   buildOptions,
+  digitsOf,
   matchesKeyword,
   parseSort,
   readParam,
@@ -55,6 +58,20 @@ export const metadata = { title: "受注一覧（本部）｜VIS 代理店ポー
  * この画面だけは絞り込みなしで取得する。lib 側は変更しない。
  * ------------------------------------------------------------------ */
 
+/**
+ * 一度に読み込む上限。
+ *
+ * 保存先（Supabase）は、こちらが件数を指定しないと既定の 1,000 行で勝手に打ち切る。
+ * 打ち切られたことは黙って起きるので、上限をこちらから明示して、
+ * 取れた件数が上限に達していたら「全部は出ていない」と分かるようにしておく。
+ * これを怠ると、売上合計・支払対象額・代理店ごとの集計が
+ * 何の断りもなく少なく出てしまう。
+ *
+ * 保存先の既定と同じ 1,000 にそろえてある（顧客管理の画面と同じ考え方）。
+ * ここだけ大きくしても保存先側で切られ、上限に達したことに気づけなくなる。
+ */
+const LIMIT = 1000;
+
 /** App10「出荷状況」の選択肢。受注が1件も無い状態でも絞り込めるように持っておく。 */
 const SHIPPING_STATUSES = ["出荷待ち", "出荷手配中", "出荷済", "キャンセル"];
 
@@ -80,28 +97,58 @@ const PAYMENT_METHODS = [
 ];
 const MATCH_STATUSES = ["照合済", "要確認", "直販"];
 
-/** 並び替えに使える列。 */
+/** 並び替えに使える列。過去に配った URL が効かなくならないよう、名前は変えない。 */
 const SORT_COLUMNS = [
   "date",
   "customer",
   "product",
   "quantity",
   "amount",
+  "payment",
   "payee",
+  "staff",
   "owner",
   "ship",
+  "tracking",
   "match",
 ];
 
 const DEFAULT_SORT: SortState = { column: "date", desc: true };
 
-const PAGE_SIZE = 500;
-const MAX_PAGES = 5;
+/* ------------------------------------------------------------------
+ * 毎朝の作業をひと押しで出すための絞り込み。
+ *
+ * 出荷の手配と送り状番号の記入は本部が毎朝まとめて行うので、
+ * 「未出荷」「送り状番号がまだ」は選び直しの操作なしで開けるようにする。
+ * どちらも過去の月に取り残された受注こそ見落としたくないため、
+ * 期間を「全期間」に切り替えたうえで絞り込む。
+ * ------------------------------------------------------------------ */
+const TODO_UNSHIPPED = "unshipped";
+const TODO_NO_TRACKING = "notracking";
+const TODO_VOIDED = "voided";
+const TODO_VALUES = [TODO_UNSHIPPED, TODO_NO_TRACKING, TODO_VOIDED];
+const TODO_LABELS: Record<string, string> = {
+  [TODO_UNSHIPPED]: "未出荷のものだけ",
+  [TODO_NO_TRACKING]: "送り状番号がまだのものだけ",
+  [TODO_VOIDED]: "キャンセル・審査否決だけ",
+};
+
+/** ヤマト運輸の追跡ページ。番号は数字だけにして渡す。 */
+function trackingUrl(trackingNo: string): string {
+  const digits = digitsOf(trackingNo) || trackingNo;
+  return `https://toi.kuronekoyamato.co.jp/cgi-bin/tneko?number00=1&number01=${encodeURIComponent(digits)}`;
+}
 
 type AdminOrder = Order & {
   /** ゼロ次代理店コード（集計用） */
   zeroCode: string;
-  /** 2次代理店に支払う1台あたりの金額。受注に入っていなければ null。 */
+  /** 売ったスタッフのコード（代理店マスタのコード区分 02） */
+  staffCode: string;
+  /** 信販の審査結果（承認／否決／電話確認待ち） */
+  reviewResult: string;
+  /** キャンセル・審査否決。売上にも報酬にも数えない受注。 */
+  voided: boolean;
+  /** エリア統括代理店（データベース上の2次代理店）に支払う1台あたりの金額。受注に入っていなければ null。 */
   secondaryUnit: number | null;
   /** 上記 × 台数。算出できなければ null。 */
   secondaryTotal: number | null;
@@ -122,7 +169,10 @@ function toAdminOrder(r: Row): AdminOrder {
   const agencyCode = str(r, "agency_code");
   const quantity = num(r, "quantity") || 1;
   // 空欄と 0 円は意味が違う。空欄なら「まだ決まっていない」ので金額を出さない。
+  // 単価の引き先はデータベースの値（"2次代理店"）で選ぶ。画面の呼び方では引かない。
   const unit = unitRewardFor(r, "2次代理店");
+  const shippingStatus = str(r, "ship_status");
+  const reviewResult = str(r, "review_result");
   return {
     recordId: str(r, "id"),
     date: str(r, "ordered_on"),
@@ -131,7 +181,7 @@ function toAdminOrder(r: Row): AdminOrder {
     amount: num(r, "amount"),
     quantity,
     phone: str(r, "phone"),
-    shippingStatus: str(r, "ship_status"),
+    shippingStatus,
     shippedAt: str(r, "shipped_on"),
     paymentMethod: str(r, "payment_method"),
     matchStatus: str(r, "match_status"),
@@ -141,6 +191,9 @@ function toAdminOrder(r: Row): AdminOrder {
     trackingNo: str(r, "tracking_no"),
     ownerCode: referrer || agencyCode,
     zeroCode: str(r, "zeroth_code"),
+    staffCode: str(r, "staff_code"),
+    reviewResult,
+    voided: shippingStatus === "キャンセル" || reviewResult === "否決",
     secondaryUnit: unit,
     secondaryTotal: unit === null ? null : unit * quantity,
   };
@@ -163,6 +216,7 @@ async function fetchAllOrders(
     const { from, to } = monthRange(month);
     filters.push(`ordered_on=gte.${from}`, `ordered_on=lte.${to}`);
   }
+  filters.push(`limit=${LIMIT}`);
   const [rows, products] = await Promise.all([
     select<Row>(`orders?select=*&${filters.join("&")}`),
     select<Row>("products?select=name,amount_so,amount_niji,amount_hanbai,amount_toritsugi,reward_target"),
@@ -181,19 +235,20 @@ async function fetchAllOrders(
       _unit_toritsugi: off ? null : p!["amount_toritsugi"] ?? null,
     } as Row;
   });
-  return { rows: enriched.map(toAdminOrder), truncated: false };
+  // 上限ぴったりまで取れたときは、その先にまだ受注が残っている可能性がある。
+  return { rows: enriched.map(toAdminOrder), truncated: rows.length >= LIMIT };
 }
 
 /** 受注に記録されている代理店コードすべて（重複を除く）。 */
 function codesOf(o: AdminOrder): string[] {
-  return [...new Set([o.agencyCode, o.secondaryCode, o.referrerCode, o.zeroCode])].filter(
-    Boolean,
-  );
+  return [
+    ...new Set([o.agencyCode, o.secondaryCode, o.referrerCode, o.zeroCode, o.staffCode]),
+  ].filter(Boolean);
 }
 
 /**
  * 集計・振込確認のまとめ先。
- * 受注には集計用の「2次代理店コード」が入るので、まずそれを使う。
+ * 受注には集計用の「2次代理店コード」（画面では エリア統括代理店）が入るので、まずそれを使う。
  * 入っていない受注は、受注に記録された代理店コードでまとめる。
  */
 function payeeCodeOf(o: AdminOrder): string {
@@ -207,6 +262,9 @@ type AgencyTotals = {
   units: number;
   sales: number;
   payable: number | null;
+  /** キャンセル・審査否決の件数と金額。上の集計には入れず、ここだけに出す。 */
+  voidedCount: number;
+  voidedSales: number;
 };
 
 function sumPayable(rows: AdminOrder[]): number | null {
@@ -218,6 +276,13 @@ function sumPayable(rows: AdminOrder[]): number | null {
   return total;
 }
 
+/**
+ * 代理店ごとにまとめる。
+ *
+ * キャンセルと審査否決の受注は、売上・台数・支払対象額のどれにも足さない。
+ * ただし行そのものは消さずに「取消」の列で件数と金額を見せる。
+ * 消してしまうと、取り消しばかりの代理店が表から丸ごと消えて気づけなくなるため。
+ */
 function groupByPayee(rows: AdminOrder[], names: Map<string, string>): AgencyTotals[] {
   const buckets = new Map<string, AdminOrder[]>();
   for (const r of rows) {
@@ -227,14 +292,20 @@ function groupByPayee(rows: AdminOrder[], names: Map<string, string>): AgencyTot
     buckets.set(key, list);
   }
   return [...buckets.entries()]
-    .map(([code, list]) => ({
-      code,
-      name: names.get(code) ?? "",
-      orderCount: list.length,
-      units: list.reduce((s, r) => s + (r.quantity || 1), 0),
-      sales: list.reduce((s, r) => s + r.amount, 0),
-      payable: sumPayable(list),
-    }))
+    .map(([code, list]) => {
+      const live = list.filter((r) => !r.voided);
+      const voided = list.filter((r) => r.voided);
+      return {
+        code,
+        name: names.get(code) ?? "",
+        orderCount: live.length,
+        units: live.reduce((s, r) => s + (r.quantity || 1), 0),
+        sales: live.reduce((s, r) => s + r.amount, 0),
+        payable: sumPayable(live),
+        voidedCount: voided.length,
+        voidedSales: voided.reduce((s, r) => s + r.amount, 0),
+      };
+    })
     .sort((a, b) => b.units - a.units || b.sales - a.sales || a.code.localeCompare(b.code));
 }
 
@@ -251,6 +322,32 @@ function orderDate(v: string, withYear: boolean): string {
   return withYear ? `${v.slice(0, 4)}/${jpDate(v)}` : jpDate(v);
 }
 
+/** 毎朝の作業をひと押しで開くためのリンク。押されている間は色を変える。 */
+function QuickFilter({
+  href,
+  active,
+  children,
+}: {
+  href: string;
+  active: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      className={cn(
+        "rounded-lg border px-3 py-1.5 text-xs font-medium transition",
+        active
+          ? "border-gold-500/60 bg-gold-500/15 text-gold-300"
+          : "border-ink-700 bg-ink-850 text-ink-200 hover:border-ink-600 hover:text-ink-50",
+      )}
+    >
+      {children}
+      {active ? "（解除する）" : null}
+    </Link>
+  );
+}
+
 export default async function AdminOrdersPage({
   searchParams,
 }: {
@@ -260,6 +357,7 @@ export default async function AdminOrdersPage({
     ship?: string;
     pay?: string;
     match?: string;
+    todo?: string;
     keyword?: string;
     sort?: string;
     dir?: string;
@@ -278,6 +376,8 @@ export default async function AdminOrdersPage({
   const selectedShip = readParam(params, "ship") || ALL;
   const selectedPay = readParam(params, "pay") || ALL;
   const selectedMatch = readParam(params, "match") || ALL;
+  const rawTodo = readParam(params, "todo");
+  const todo = TODO_VALUES.includes(rawTodo) ? rawTodo : "";
   const keyword = readParam(params, "keyword");
   const sort = parseSort(params, DEFAULT_SORT, SORT_COLUMNS);
   const allPeriod = month === "all";
@@ -306,7 +406,7 @@ export default async function AdminOrdersPage({
   const header = (
     <PageHeader
       title="受注一覧（全代理店）"
-      description="全代理店の受注をまとめて確認できます。期間・代理店・出荷状況・決済方法・照合状態で絞り込め、注文者名や送り状番号でも探せます。表の見出しを押すと並び替わります。"
+      description="全代理店の受注をまとめて確認できます。期間・代理店・出荷状況・決済方法・照合状態で絞り込め、注文者名や送り状番号でも探せます。表の見出しを押すと並び替わります。キャンセルと審査否決の受注は、売上・支払対象額には数えていません。"
     />
   );
 
@@ -374,6 +474,11 @@ export default async function AdminOrdersPage({
     if (selectedShip !== ALL && o.shippingStatus !== selectedShip) return false;
     if (selectedPay !== ALL && o.paymentMethod !== selectedPay) return false;
     if (selectedMatch !== ALL && o.matchStatus !== selectedMatch) return false;
+    // 未出荷・送り状番号なしは「これから手を動かすもの」なので、
+    // 取り消された受注は最初から外す。
+    if (todo === TODO_UNSHIPPED && (o.voided || o.shippingStatus === "出荷済")) return false;
+    if (todo === TODO_NO_TRACKING && (o.voided || o.trackingNo)) return false;
+    if (todo === TODO_VOIDED && !o.voided) return false;
     if (!matchesKeyword(keyword, [o.customerName, o.trackingNo])) return false;
     return true;
   });
@@ -385,9 +490,12 @@ export default async function AdminOrdersPage({
     product: (o) => o.productName,
     quantity: (o) => o.quantity || 1,
     amount: (o) => o.amount,
+    payment: (o) => o.paymentMethod,
     payee: (o) => payeeCodeOf(o),
+    staff: (o) => o.staffCode,
     owner: (o) => o.ownerCode,
     ship: (o) => o.shippingStatus,
+    tracking: (o) => o.trackingNo,
     match: (o) => o.matchStatus,
   };
   const rows = sortRows(filteredRows, sort.column, sort.desc, accessors);
@@ -397,21 +505,40 @@ export default async function AdminOrdersPage({
     selectedShip !== ALL ||
     selectedPay !== ALL ||
     selectedMatch !== ALL ||
+    Boolean(todo) ||
     Boolean(keyword);
   const clearHref = buildListHref(BASE, params, {
     code: "",
     ship: "",
     pay: "",
     match: "",
+    todo: "",
     keyword: "",
   });
 
-  const orderCount = rows.length;
-  const unitTotal = rows.reduce((s, o) => s + (o.quantity || 1), 0);
-  const salesTotal = rows.reduce((s, o) => s + o.amount, 0);
-  const shippedCount = rows.filter((o) => o.shippingStatus === "出荷済").length;
-  const payableTotal = sumPayable(rows);
-  const needsCheck = rows.filter((o) => o.matchStatus === "要確認");
+  /** ひと押しの絞り込み。期間は「全期間」にする（先月の取り残しを見落とさないため）。 */
+  const todoHref = (value: string): string =>
+    todo === value
+      ? buildListHref(BASE, params, { todo: "" })
+      : buildListHref(BASE, params, { todo: value, month: "all" });
+
+  /* --- 集計はキャンセル・審査否決を除いて行う --- */
+  const liveRows = rows.filter((o) => !o.voided);
+  const voidedRows = rows.filter((o) => o.voided);
+  const displayCount = rows.length;
+  const orderCount = liveRows.length;
+  const unitTotal = liveRows.reduce((s, o) => s + (o.quantity || 1), 0);
+  const salesTotal = liveRows.reduce((s, o) => s + o.amount, 0);
+  const shippedCount = liveRows.filter((o) => o.shippingStatus === "出荷済").length;
+  const payableTotal = sumPayable(liveRows);
+  const voidedCount = voidedRows.length;
+  const voidedSales = voidedRows.reduce((s, o) => s + o.amount, 0);
+  const cancelledCount = voidedRows.filter((o) => o.shippingStatus === "キャンセル").length;
+  const rejectedCount = voidedRows.filter(
+    (o) => o.reviewResult === "否決" && o.shippingStatus !== "キャンセル",
+  ).length;
+  const needsCheck = liveRows.filter((o) => o.matchStatus === "要確認");
+  const noTracking = liveRows.filter((o) => !o.trackingNo).length;
   const groups = groupByPayee(rows, nameByCode);
   const missingPayable = groups.some((g) => g.payable === null);
   const selectedName = selectedCode === ALL ? "" : (nameByCode.get(selectedCode) ?? "");
@@ -422,6 +549,7 @@ export default async function AdminOrdersPage({
     selectedShip === ALL ? null : selectedShip,
     selectedPay === ALL ? null : selectedPay,
     selectedMatch === ALL ? null : selectedMatch,
+    todo ? TODO_LABELS[todo] : null,
     keyword ? `「${keyword}」` : null,
   ]
     .filter(Boolean)
@@ -434,7 +562,11 @@ export default async function AdminOrdersPage({
       <Card>
         <FilterBar
           action={BASE}
-          hidden={{ sort: sort.column, dir: sort.desc ? "desc" : "asc" }}
+          hidden={{
+            sort: sort.column,
+            dir: sort.desc ? "desc" : "asc",
+            todo: todo || undefined,
+          }}
         >
           <FilterSelect
             name="month"
@@ -482,35 +614,55 @@ export default async function AdminOrdersPage({
           />
           <FilterActions clearHref={clearHref} filtered={isFiltered} />
         </FilterBar>
+
+        <div className="flex flex-wrap items-center gap-2 border-t border-ink-800 px-5 py-3.5">
+          <span className="text-xs text-ink-400">毎朝の確認：</span>
+          <QuickFilter href={todoHref(TODO_UNSHIPPED)} active={todo === TODO_UNSHIPPED}>
+            未出荷のものだけ
+          </QuickFilter>
+          <QuickFilter href={todoHref(TODO_NO_TRACKING)} active={todo === TODO_NO_TRACKING}>
+            送り状番号がまだのものだけ
+          </QuickFilter>
+          <QuickFilter href={todoHref(TODO_VOIDED)} active={todo === TODO_VOIDED}>
+            キャンセル・審査否決だけ
+          </QuickFilter>
+          <span className="text-xs text-ink-500">
+            押すと期間が「全期間」に変わり、先月までの取り残しも一緒に出ます。
+          </span>
+        </div>
       </Card>
 
       {isFiltered ? (
         <FilterSummary
           total={periodOrders.length}
-          shown={rows.length}
+          shown={displayCount}
           clearHref={clearHref}
           note={`${periodLabel}の受注のうち`}
         />
       ) : null}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <StatTile
           label="受注件数"
           value={orderCount.toLocaleString("ja-JP")}
           unit="件"
-          hint={filterLabel}
+          hint={
+            voidedCount > 0
+              ? `${filterLabel}（キャンセル・否決 ${voidedCount} 件を除く）`
+              : filterLabel
+          }
         />
         <StatTile
           label="台数"
           value={unitTotal.toLocaleString("ja-JP")}
           unit="台"
-          hint="数量の合計"
+          hint="キャンセル・否決を除いた数量の合計"
         />
         <StatTile
           label="売上合計"
           value={yen(salesTotal)}
           tone="gold"
-          hint="お客様のお支払額の合計"
+          hint="お客様のお支払額の合計（キャンセル・否決を除く）"
         />
         <StatTile
           label="出荷済"
@@ -522,12 +674,43 @@ export default async function AdminOrdersPage({
               : "出荷が終わった受注の数"
           }
         />
+        <StatTile
+          label="キャンセル・審査否決"
+          value={voidedCount.toLocaleString("ja-JP")}
+          unit="件"
+          tone={voidedCount > 0 ? "warn" : "default"}
+          hint={
+            voidedCount > 0
+              ? `${yen(voidedSales)} 分を売上・支払対象額から外しています`
+              : "取り消された受注はありません"
+          }
+        />
       </div>
+
+      {voidedCount > 0 ? (
+        <Notice tone="warn">
+          {filterLabel}の受注のうち {voidedCount} 件（{yen(voidedSales)}）は、
+          {cancelledCount > 0 ? `キャンセル ${cancelledCount} 件` : ""}
+          {cancelledCount > 0 && rejectedCount > 0 ? "・" : ""}
+          {rejectedCount > 0 ? `審査否決 ${rejectedCount} 件` : ""}
+          のため、売上合計・支払対象額・代理店ごとの集計には数えていません。
+          下の表には残していますが、行の色を変えて取り消し済みと分かるようにしています。
+          <br />
+          <Link
+            href={todoHref(TODO_VOIDED)}
+            className="underline underline-offset-4 hover:text-warn-100"
+          >
+            取り消された受注だけを表示する
+          </Link>
+        </Notice>
+      ) : null}
 
       {truncated ? (
         <Notice tone="warn">
-          件数が多いため、受注日の新しい順に 2,500 件までを表示しています。
-          期間を月で絞り込むと、そのぶんはすべて表示されます。
+          件数が多いため、受注日の新しい順に {LIMIT.toLocaleString("ja-JP")} 件までを読み込んでいます。
+          上の受注件数・台数・売上合計と、代理店ごとの集計・支払対象額も、この
+          {LIMIT.toLocaleString("ja-JP")} 件ぶんだけを数えた金額です。
+          振込の金額を確かめるときは、期間を月で絞り込んでからご覧ください。
         </Notice>
       ) : null}
 
@@ -562,6 +745,7 @@ export default async function AdminOrdersPage({
                 <Th align="right">台数</Th>
                 <Th align="right">売上</Th>
                 <Th align="right">支払対象額</Th>
+                <Th align="right">取消（集計外）</Th>
               </tr>
             </thead>
             <tbody>
@@ -589,6 +773,18 @@ export default async function AdminOrdersPage({
                   <Td numeric align="right" className="text-gold-300">
                     {yen(g.payable)}
                   </Td>
+                  <Td numeric align="right" className="whitespace-nowrap text-bad-100">
+                    {g.voidedCount > 0 ? (
+                      <>
+                        {g.voidedCount.toLocaleString("ja-JP")} 件
+                        <span className="ml-1 text-xs text-ink-400">
+                          （{yen(g.voidedSales)}）
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-ink-500">—</span>
+                    )}
+                  </Td>
                 </tr>
               ))}
             </tbody>
@@ -608,6 +804,16 @@ export default async function AdminOrdersPage({
                 <Td numeric align="right" className="font-semibold text-gold-400">
                   {yen(payableTotal)}
                 </Td>
+                <Td numeric align="right" className="whitespace-nowrap font-semibold text-bad-100">
+                  {voidedCount > 0 ? (
+                    <>
+                      {voidedCount.toLocaleString("ja-JP")} 件
+                      <span className="ml-1 text-xs text-ink-400">（{yen(voidedSales)}）</span>
+                    </>
+                  ) : (
+                    <span className="text-ink-500">—</span>
+                  )}
+                </Td>
               </tr>
             </tfoot>
           </Table>
@@ -616,7 +822,7 @@ export default async function AdminOrdersPage({
 
       {missingPayable ? (
         <Notice tone="warn">
-          2次代理店ぶんの1台あたりの金額が入っていない受注があるため、支払対象額を出せない代理店があります。
+          {rankLabel("2次代理店")}ぶんの1台あたりの金額が入っていない受注があるため、支払対象額を出せない代理店があります。
           商品マスタの単価が受注に反映されているかご確認ください。金額が確かめられないところは「—」と表示しています。
         </Notice>
       ) : null}
@@ -625,11 +831,13 @@ export default async function AdminOrdersPage({
         title={`受注明細（${filterLabel}）`}
         action={
           <span className="text-xs text-ink-400">
-            {orderCount.toLocaleString("ja-JP")} 件・見出しを押すと並び替えられます
+            {displayCount.toLocaleString("ja-JP")} 件
+            {voidedCount > 0 ? `（うち取り消し ${voidedCount} 件）` : ""}
+            ・見出しを押すと並び替えられます
           </span>
         }
       >
-        {orderCount === 0 ? (
+        {displayCount === 0 ? (
           <EmptyState
             title={
               isFiltered ? "条件に合うものがありません" : "この期間の受注はまだありません"
@@ -643,6 +851,7 @@ export default async function AdminOrdersPage({
                     selectedShip === ALL ? null : `出荷状況「${selectedShip}」`,
                     selectedPay === ALL ? null : `決済方法「${selectedPay}」`,
                     selectedMatch === ALL ? null : `照合状態「${selectedMatch}」`,
+                    todo ? TODO_LABELS[todo] : null,
                     keyword ? `キーワード「${keyword}」` : null,
                   ]
                     .filter(Boolean)
@@ -655,22 +864,31 @@ export default async function AdminOrdersPage({
             <thead>
               <tr>
                 <SortableTh column="date" label="受注日" sort={sort} basePath={BASE} params={params} />
-                <SortableTh column="customer" label="注文者名" sort={sort} basePath={BASE} params={params} />
-                <SortableTh column="product" label="商品名" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="customer" label="注文者" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="product" label="商品" sort={sort} basePath={BASE} params={params} />
                 <SortableTh column="quantity" label="台数" sort={sort} basePath={BASE} params={params} align="right" />
                 <SortableTh column="amount" label="金額" sort={sort} basePath={BASE} params={params} align="right" />
-                <SortableTh column="payee" label="代理店コード" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="payment" label="決済方法" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="payee" label="代理店" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="staff" label="担当スタッフ" sort={sort} basePath={BASE} params={params} />
                 <SortableTh column="owner" label="担当コード" sort={sort} basePath={BASE} params={params} />
                 <SortableTh column="ship" label="出荷状況" sort={sort} basePath={BASE} params={params} />
-                <SortableTh column="match" label="照合ステータス" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="tracking" label="送り状番号" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="match" label="照合状態" sort={sort} basePath={BASE} params={params} />
               </tr>
             </thead>
             <tbody>
               {rows.map((o) => {
                 const payee = payeeCodeOf(o);
-                const attention = o.matchStatus === "要確認";
+                const attention = !o.voided && o.matchStatus === "要確認";
                 return (
-                  <tr key={o.recordId} className={cn(attention && "bg-warn-500/10")}>
+                  <tr
+                    key={o.recordId}
+                    className={cn(
+                      o.voided && "bg-bad-500/10",
+                      attention && "bg-warn-500/10",
+                    )}
+                  >
                     <Td numeric className="whitespace-nowrap">
                       {orderDate(o.date, allPeriod)}
                     </Td>
@@ -686,8 +904,15 @@ export default async function AdminOrdersPage({
                     <Td numeric align="right">
                       {(o.quantity || 1).toLocaleString("ja-JP")}
                     </Td>
-                    <Td numeric align="right">
+                    <Td
+                      numeric
+                      align="right"
+                      className={cn("whitespace-nowrap", o.voided && "text-ink-500 line-through")}
+                    >
                       {yen(o.amount)}
+                    </Td>
+                    <Td className="whitespace-nowrap">
+                      {o.paymentMethod || <span className="text-ink-400">—</span>}
                     </Td>
                     <Td>
                       {payee ? (
@@ -701,11 +926,43 @@ export default async function AdminOrdersPage({
                         <Badge tone="warn">コードなし</Badge>
                       )}
                     </Td>
+                    <Td>
+                      {o.staffCode ? (
+                        <div className="min-w-0">
+                          <div className="tabnum truncate text-ink-100">{o.staffCode}</div>
+                          <div className="truncate text-xs text-ink-400">
+                            {nameByCode.get(o.staffCode) ?? "代理店マスタに該当なし"}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-ink-400">—</span>
+                      )}
+                    </Td>
                     <Td numeric className="whitespace-nowrap">
                       {o.ownerCode || <span className="text-ink-400">—</span>}
                     </Td>
                     <Td>
                       <StatusBadge status={o.shippingStatus} />
+                      {o.reviewResult === "否決" ? (
+                        <div className="mt-1">
+                          <Badge tone="bad">審査否決</Badge>
+                        </div>
+                      ) : null}
+                    </Td>
+                    <Td numeric className="whitespace-nowrap">
+                      {o.trackingNo ? (
+                        <a
+                          href={trackingUrl(o.trackingNo)}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="ヤマト運輸の追跡ページを開きます"
+                          className="underline underline-offset-4 hover:text-gold-300"
+                        >
+                          {o.trackingNo}
+                        </a>
+                      ) : (
+                        <span className="text-ink-400">未入力</span>
+                      )}
                     </Td>
                     <Td>
                       <StatusBadge status={o.matchStatus} />
@@ -717,10 +974,12 @@ export default async function AdminOrdersPage({
             <tfoot>
               <tr>
                 <Td className="font-semibold text-ink-100">合計</Td>
-                <Td className="font-semibold text-ink-100">
+                <Td className="whitespace-nowrap font-semibold text-ink-100">
                   {orderCount.toLocaleString("ja-JP")}件
                 </Td>
-                <Td>{null}</Td>
+                <Td className="text-xs text-ink-400">
+                  {voidedCount > 0 ? "キャンセル・否決を除く" : null}
+                </Td>
                 <Td numeric align="right" className="font-semibold text-ink-50">
                   {unitTotal.toLocaleString("ja-JP")}
                 </Td>
@@ -731,16 +990,43 @@ export default async function AdminOrdersPage({
                 <Td>{null}</Td>
                 <Td>{null}</Td>
                 <Td>{null}</Td>
+                <Td>{null}</Td>
+                <Td className="whitespace-nowrap text-xs text-ink-400">
+                  {noTracking > 0 ? `未入力 ${noTracking.toLocaleString("ja-JP")} 件` : null}
+                </Td>
+                <Td>{null}</Td>
               </tr>
+              {voidedCount > 0 ? (
+                <tr>
+                  <Td className="text-bad-100">うち取り消し</Td>
+                  <Td className="whitespace-nowrap text-bad-100">
+                    {voidedCount.toLocaleString("ja-JP")}件
+                  </Td>
+                  <Td className="text-xs text-ink-400">キャンセル・審査否決</Td>
+                  <Td>{null}</Td>
+                  <Td numeric align="right" className="whitespace-nowrap text-bad-100 line-through">
+                    {yen(voidedSales)}
+                  </Td>
+                  <Td>{null}</Td>
+                  <Td>{null}</Td>
+                  <Td>{null}</Td>
+                  <Td>{null}</Td>
+                  <Td>{null}</Td>
+                  <Td>{null}</Td>
+                  <Td>{null}</Td>
+                </tr>
+              ) : null}
             </tfoot>
           </Table>
         )}
       </Card>
 
       <Notice tone="info">
-        代理店コードは、受注に記録された集計用の2次代理店コードです。入っていない受注は、受注に記録された代理店コードでまとめています。
+        代理店は、受注に記録された集計用の{rankLabel("2次代理店")}コードです。入っていない受注は、受注に記録された代理店コードでまとめています。
         担当コードは、取次の紹介コードがある受注ではそのコード、無い受注では代理店コードです。
-        支払対象額は「2次代理店ぶんの1台あたりの金額 × 台数」で計算しています。
+        支払対象額は「{rankLabel("2次代理店")}ぶんの1台あたりの金額 × 台数」で計算しています。
+        キャンセルと審査否決の受注は、売上・台数・支払対象額のどれにも数えていません（表では行の色を変えて残しています）。
+        送り状番号を押すと、ヤマト運輸の追跡ページが別のタブで開きます。
       </Notice>
     </div>
   );

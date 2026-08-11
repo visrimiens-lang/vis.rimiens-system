@@ -31,7 +31,33 @@ import {
   Th,
   cn,
 } from "@/components/ui";
+import {
+  buildListHref,
+  matchesKeyword,
+  parseSort,
+  readParam,
+  sortRows,
+  type Accessors,
+  type SearchParams,
+  type SortState,
+} from "@/lib/list-params";
+import {
+  FilterActions,
+  FilterBar,
+  FilterSummary,
+  FilterText,
+  SortableTh,
+} from "@/components/SortableTh";
+import { channelLabel, codeKindLabel, rankShort, statusTone } from "@/lib/labels";
 import { SlotRequestButton } from "./SlotRequestButton";
+
+const BASE = "/organization";
+
+/** 見出しを押して並び替えられる列。 */
+const SORT_COLUMNS = ["code", "name", "rank", "kind", "status", "email", "phone", "parent"];
+
+/** 既定はコードの若い順（組織図と同じ並び）。 */
+const DEFAULT_SORT: SortState = { column: "", desc: false };
 
 /* ---------- 組織図を「行＋深さ」に平らにする ---------- */
 
@@ -41,13 +67,6 @@ function flatten(node: OrgNode, depth = 0, out: Row[] = []): Row[] {
   out.push({ agency: node.agency, depth });
   for (const child of node.children) flatten(child, depth + 1, out);
   return out;
-}
-
-function kindLabel(a: Agency): string {
-  if (a.codeKind === "00") return "販売代理店";
-  if (a.codeKind === "01") return "取次パートナー";
-  if (a.codeKind === "02") return "スタッフ";
-  return "区分未設定";
 }
 
 /* ---------- 枠の状態メッセージ ---------- */
@@ -78,78 +97,32 @@ function SlotStateNotice({ slots }: { slots: SlotSummary }) {
   if (slots.isOver) {
     return (
       <Notice tone="warn">
-        枠がすべて埋まっています。新しく販売代理店を登録するには、増枠のお申し込みが必要です。
+        枠がすべて埋まっています。新しく{codeKindLabel("00")}（コード区分00）を登録するには、増枠のお申し込みが必要です。
       </Notice>
     );
   }
   return null;
 }
 
-/* ---------- 枠のマス ---------- */
-
-function SlotGrid({ slots }: { slots: SlotSummary }) {
-  const total = Math.max(slots.limit, slots.used);
-  const cells = Array.from({ length: total }, (_, i) => i);
-
-  return (
-    <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-      {cells.map((i) => {
-        const member = slots.members[i];
-        const overflow = i >= slots.limit;
-
-        if (!member) {
-          return (
-            <li
-              key={`empty-${i}`}
-              className="rounded-lg border border-dashed border-ink-700 px-3 py-3 text-center"
-            >
-              <div className="text-sm text-ink-400">空き</div>
-              <div className="tabnum mt-0.5 text-[11px] text-ink-600">{i + 1} 枠目</div>
-            </li>
-          );
-        }
-
-        return (
-          <li
-            key={member.code || `filled-${i}`}
-            className={cn(
-              "rounded-lg border px-3 py-3",
-              overflow
-                ? "border-warn-500/40 bg-warn-500/10"
-                : "border-gold-500/35 bg-gold-500/10",
-            )}
-            title={member.name}
-          >
-            <div className="truncate text-sm font-medium text-ink-50">
-              {member.name || "（名称未登録）"}
-            </div>
-            <div
-              className={cn(
-                "tabnum mt-0.5 truncate text-[11px]",
-                overflow ? "text-warn-100" : "text-gold-300",
-              )}
-            >
-              {member.code || "—"}
-              {overflow ? "・上限超過" : ""}
-            </div>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
 /* ---------- 画面本体 ---------- */
 
-export default async function OrganizationPage() {
+export default async function OrganizationPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; sort?: string; dir?: string }>;
+}) {
   const viewer = await currentViewer();
   if (!viewer) redirect("/login");
   if (viewer.kind !== "agency") redirect("/admin/agencies");
 
+  const params: SearchParams = await searchParams;
+  const keyword = readParam(params, "q");
+  const sort = parseSort(params, DEFAULT_SORT, SORT_COLUMNS);
+
   const header = (
     <PageHeader
       title="組織と枠"
-      description="配下の代理店の並びと、枠の空き状況をまとめています。枠は販路種別ごとに分かれていて、合計100枠です。"
+      description="配下の代理店の並びと、枠の空き状況をまとめています。枠は販路種別ごとに分かれていて、合計100枠です。配下の連絡先（メールアドレス・電話番号）もこの画面で確認できます。"
     />
   );
 
@@ -220,14 +193,20 @@ export default async function OrganizationPage() {
   const countBy = (list: Agency[], kind: string) =>
     list.filter((a) => (a.codeKind || "") === kind).length;
 
+  // 区分の呼び方は labels.ts の codeKindLabel() だけを出所にする。
+  // ここで文字を直書きすると、同じ区分が画面ごとに違う呼ばれ方になる。
+  // とくに 00 は総販売代理店・統括代理店・サロン代理店・個人販売パートナーまで
+  // まとめて入る区分なので、「販売代理店」と書くと配下の統括代理店まで
+  // 販売代理店として数えているように見えてしまう。
   const kindRows = [
-    { label: "販売代理店（コード区分00）", kind: "00", slot: "1社ぶん消費" },
-    { label: "取次パートナー", kind: "01", slot: "消費しない" },
-    { label: "スタッフ", kind: "02", slot: "消費しない" },
-    { label: "区分未設定", kind: "", slot: "—" },
+    { kind: "00", note: "（コード区分00）", slot: "1社ぶん消費" },
+    { kind: "01", note: "", slot: "消費しない" },
+    { kind: "02", note: "", slot: "消費しない" },
+    { kind: "", note: "", slot: "—" },
   ]
     .map((b) => ({
       ...b,
+      label: `${codeKindLabel(b.kind)}${b.note}`,
       direct: countBy(directChildren, b.kind),
       all: countBy(descendants, b.kind),
     }))
@@ -236,6 +215,27 @@ export default async function OrganizationPage() {
   const suspendedDirect = directChildren.filter(
     (a) => a.codeKind === "00" && a.status === "停止・解約",
   ).length;
+
+  /* --- 配下の一覧（連絡先つき） --- */
+  const contacts = descendants.filter((a) =>
+    matchesKeyword(keyword, [a.code, a.name, a.representative, a.email, a.phone]),
+  );
+
+  const accessors: Accessors<Agency> = {
+    code: (a) => a.code,
+    name: (a) => a.name,
+    rank: (a) => rankShort(a.rank, a.codeKind),
+    kind: (a) => codeKindLabel(a.codeKind),
+    status: (a) => a.status,
+    email: (a) => a.email,
+    phone: (a) => a.phone,
+    parent: (a) => a.parentCode,
+  };
+  const contactRows = sortRows(contacts, sort.column, sort.desc, accessors);
+
+  const isFiltered = keyword !== "";
+  const clearHref = buildListHref(BASE, params, { q: "" });
+  const missingContact = descendants.filter((a) => !a.email && !a.phone).length;
 
   return (
     <div className="space-y-6">
@@ -307,6 +307,10 @@ export default async function OrganizationPage() {
             {rows.map(({ agency, depth }) => {
               const consumes = countsTowardSlot(agency);
               const isSelf = agency.code === me.code;
+              // 階層と区分が同じ呼び方になる相手（取次パートナー・スタッフ）は、
+              // 同じ言葉を2つ並べない。
+              const rankText = rankShort(agency.rank, agency.codeKind);
+              const kindText = codeKindLabel(agency.codeKind);
               return (
                 <li
                   key={agency.code || agency.recordId}
@@ -330,11 +334,13 @@ export default async function OrganizationPage() {
                   {isSelf ? <Badge tone="gold">あなた</Badge> : null}
                   {agency.rank ? (
                     <Badge tone={agency.rank === "総販売代理店" ? "gold" : "neutral"}>
-                      {agency.rank}
+                      {rankText}
                     </Badge>
                   ) : null}
                   <StatusBadge status={agency.status} />
-                  <span className="text-xs text-ink-400">{kindLabel(agency)}</span>
+                  {kindText !== rankText ? (
+                    <span className="text-xs text-ink-400">{kindText}</span>
+                  ) : null}
                 </li>
               );
             })}
@@ -344,13 +350,194 @@ export default async function OrganizationPage() {
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-ink-800 px-5 py-3 text-xs text-ink-400">
           <span className="flex items-center gap-2">
             <span className="inline-block h-3.5 w-0.5 shrink-0 bg-gold-500/70" />
-            枠を消費する販売代理店（コード区分 00）
+            枠を消費する{codeKindLabel("00")}（コード区分 00）
           </span>
           <span className="flex items-center gap-2">
             <span className="inline-block h-3.5 w-0.5 shrink-0 bg-ink-800" />
-            取次パートナー・スタッフ（枠は消費しません）
+            {codeKindLabel("01")}・{codeKindLabel("02")}（枠は消費しません）
           </span>
         </div>
+      </Card>
+
+      {/* 配下の一覧（連絡先） */}
+      <Card title={`配下の一覧　${contactRows.length} 社`}>
+        {descendants.length === 0 ? (
+          <EmptyState
+            title="まだ配下の登録がありません。"
+            description="配下が登録されると、連絡先（メールアドレス・電話番号）をここで確認できます。"
+          />
+        ) : (
+          <>
+            <FilterBar
+              action={BASE}
+              hidden={{
+                sort: sort.column,
+                dir: sort.column ? (sort.desc ? "desc" : "asc") : "",
+              }}
+            >
+              <FilterText
+                name="q"
+                label="名前・コード・連絡先"
+                value={keyword}
+                placeholder="例：山田／RIM0003／090"
+                width="w-72"
+              />
+              <FilterActions clearHref={clearHref} filtered={isFiltered} />
+            </FilterBar>
+
+            {isFiltered ? (
+              <div className="border-t border-ink-800 px-5 py-3">
+                <FilterSummary
+                  total={descendants.length}
+                  shown={contactRows.length}
+                  unit="社"
+                  clearHref={clearHref}
+                />
+              </div>
+            ) : null}
+
+            {contactRows.length === 0 ? (
+              <EmptyState
+                title="条件に合う配下がありません"
+                description="名前・代理店コード・メールアドレス・電話番号の一部で探せます。条件を外すと配下すべてが表示されます。"
+              />
+            ) : (
+              <Table>
+                <thead>
+                  <tr>
+                    <SortableTh
+                      column="code"
+                      label="代理店コード"
+                      sort={sort}
+                      basePath={BASE}
+                      params={params}
+                    />
+                    <SortableTh
+                      column="name"
+                      label="名前"
+                      sort={sort}
+                      basePath={BASE}
+                      params={params}
+                    />
+                    <SortableTh
+                      column="rank"
+                      label="階層"
+                      sort={sort}
+                      basePath={BASE}
+                      params={params}
+                    />
+                    <SortableTh
+                      column="kind"
+                      label="区分"
+                      sort={sort}
+                      basePath={BASE}
+                      params={params}
+                    />
+                    <SortableTh
+                      column="status"
+                      label="稼働状況"
+                      sort={sort}
+                      basePath={BASE}
+                      params={params}
+                    />
+                    <SortableTh
+                      column="email"
+                      label="メールアドレス"
+                      sort={sort}
+                      basePath={BASE}
+                      params={params}
+                    />
+                    <SortableTh
+                      column="phone"
+                      label="電話番号"
+                      sort={sort}
+                      basePath={BASE}
+                      params={params}
+                    />
+                    <SortableTh
+                      column="parent"
+                      label="所属先"
+                      sort={sort}
+                      basePath={BASE}
+                      params={params}
+                    />
+                  </tr>
+                </thead>
+                <tbody>
+                  {contactRows.map((a) => (
+                    <tr key={a.code || a.recordId}>
+                      <Td numeric>{a.code || "—"}</Td>
+                      <Td>
+                        <div className="text-ink-100">{a.name || "（名称未登録）"}</div>
+                        {a.representative && a.representative !== a.name ? (
+                          <div className="mt-1 text-xs text-ink-400">
+                            ご担当：{a.representative}
+                          </div>
+                        ) : null}
+                      </Td>
+                      <Td>
+                        <Badge tone={a.rank === "総販売代理店" ? "gold" : "neutral"}>
+                          {rankShort(a.rank, a.codeKind)}
+                        </Badge>
+                        {a.channel && a.channel !== "未設定" ? (
+                          <div className="mt-1 text-xs text-ink-400">
+                            {channelLabel(a.channel)}
+                          </div>
+                        ) : null}
+                      </Td>
+                      <Td>
+                        <span className="text-xs text-ink-300">
+                          {codeKindLabel(a.codeKind)}
+                        </span>
+                      </Td>
+                      <Td>
+                        <Badge tone={statusTone(a.status)}>{a.status || "未設定"}</Badge>
+                      </Td>
+                      <Td>
+                        {a.email ? (
+                          <a
+                            href={`mailto:${a.email}`}
+                            className="break-all text-gold-300 underline underline-offset-2 transition hover:text-gold-100"
+                          >
+                            {a.email}
+                          </a>
+                        ) : (
+                          <span className="text-ink-500">未登録</span>
+                        )}
+                      </Td>
+                      <Td numeric>
+                        {a.phone ? (
+                          <a
+                            href={`tel:${a.phone.replace(/[^0-9+]/g, "")}`}
+                            className="whitespace-nowrap text-gold-300 underline underline-offset-2 transition hover:text-gold-100"
+                          >
+                            {a.phone}
+                          </a>
+                        ) : (
+                          <span className="text-ink-500">未登録</span>
+                        )}
+                      </Td>
+                      <Td numeric>
+                        {a.parentCode === me.code ? (
+                          <Badge>自分の直下</Badge>
+                        ) : (
+                          <span className="text-ink-300">{a.parentCode || "—"}</span>
+                        )}
+                      </Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            )}
+
+            <div className="border-t border-ink-800 px-5 py-3 text-xs leading-relaxed text-ink-400">
+              メールアドレスを押すとメールの作成画面が、電話番号を押すと電話の発信画面が開きます。
+              {missingContact > 0
+                ? `連絡先が登録されていない配下が ${missingContact} 社あります。ポータルからは直せないため、本部にご連絡ください。`
+                : ""}
+            </div>
+          </>
+        )}
       </Card>
 
       {/* 内訳 */}
@@ -397,7 +584,7 @@ export default async function OrganizationPage() {
         <div className="border-t border-ink-800 px-5 py-3 text-xs leading-relaxed text-ink-400">
           「直下」はあなたが直接登録した先、「配下すべて」はその先の階層も含めた数です。
           {suspendedDirect > 0
-            ? `直下の販売代理店のうち ${suspendedDirect} 社は停止・解約のため、枠には数えていません。`
+            ? `直下の${codeKindLabel("00")}（コード区分00）のうち ${suspendedDirect} 社は停止・解約のため、枠には数えていません。`
             : ""}
         </div>
       </Card>

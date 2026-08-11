@@ -50,7 +50,7 @@ export const metadata = { title: "デモ機管理（本部）｜VIS 代理店ポ
  * ------------------------------------------------------------------ */
 
 /** 表の列数。入力欄を表いっぱいに広げるのに使う。 */
-const COLUMN_COUNT = 7;
+const COLUMN_COUNT = 9;
 
 /** 台数のタイルに並べる状態。保存先の設定と同じ並びにしてある。 */
 const STATES = ["在庫", "設置済", "貸出中", "返却済", "故障・修理", "廃棄"];
@@ -93,6 +93,21 @@ function isOverdue(m: DemoView, today: string): boolean {
   return m.returnDueOn < today;
 }
 
+/**
+ * 返却予定日を何日過ぎているか。過ぎていなければ 0。
+ * 「あと何日で返ってくるか」ではなく「何日待たせているか」を出したいので、
+ * 今日から返却予定日を引いた日数を返す。
+ */
+function overdueDaysOf(m: DemoView, today: string): number {
+  if (!isOverdue(m, today)) return 0;
+  // どちらも "YYYY-MM-DD"。時差でずれないよう、日付だけを UTC として読む。
+  const due = Date.parse(`${m.returnDueOn.slice(0, 10)}T00:00:00Z`);
+  const now = Date.parse(`${today}T00:00:00Z`);
+  if (!Number.isFinite(due) || !Number.isFinite(now)) return 0;
+  const days = Math.round((now - due) / 86_400_000);
+  return days > 0 ? days : 0;
+}
+
 /** 絞り込みの合図。"all" か 6つの状態、または "overdue"。 */
 function toFilter(v: string): string {
   if (v === "overdue") return "overdue";
@@ -100,7 +115,16 @@ function toFilter(v: string): string {
 }
 
 /** 並び替えに使える列。 */
-const SORT_COLUMNS = ["serial", "model", "state", "holder", "lendTo", "returnDue"];
+const SORT_COLUMNS = [
+  "serial",
+  "model",
+  "acquired",
+  "state",
+  "holderCode",
+  "holder",
+  "lendTo",
+  "returnDue",
+];
 
 /** 既定は取得したまま（登録の新しい順）。 */
 const DEFAULT_SORT: SortState = { column: "", desc: false };
@@ -189,6 +213,8 @@ export default async function AdminDemoPage({
     countByState.set(m.state, (countByState.get(m.state) ?? 0) + 1);
   }
   const overdue = machines.filter((m) => isOverdue(m, today));
+  // いちばん長く待たせている台の日数。何日ぶんの遅れかで、連絡の急ぎ具合が変わる。
+  const worstOverdue = overdue.reduce((max, m) => Math.max(max, overdueDaysOf(m, today)), 0);
 
   /* --- 状態のタブで分けたあと、キーワードと機種で絞り込む --- */
   const inChip =
@@ -214,11 +240,13 @@ export default async function AdminDemoPage({
   const accessors: Accessors<DemoView> = {
     serial: (m) => m.serialNo,
     model: (m) => m.model,
+    acquired: (m) => m.acquiredKind,
     // 状態は五十音順ではなく、タイルと同じ並び（在庫→設置済→…）で並べる
     state: (m) => {
       const i = STATES.indexOf(m.state);
       return i < 0 ? null : i;
     },
+    holderCode: (m) => m.holderCode,
     holder: (m) => m.holderName || m.holderCode,
     lendTo: (m) => m.lendTo,
     returnDue: (m) => m.returnDueOn,
@@ -258,7 +286,8 @@ export default async function AdminDemoPage({
 
       {overdue.length > 0 ? (
         <Notice tone="warn">
-          返却予定日を過ぎているデモ機が {overdue.length} 台あります。貸出先にご確認のうえ、
+          返却予定日を過ぎているデモ機が {overdue.length} 台あります
+          （いちばん長いもので {worstOverdue.toLocaleString("ja-JP")} 日超過）。貸出先にご確認のうえ、
           回収するか、返却予定日を入れ直してください。
           <Link
             href={buildListHref(BASE, params, { state: "overdue" })}
@@ -343,7 +372,9 @@ export default async function AdminDemoPage({
               <tr>
                 <SortableTh column="serial" label="製品番号" sort={sort} basePath={BASE} params={params} />
                 <SortableTh column="model" label="機種" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="acquired" label="取得区分" sort={sort} basePath={BASE} params={params} />
                 <SortableTh column="state" label="状態" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="holderCode" label="保有代理店コード" sort={sort} basePath={BASE} params={params} />
                 <SortableTh column="holder" label="保有者（責任者）" sort={sort} basePath={BASE} params={params} />
                 <SortableTh column="lendTo" label="貸出先" sort={sort} basePath={BASE} params={params} />
                 <SortableTh column="returnDue" label="返却予定日" sort={sort} basePath={BASE} params={params} />
@@ -357,7 +388,7 @@ export default async function AdminDemoPage({
                   machine={m}
                   agencies={agencyOptions}
                   today={today}
-                  overdue={isOverdue(m, today)}
+                  overdueDays={overdueDaysOf(m, today)}
                   columnCount={COLUMN_COUNT}
                 />
               ))}
@@ -371,8 +402,14 @@ export default async function AdminDemoPage({
       </Card>
 
       <Notice tone="info">
+        「保有代理店コード」は、その台を持っている代理店のコードです。
         「保有者（責任者）」は、その台を預かって管理している方のお名前です（デモ機登録フォームの
-        「使用者名」にあたります）。代理店の「デモ機」の画面にも、同じ内容が表示されます。
+        「使用者名」にあたります）。同じ苗字の方がいても、コードを見ればどちらの代理店の台か分かります。
+        <br />
+        「取得区分」は、登録欄の「取得のしかた」と同じ項目です（個人購入／デモ機購入／無料貸与）。
+        無料貸与の台は本部からお預けしているものなので、返却のご連絡が必要になります。
+        <br />
+        代理店の「デモ機」の画面にも、同じ内容が表示されます。
       </Notice>
     </div>
   );

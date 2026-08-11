@@ -17,6 +17,11 @@ import {
 } from "@/lib/list-params";
 import type { Agency } from "@/lib/types";
 import {
+  ProgressLegend,
+  progressOf,
+  type ProgressSource,
+} from "@/components/Progress";
+import {
   Card,
   EmptyState,
   Notice,
@@ -34,7 +39,8 @@ import {
   FilterText,
   SortableTh,
 } from "@/components/SortableTh";
-import { CustomerRow, type CustomerView } from "./CustomerForm";
+import { codeKindLabel } from "@/lib/labels";
+import { CustomerRow, STAFF_CODE_LIST_ID, type CustomerView } from "./CustomerForm";
 
 const BASE = "/admin/customers";
 
@@ -55,7 +61,7 @@ export const metadata = { title: "顧客管理（本部）｜VIS 代理店ポー
 const LIMIT = 1000;
 
 /** 表の列数。修正欄を表いっぱいに広げるのに使う。 */
-const COLUMN_COUNT = 9;
+const COLUMN_COUNT = 11;
 
 type Kind = "all" | "introduced" | "general";
 
@@ -74,7 +80,9 @@ const SORT_COLUMNS = [
   "name",
   "phone",
   "agency",
+  "staff",
   "referrer",
+  "progress",
   "review",
   "payment",
   "ship",
@@ -112,8 +120,41 @@ function toCustomer(r: Row): CustomerView {
     contractedOn: s_(r, "contracted_on"),
     shipStatus: s_(r, "ship_status"),
     trackingNo: s_(r, "tracking_no"),
+    deliveredOn: s_(r, "delivered_on"),
     serialNo: s_(r, "serial_no"),
   };
+}
+
+/**
+ * 顧客台帳の状態を、進み具合の部品（src/components/Progress.tsx）が読める形に言い換える。
+ *
+ * 同じ「審査に通った」でも、受注は「承認」、顧客台帳は「審査完了」と言葉が違う。
+ * 部品側を顧客台帳の言葉に広げると、代理店の画面と本部の画面で段階の判定が
+ * ずれるおそれがあるので、言い換えはこの画面で引き受ける。
+ * データベースの値そのものは変えない。
+ */
+function progressSourceOf(c: CustomerView): ProgressSource {
+  const review =
+    c.reviewStatus === "審査完了"
+      ? "承認"
+      : c.reviewStatus === "審査NG"
+        ? "否決"
+        : "";
+
+  // お支払いが「否決・キャンセル」なら、審査が通っていてもお申し込みは止まっている。
+  // 出荷の状態だけを見ていると、止まった案件が「審査完了 40%」のまま並んでしまう。
+  const ship = c.paymentStatus === "否決・キャンセル" ? "キャンセル" : c.shipStatus;
+
+  return { reviewResult: review, shipStatus: ship, deliveredOn: c.deliveredOn };
+}
+
+/**
+ * 並び替えに使う進み具合の数値。
+ * 止まったもの（キャンセル・審査NG）は -1 にして、進んでいる案件と混ざらないようにする。
+ */
+function progressValue(c: CustomerView): number {
+  const state = progressOf(progressSourceOf(c));
+  return state.stopped ? -1 : state.percent;
 }
 
 /**
@@ -171,7 +212,7 @@ export default async function AdminCustomersPage({
   const header = (
     <PageHeader
       title="顧客管理"
-      description="ご契約いただいたお客様の一覧です。お名前と電話番号で探せ、審査・お支払い・出荷の状態でも絞り込めます。表の見出しを押すと並び替わります。住所や連絡先の書き間違いは、この画面から直せます。"
+      description="ご契約いただいたお客様の一覧です。お名前と電話番号で探せ、審査・お支払い・出荷の状態でも絞り込めます。申込からお届けまでの進み具合と、担当スタッフもこの表で確認できます。表の見出しを押すと並び替わります。住所や連絡先の書き間違いは、この画面から直せます。"
     />
   );
 
@@ -221,7 +262,9 @@ export default async function AdminCustomersPage({
     name: (c) => c.nameKana || c.name,
     phone: (c) => c.phone,
     agency: (c) => c.agencyCode,
+    staff: (c) => c.staffCode,
     referrer: (c) => c.referrerCode,
+    progress: (c) => progressValue(c),
     review: (c) => c.reviewStatus,
     payment: (c) => c.paymentStatus,
     ship: (c) => c.shipStatus,
@@ -245,7 +288,12 @@ export default async function AdminCustomersPage({
   const paymentOptions = buildOptions(customers, (c) => c.paymentStatus, [], payment);
   const shipOptions = buildOptions(customers, (c) => c.shipStatus, [], ship);
 
-  const beforeShipping = found.filter((c) => c.shipStatus !== "出荷済").length;
+  // 「お届け前」は本部が住所直しなどで手を打つ相手の数。
+  // 表の「進み具合」で『中止』と出ている方（キャンセル・審査NG）は、もう手を打つ相手ではないので数えない。
+  // progressValue() は中止を -1 で返すので、0 以上だけを残す。
+  const beforeShipping = found.filter(
+    (c) => c.shipStatus !== "出荷済" && progressValue(c) >= 0,
+  ).length;
   const truncated = customers.length >= LIMIT;
   const current = TABS.find((t) => t.key === kind)!;
 
@@ -360,39 +408,64 @@ export default async function AdminCustomersPage({
         {rows.length === 0 ? (
           <EmptyState title={emptyTitle(kind, isFiltered)} description={emptyDescription(kind, isFiltered)} />
         ) : (
-          <Table>
-            <thead>
-              <tr>
-                <SortableTh column="name" label="お名前" sort={sort} basePath={BASE} params={params} />
-                <SortableTh column="phone" label="電話番号" sort={sort} basePath={BASE} params={params} />
-                <SortableTh column="agency" label="担当代理店" sort={sort} basePath={BASE} params={params} />
-                <SortableTh column="referrer" label="紹介元" sort={sort} basePath={BASE} params={params} />
-                <SortableTh column="review" label="審査" sort={sort} basePath={BASE} params={params} />
-                <SortableTh column="payment" label="お支払い" sort={sort} basePath={BASE} params={params} />
-                <SortableTh column="ship" label="出荷" sort={sort} basePath={BASE} params={params} />
-                <SortableTh column="contracted" label="ご契約日" sort={sort} basePath={BASE} params={params} />
-                <Th align="right">修正</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((c) => (
-                <CustomerRow
-                  key={c.id}
-                  customer={c}
-                  agencyName={nameByCode.get(c.agencyCode) ?? ""}
-                  referrerName={nameByCode.get(c.referrerCode) ?? ""}
-                  introduced={isIntroduced(c)}
-                  columnCount={COLUMN_COUNT}
-                />
+          <>
+            <Table>
+              <thead>
+                <tr>
+                  <SortableTh column="name" label="お名前" sort={sort} basePath={BASE} params={params} />
+                  <SortableTh column="phone" label="電話番号" sort={sort} basePath={BASE} params={params} />
+                  <SortableTh column="agency" label="担当代理店" sort={sort} basePath={BASE} params={params} />
+                  <SortableTh column="staff" label="担当スタッフ" sort={sort} basePath={BASE} params={params} />
+                  <SortableTh column="referrer" label="紹介元" sort={sort} basePath={BASE} params={params} />
+                  <SortableTh column="progress" label="進み具合" sort={sort} basePath={BASE} params={params} />
+                  <SortableTh column="review" label="審査" sort={sort} basePath={BASE} params={params} />
+                  <SortableTh column="payment" label="お支払い" sort={sort} basePath={BASE} params={params} />
+                  <SortableTh column="ship" label="出荷" sort={sort} basePath={BASE} params={params} />
+                  <SortableTh column="contracted" label="ご契約日" sort={sort} basePath={BASE} params={params} />
+                  <Th align="right">修正</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((c) => (
+                  <CustomerRow
+                    key={c.id}
+                    customer={c}
+                    agencyName={nameByCode.get(c.agencyCode) ?? ""}
+                    referrerName={nameByCode.get(c.referrerCode) ?? ""}
+                    staffName={nameByCode.get(c.staffCode) ?? ""}
+                    progress={progressSourceOf(c)}
+                    introduced={isIntroduced(c)}
+                    columnCount={COLUMN_COUNT}
+                  />
+                ))}
+              </tbody>
+            </Table>
+            <div className="border-t border-ink-800 px-5 py-3.5">
+              <ProgressLegend />
+            </div>
+
+            {/* 修正欄の「担当スタッフのコード」で使う入力候補。
+                修正欄はお客様の人数ぶん作られるので、候補は画面に1つだけ置いて、
+                どの行の入力欄からも同じものを参照する。 */}
+            <datalist id={STAFF_CODE_LIST_ID}>
+              {agencies.map((a) => (
+                <option key={a.code} value={a.code}>
+                  {`${a.name || "（名称未登録）"}／${codeKindLabel(a.codeKind)}`}
+                </option>
               ))}
-            </tbody>
-          </Table>
+            </datalist>
+          </>
         )}
       </Card>
 
       <Notice tone="info">
         「取次店の紹介」は、紹介元の取次店コードが入っているお客様です。トスアップと電話番号が一致したときに
         自動で入ります。コードが入っていないお客様は「一般」に分かれます。
+        <br />
+        「担当スタッフ」は、そのお申し込みを取った方のコードです。空欄のお客様は誰が売ったかが残っていないので、
+        分かる場合は、その行の「登録内容を直す」を押して埋めてください。入力欄では登録済みのコードから選べます。
+        <br />
+        「出荷」の下に送り状番号が出ているお客様は、番号を押すとヤマト運輸のお届け状況が別のタブで開きます。
         <br />
         この画面ではお客様の登録を消せません。お申し込みの取り消しは、お支払いと出荷の状態で管理してください。
       </Notice>

@@ -1,7 +1,8 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import { findAgencyByCode, listDescendants } from "@/lib/agencies";
-import { currentMonth, recentMonths, scopeCodes } from "@/lib/orders";
+import { currentMonth, listOrders, recentMonths, scopeCodes } from "@/lib/orders";
 import {
   LEAD_LIMIT,
   isClosed,
@@ -26,14 +27,48 @@ import {
   jpDate,
   jpMonthLabel,
 } from "@/components/ui";
-import { LeadMonthFilter } from "./MonthFilter";
+import {
+  ALL,
+  buildListHref,
+  buildOptions,
+  matchesKeyword,
+  parseSort,
+  readParam,
+  sortRows,
+  type Accessors,
+  type FilterOption,
+  type SearchParams,
+  type SortState,
+} from "@/lib/list-params";
+import {
+  FilterActions,
+  FilterBar,
+  FilterSelect,
+  FilterSummary,
+  FilterText,
+  SortableTh,
+} from "@/components/SortableTh";
 
 export const metadata = { title: "トスアップ状況｜VIS 代理店ポータル" };
 
+const BASE = "/leads";
+
+/**
+ * トスアップの状態。保存先（leads.status）で決まっている5つで、この並びで出す。
+ * 絞り込みはこの値のまま行う（画面の呼び方で比べない）。
+ */
+const STATUSES = ["トスアップ済", "商談中", "体験同意・検討中", "成約", "不成立"];
+
+/** 見出しを押して並び替えられる列。 */
+const SORT_COLUMNS = ["tossed", "customer", "phone", "referrer", "status", "closed", "order"];
+
+/** 既定はトスアップの新しい順（取得したままの並び）。 */
+const DEFAULT_SORT: SortState = { column: "", desc: false };
+
 /** "YYYY-MM" か "all" だけを受け付ける。それ以外は今月に落とす。 */
-function normalizeMonth(raw: string | undefined, fallback: string): string {
-  if (raw === "all") return "all";
-  if (raw && /^\d{4}-(0[1-9]|1[0-2])$/.test(raw)) return raw;
+function normalizeMonth(raw: string, fallback: string): string {
+  if (raw === ALL) return ALL;
+  if (/^\d{4}-(0[1-9]|1[0-2])$/.test(raw)) return raw;
   return fallback;
 }
 
@@ -46,22 +81,34 @@ function showDate(ymd: string, withYear: boolean): string {
 export default async function LeadsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string }>;
+  searchParams: Promise<{
+    month?: string;
+    status?: string;
+    q?: string;
+    sort?: string;
+    dir?: string;
+  }>;
 }) {
   const viewer = await currentViewer();
   if (!viewer) redirect("/login");
   if (viewer.kind !== "agency") redirect("/admin/agencies");
 
-  const { month: monthParam } = await searchParams;
+  const params: SearchParams = await searchParams;
   const thisMonth = currentMonth();
   const months = recentMonths(12);
-  const month = normalizeMonth(monthParam, thisMonth);
-  const allPeriod = month === "all";
+  const month = normalizeMonth(readParam(params, "month"), thisMonth);
+  const status = readParam(params, "status") || ALL;
+  const keyword = readParam(params, "q");
+  const sort = parseSort(params, DEFAULT_SORT, SORT_COLUMNS);
+
+  const allPeriod = month === ALL;
   const periodLabel = allPeriod ? "全期間" : jpMonthLabel(month);
 
   let self: Agency | null = null;
   let members: Agency[] = [];
   let allLeads: Lead[] = [];
+  /** 成約したトスアップのうち、受注一覧でも開ける受注番号。 */
+  let openableOrders = new Set<string>();
   let error: string | null = null;
 
   try {
@@ -71,7 +118,19 @@ export default async function LeadsPage({
     } else {
       const descendants = await listDescendants(self.code);
       members = [self, ...descendants];
-      allLeads = await listLeads(scopeCodes(self, descendants));
+      const codes = scopeCodes(self, descendants);
+      allLeads = await listLeads(codes);
+
+      // 成約したトスアップに受注番号が入っていても、その受注が自分の担当から
+      // 外れていれば顧客一覧では開けない。開けるものだけリンクにする。
+      if (allLeads.some((l) => l.orderNo)) {
+        try {
+          const { orders } = await listOrders(codes);
+          openableOrders = new Set(orders.map((o) => o.recordId));
+        } catch {
+          // 受注が読めなくてもトスアップの一覧は出す（リンクだけ出さない）
+        }
+      }
     }
   } catch (e) {
     error =
@@ -103,32 +162,119 @@ export default async function LeadsPage({
     );
   }
 
-  const rows = allPeriod ? allLeads : allLeads.filter((l) => leadMonth(l) === month);
-  const summary = summarizeLeads(rows);
+  const inPeriod = allPeriod ? allLeads : allLeads.filter((l) => leadMonth(l) === month);
+
+  /* --- 絞り込み --- */
+  const found = inPeriod.filter((l) => {
+    if (status !== ALL && l.status !== status) return false;
+    return matchesKeyword(keyword, [l.customerName, l.phone]);
+  });
+
+  /* --- 並び替え --- */
   const nameByCode = new Map(members.map((m) => [m.code, m.name]));
+  const accessors: Accessors<Lead> = {
+    tossed: (l) => jstDate(l.tossedAt),
+    customer: (l) => l.customerName,
+    phone: (l) => l.phone,
+    referrer: (l) => nameByCode.get(l.referrerCode) || l.referrerCode,
+    // 状態は五十音順ではなく、商談の進む順（トスアップ済→商談中→…）で並べる
+    status: (l) => {
+      const i = STATUSES.indexOf(l.status);
+      return i < 0 ? null : i;
+    },
+    closed: (l) => l.closedAt,
+    order: (l) => l.orderNo,
+  };
+  const rows = sortRows(found, sort.column, sort.desc, accessors);
+
+  const summary = summarizeLeads(rows);
   const truncated = allLeads.length >= LEAD_LIMIT;
+
+  const statusOptions: FilterOption[] = buildOptions(
+    inPeriod,
+    (l) => l.status,
+    STATUSES,
+    status,
+  );
+  const monthOptions: FilterOption[] = months.map((m) => ({
+    value: m,
+    label: `${jpMonthLabel(m)}${m === thisMonth ? "（今月）" : ""}`,
+    count: 0,
+  }));
+
+  const isFiltered = Boolean(keyword) || status !== ALL;
+  const clearHref = buildListHref(BASE, params, { q: "", status: "" });
 
   return (
     <div className="space-y-6">
       {header}
 
       <Card>
-        <LeadMonthFilter month={month} months={months} defaultMonth={thisMonth} />
+        <FilterBar
+          action={BASE}
+          hidden={{
+            sort: sort.column,
+            dir: sort.column ? (sort.desc ? "desc" : "asc") : "",
+          }}
+        >
+          <FilterText
+            name="q"
+            label="お客様のお名前・電話番号"
+            value={keyword}
+            placeholder="例：山田／09012345678"
+            width="w-60"
+          />
+          <FilterSelect
+            name="status"
+            label="状態"
+            value={status}
+            options={statusOptions}
+            allLabel={`すべて（${inPeriod.length}）`}
+            width="w-52"
+          />
+          <FilterSelect
+            name="month"
+            label="期間"
+            value={allPeriod ? ALL : month}
+            options={monthOptions}
+            allLabel="全期間"
+            showCount={false}
+            width="w-44"
+          />
+          <FilterActions clearHref={clearHref} filtered={isFiltered} />
+        </FilterBar>
       </Card>
+
+      {isFiltered ? (
+        <FilterSummary
+          total={inPeriod.length}
+          shown={rows.length}
+          clearHref={clearHref}
+          note={periodLabel}
+        />
+      ) : null}
 
       <div className="grid gap-4 sm:grid-cols-3">
         <StatTile
           label="トスアップ件数"
           value={String(summary.total)}
           unit="件"
-          hint={`${periodLabel}にご紹介いただいた件数`}
+          hint={
+            isFiltered
+              ? `${periodLabel}・いまの絞り込みでの件数`
+              : `${periodLabel}にご紹介いただいた件数`
+          }
         />
         <StatTile
           label="成約件数"
           value={String(summary.closed)}
           unit="件"
           tone="gold"
-          hint="お申し込みまで進んだ件数"
+          hint={
+            isFiltered
+              ? "いまの絞り込みのうち、お申し込みまで進んだ件数"
+              : "お申し込みまで進んだ件数"
+          }
         />
         <StatTile
           label="成約率"
@@ -143,7 +289,12 @@ export default async function LeadsPage({
 
       <Card title={`ご紹介いただいたお客様（${periodLabel}）`}>
         {rows.length === 0 ? (
-          allLeads.length === 0 ? (
+          isFiltered ? (
+            <EmptyState
+              title="条件に合うトスアップがありません"
+              description="状態を「すべて」に戻すか、期間を「全期間」に広げてお試しください。お名前・電話番号は一部でも探せます。"
+            />
+          ) : allLeads.length === 0 ? (
             <EmptyState
               title="まだトスアップがありません"
               description="専用フォームからお客様をご紹介いただくと、ここに進捗が表示されます。"
@@ -158,13 +309,57 @@ export default async function LeadsPage({
           <Table>
             <thead>
               <tr>
-                <Th>トスアップ日</Th>
-                <Th>お客様名</Th>
-                <Th>電話番号</Th>
-                {showReferrer ? <Th>紹介元</Th> : null}
-                <Th>ステータス</Th>
-                <Th>成約日</Th>
-                <Th>受注番号</Th>
+                <SortableTh
+                  column="tossed"
+                  label="トスアップ日"
+                  sort={sort}
+                  basePath={BASE}
+                  params={params}
+                />
+                <SortableTh
+                  column="customer"
+                  label="お客様名"
+                  sort={sort}
+                  basePath={BASE}
+                  params={params}
+                />
+                <SortableTh
+                  column="phone"
+                  label="電話番号"
+                  sort={sort}
+                  basePath={BASE}
+                  params={params}
+                />
+                {showReferrer ? (
+                  <SortableTh
+                    column="referrer"
+                    label="紹介元"
+                    sort={sort}
+                    basePath={BASE}
+                    params={params}
+                  />
+                ) : null}
+                <SortableTh
+                  column="status"
+                  label="ステータス"
+                  sort={sort}
+                  basePath={BASE}
+                  params={params}
+                />
+                <SortableTh
+                  column="closed"
+                  label="成約日"
+                  sort={sort}
+                  basePath={BASE}
+                  params={params}
+                />
+                <SortableTh
+                  column="order"
+                  label="受注番号"
+                  sort={sort}
+                  basePath={BASE}
+                  params={params}
+                />
               </tr>
             </thead>
             <tbody>
@@ -194,7 +389,22 @@ export default async function LeadsPage({
                   <Td numeric>{showDate(l.closedAt, allPeriod)}</Td>
                   <Td numeric>
                     {l.orderNo ? (
-                      l.orderNo
+                      openableOrders.has(l.orderNo) ? (
+                        <Link
+                          href={`/customers?order=${encodeURIComponent(l.orderNo)}`}
+                          className="tabnum text-gold-300 underline underline-offset-2 transition hover:text-gold-100"
+                          title="顧客一覧でこの受注を開きます"
+                        >
+                          {l.orderNo}
+                        </Link>
+                      ) : (
+                        <>
+                          <span className="tabnum">{l.orderNo}</span>
+                          <div className="mt-1 text-xs text-ink-400">
+                            受注は本部の管理です
+                          </div>
+                        </>
+                      )
                     ) : (
                       <span className="text-ink-400">{isClosed(l) ? "確認中" : "—"}</span>
                     )}
@@ -215,7 +425,8 @@ export default async function LeadsPage({
 
       <Notice tone="info">
         ステータスは本部と担当代理店が商談の進み具合にあわせて更新します。「成約」になるとお申し込みが確定し、
-        成約日と受注番号が入ります。成約なのに受注番号が「確認中」のままの場合は、本部側で受注との突き合わせが
+        成約日と受注番号が入ります。受注番号がリンクになっているものは、押すと顧客一覧でその受注の進み具合を
+        確認できます。成約なのに受注番号が「確認中」のままの場合は、本部側で受注との突き合わせが
         済んでいません。数日たっても変わらないときは本部にお問い合わせください。
       </Notice>
     </div>

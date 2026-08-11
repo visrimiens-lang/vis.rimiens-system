@@ -7,15 +7,32 @@ import {
   updateCustomerAction,
   type CustomerFormState,
 } from "@/actions/customer-actions";
+import {
+  Progress,
+  yamatoTrackingUrl,
+  type ProgressSource,
+} from "@/components/Progress";
 import { Badge, Notice, Td, jpDate } from "@/components/ui";
 
 /* ------------------------------------------------------------------
  * 本部の「顧客管理」の、行の表示と修正フォーム。
  *
- * 直せるのは連絡先とお届け先だけにしてある。
+ * 直せるのは連絡先・お届け先と、担当スタッフのコードだけにしてある。
  * 担当代理店・紹介元のコードは報酬の支払先に直結するため、
  * この画面からは変えられない（変更が必要なときは本部内で相談する）。
+ *
+ * 担当スタッフだけ直せるようにしているのは、2026-08-07 の打合せで出た
+ * 「誰が売ったかを追えない」への対応。お申し込みの取り込みでは入らない列なので、
+ * 本部が聞き取って埋める場所がないと、一覧に出しても空欄のまま残ってしまう。
+ * この列は報酬の計算には使っていない。
  * ------------------------------------------------------------------ */
+
+/**
+ * 担当スタッフのコードの入力候補（datalist）の id。
+ * 候補そのものは一覧側（page.tsx）が画面に1つだけ置く。
+ * 修正欄はお客様の人数ぶん作られるので、行ごとに候補を持たせると同じ一覧を何度も送ることになる。
+ */
+export const STAFF_CODE_LIST_ID = "staff-code-candidates";
 
 /** 一覧に出すために必要なぶんだけを持つ、お客様1名ぶんの内容。 */
 export type CustomerView = {
@@ -39,6 +56,8 @@ export type CustomerView = {
   contractedOn: string;
   shipStatus: string;
   trackingNo: string;
+  /** 配達が終わった日。入っていれば進み具合は「配達完了」。 */
+  deliveredOn: string;
   serialNo: string;
 };
 
@@ -154,6 +173,8 @@ export function CustomerRow({
   customer,
   agencyName,
   referrerName,
+  staffName,
+  progress,
   introduced,
   columnCount,
 }: {
@@ -162,6 +183,14 @@ export function CustomerRow({
   agencyName: string;
   /** 紹介元の取次店の名前（代理店マスタから引いたもの）。 */
   referrerName: string;
+  /** 担当スタッフの名前（代理店マスタから引いたもの）。無ければ空。 */
+  staffName: string;
+  /**
+   * 進み具合のもとになる状態。
+   * 顧客台帳と受注では言葉が違う（審査完了／承認）ため、
+   * 言い換えは一覧側（page.tsx）でまとめて行い、ここは受け取って出すだけにする。
+   */
+  progress: ProgressSource;
   /** 取次店からの紹介かどうか。判定は一覧側でまとめて行っている。 */
   introduced: boolean;
   /** 修正欄を表いっぱいに広げるための列数。 */
@@ -200,6 +229,22 @@ export function CustomerRow({
             <span className="text-ink-400">—</span>
           )}
         </Td>
+        {/* 2026-08-07 の打合せで「誰が売ったかを追えない」との指摘があったため、
+            担当スタッフのコードを一覧に出す。名前は代理店マスタから引く。 */}
+        <Td>
+          {customer.staffCode ? (
+            <div className="min-w-0">
+              <div className="tabnum truncate text-ink-200">{customer.staffCode}</div>
+              {staffName ? (
+                <div className="truncate text-xs text-ink-400">{staffName}</div>
+              ) : (
+                <div className="truncate text-xs text-ink-500">代理店一覧に該当なし</div>
+              )}
+            </div>
+          ) : (
+            <span className="text-ink-500">未記録</span>
+          )}
+        </Td>
         <Td>
           {introduced ? (
             <div className="min-w-0">
@@ -212,6 +257,9 @@ export function CustomerRow({
           ) : (
             <Badge>一般</Badge>
           )}
+        </Td>
+        <Td>
+          <Progress {...progress} compact />
         </Td>
         <Td>
           <Status value={customer.reviewStatus} tone={reviewTone(customer.reviewStatus)} />
@@ -227,6 +275,20 @@ export function CustomerRow({
         </Td>
         <Td>
           <Status value={customer.shipStatus} tone={shipTone(customer.shipStatus)} />
+          {/* 送り状番号が入っていれば、そのままヤマト運輸の追跡ページを開けるようにする。
+              本部が番号を写して検索しなおす手間をなくすため。 */}
+          {customer.trackingNo ? (
+            <a
+              href={yamatoTrackingUrl(customer.trackingNo)}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="ヤマト運輸の荷物追跡ページを新しいタブで開きます"
+              className="tabnum mt-1 block whitespace-nowrap text-xs text-gold-300 underline underline-offset-2 transition hover:text-gold-200"
+            >
+              {customer.trackingNo}
+              <span className="ml-1 text-ink-400">お届け状況</span>
+            </a>
+          ) : null}
         </Td>
         <Td numeric className="whitespace-nowrap">
           {fullDate(customer.contractedOn)}
@@ -371,9 +433,33 @@ export function CustomerRow({
                 </span>
               </label>
 
+              {/* 「誰が売ったか」を後からでも埋められるようにする欄。
+                  一覧の「担当スタッフ」列が空欄の方を、本部が聞き取って入れる想定。 */}
+              <label className="block md:max-w-sm">
+                <span className={labelCls}>担当スタッフのコード</span>
+                <input
+                  type="text"
+                  name="staffCode"
+                  list={STAFF_CODE_LIST_ID}
+                  maxLength={20}
+                  defaultValue={customer.staffCode}
+                  disabled={saving}
+                  placeholder="例：RIM0003"
+                  className={`${inputCls} tabnum`}
+                />
+                <span className={hintCls}>
+                  このお申し込みを取った方のコードです。入力欄を押すと、登録されているコードから選べます。
+                  分からないときは空のままにしてください。
+                  {customer.staffCode
+                    ? staffName
+                      ? `　いまの登録：${customer.staffCode}（${staffName}）`
+                      : `　いまの登録：${customer.staffCode}（このコードは代理店一覧に見当たりません）`
+                    : ""}
+                </span>
+              </label>
+
               <div className="rounded-lg border border-ink-800 bg-ink-900/60 px-4 py-3 text-xs leading-relaxed text-ink-400">
-                担当代理店（{customer.agencyCode || "未設定"}
-                {customer.staffCode ? `／担当者 ${customer.staffCode}` : ""}）と紹介元（
+                担当代理店（{customer.agencyCode || "未設定"}）と紹介元（
                 {customer.referrerCode || "なし"}）は、報酬のお支払い先に直結するため、
                 この画面からは変えられません。付け替えが必要なときは本部内でご相談ください。
                 また、お客様の登録を消すことはできません。

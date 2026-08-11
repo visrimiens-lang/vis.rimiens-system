@@ -9,6 +9,7 @@ import {
   type SortState,
 } from "@/lib/list-params";
 import type { Product } from "@/actions/product-actions";
+import { channelLabel, rankShort } from "@/lib/labels";
 import {
   Card,
   EmptyState,
@@ -16,7 +17,6 @@ import {
   PageHeader,
   StatTile,
   Table,
-  Td,
   Th,
   yen,
 } from "@/components/ui";
@@ -75,6 +75,20 @@ function rewardMissing(p: Product): boolean {
   );
 }
 
+/**
+ * 販売単価が入っていない。
+ * お客様のお支払額が決まらないので、受注の登録でつまずく。
+ * 「0円」は無料と決めた商品なので、未入力（null）だけを拾う。
+ */
+function priceMissing(p: Product): boolean {
+  return p.price === null;
+}
+
+/** 商品名の並び。注意書きに「どの商品か」を書き出すのに使う。 */
+function nameList(items: Product[]): string {
+  return items.map((p) => p.name || "（商品名未設定）").join("・");
+}
+
 /** 並び替えに使える列。 */
 const SORT_COLUMNS = [
   "name",
@@ -108,10 +122,14 @@ function Head({ sort, params }: { sort: SortState; params: SearchParams }) {
         {th("name", "商品名", "left")}
         {th("price", "販売単価")}
         <Th align="center">報酬</Th>
-        {th("so", "総販売代理店")}
-        {th("niji", "2次代理店")}
-        {th("hanbai", "販売代理店")}
-        {th("toritsugi", "取次店")}
+        {/* 見出しの呼び方は src/lib/labels.ts に寄せる。
+            データベースには「2次代理店」で入っているが、2026-06-17 の呼称変更どおり
+            画面には「統括代理店」と出す。保存する値も報酬の計算も、これまでどおり。 */}
+        {th("so", rankShort("総販売代理店"))}
+        {th("niji", rankShort("2次代理店"))}
+        {/* この列だけはランクではなく販路種別（channel）の報酬額なので channelLabel を使う */}
+        {th("hanbai", channelLabel("販売代理店"))}
+        {th("toritsugi", rankShort("取次店"))}
         {th("points", "ポイント")}
         {th("order", "並び順")}
         <Th align="right">操作</Th>
@@ -181,13 +199,16 @@ export default async function AdminProductsPage({
   const stopped = ordered.filter((p) => !p.active);
   const rewardCount = active.filter((p) => p.rewardTarget).length;
   const missing = active.filter(rewardMissing);
+  const noPrice = active.filter(priceMissing);
   const highest = active.reduce((max, p) => Math.max(max, p.price ?? 0), 0);
+  // 単価と報酬額のどちらかが欠けている商品。表の行にも色を付けて見つけやすくする。
+  const needsInput = active.filter((p) => rewardMissing(p) || priceMissing(p)).length;
 
   return (
     <div className="space-y-6">
       {header}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <StatTile
           label="取扱中の商品"
           value={String(active.length)}
@@ -216,13 +237,32 @@ export default async function AdminProductsPage({
           unit="件"
           hint={stopped.length > 0 ? "下の表にまとめています" : "いまはありません"}
         />
+        <StatTile
+          label="金額の入力待ち"
+          value={String(needsInput)}
+          unit="件"
+          tone={needsInput > 0 ? "warn" : "default"}
+          hint={
+            needsInput > 0
+              ? "販売単価か報酬額が空欄の商品。表では行に色が付いています"
+              : "販売単価も報酬額もそろっています"
+          }
+        />
       </div>
 
       {missing.length > 0 ? (
         <Notice tone="warn">
           報酬の対象なのに、ランク別の報酬額がどこにも入っていない商品が {missing.length} 件あります
-          （{missing.map((p) => p.name || "（商品名未設定）").join("・")}）。
+          （{nameList(missing)}）。
           このままだと売れても報酬が立ちません。金額を入れるか、報酬の対象から外してください。
+        </Notice>
+      ) : null}
+
+      {noPrice.length > 0 ? (
+        <Notice tone="warn">
+          販売単価が入っていない商品が {noPrice.length} 件あります（{nameList(noPrice)}）。
+          お客様のお支払額が決まらないため、この商品での受注はご案内できません。
+          表の「内容を直す」から税込の単価を入れてください。
         </Notice>
       ) : null}
 
@@ -246,6 +286,8 @@ export default async function AdminProductsPage({
               報酬額は1台あたりの金額です。受注の台数を掛けた額が、その代理店の報酬になります。
               「—」は金額が未入力、「¥0」は報酬を出さないと決めた商品です。
               金額を直しても、すでに計上ずみの報酬は変わりません。これから登録される受注から新しい金額になります。
+              <br />
+              色が付いている行は、販売単価か報酬額が空欄のままの商品です。売る前に金額を入れてください。
             </p>
           </>
         )}

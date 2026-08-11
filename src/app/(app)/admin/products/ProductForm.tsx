@@ -8,6 +8,7 @@ import {
   type Product,
   type ProductFormState,
 } from "@/actions/product-actions";
+import { channelLabel, rankLabel } from "@/lib/labels";
 import { Badge, Notice, Td, cn, yen } from "@/components/ui";
 
 const initial: ProductFormState = {};
@@ -159,31 +160,33 @@ function Fields({ product, disabled }: { product?: Product; disabled?: boolean }
           空欄のままにすると「未設定」として保存し、一覧では「—」と出ます。
           報酬を出さないと決めている場合は 0 を入れてください（「未設定」と「0円」は区別しています）。
         </p>
+        {/* 呼び方は src/lib/labels.ts に寄せる。保存先の列名（amount_niji など）は
+            そのままなので、報酬の計算も過去の受注の金額も変わらない。 */}
         <div className="mt-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <MoneyField
             name="amountSo"
-            label="総販売代理店"
+            label={rankLabel("総販売代理店")}
             defaultValue={product?.amountSo}
             disabled={disabled}
             max={9_999_999}
           />
           <MoneyField
             name="amountNiji"
-            label="2次代理店"
+            label={rankLabel("2次代理店")}
             defaultValue={product?.amountNiji}
             disabled={disabled}
             max={9_999_999}
           />
           <MoneyField
             name="amountHanbai"
-            label="販売代理店"
+            label={channelLabel("販売代理店")}
             defaultValue={product?.amountHanbai}
             disabled={disabled}
             max={9_999_999}
           />
           <MoneyField
             name="amountToritsugi"
-            label="取次店"
+            label={rankLabel("取次店")}
             defaultValue={product?.amountToritsugi}
             disabled={disabled}
             max={9_999_999}
@@ -254,6 +257,11 @@ function rewardOverPrice(p: Product): boolean {
   return moneyCells(p).some((v) => v !== null && v > price);
 }
 
+/** 販売単価が未入力。「0円」は無料と決めた商品なので、空欄だけを拾う。 */
+function priceMissing(p: Product): boolean {
+  return p.price === null;
+}
+
 /**
  * 商品1件ぶんの行。「内容を直す」を押すと、同じ入力欄が下に開く。
  * 削除は用意しない。過去の受注が商品名でこの行を参照しているため、
@@ -268,14 +276,25 @@ export function ProductRow({ product }: { product: Product }) {
   const busy = saving || toggling;
   const message = editState.error || editState.ok || toggleState.error || toggleState.ok;
   const amounts = moneyCells(product);
+  const noPrice = priceMissing(product);
+  const noReward = rewardMissing(product);
+  // 取扱中なのに金額が空欄。売る前に手当てが要るので、行ごと色を変えて目立たせる。
+  // 取扱を止めた商品は売らないので、色は付けない（直す必要のない行が光ると見落としが増える）。
+  const needsInput = product.active && (noPrice || noReward);
   // 取扱を止められたら（＝取扱中でなくなったら）確認の問いかけは役目を終える。
   // 保存に失敗したときは取扱中のままなので、問いかけを残して理由を読んでもらう。
   const confirmOpen = confirming && product.active;
 
   return (
     <>
-      {/* 取扱を止めた商品は、背景を落として取扱中と見分けられるようにする。 */}
-      <tr className={product.active ? undefined : "bg-ink-950/50"}>
+      {/* 取扱を止めた商品は背景を落として見分けられるようにし、
+          金額が空欄のままの商品は左端に色を付けて、直す行がひと目で分かるようにする。 */}
+      <tr
+        className={cn(
+          !product.active && "bg-ink-950/50",
+          needsInput && "bg-warn-500/[0.07] [&>td:first-child]:border-l-2 [&>td:first-child]:border-l-warn-500",
+        )}
+      >
         <Td>
           {/* 「眼筋トレーニングマシンVIS本体　185,000円 ／ …」のような長い商品名が入る。
               幅を決めて折り返し、はみ出しても表ごと横スクロールで読めるようにする。 */}
@@ -290,14 +309,19 @@ export function ProductRow({ product }: { product: Product }) {
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {product.active ? null : <Badge tone="neutral">取扱停止</Badge>}
             {product.bonus10 ? <Badge tone="gold">10台ボーナス</Badge> : null}
-            {rewardMissing(product) ? <Badge tone="warn">報酬額が未入力</Badge> : null}
+            {noPrice ? <Badge tone="warn">販売単価が未入力</Badge> : null}
+            {noReward ? <Badge tone="warn">報酬額が未入力</Badge> : null}
             {rewardOverPrice(product) ? (
               <Badge tone="warn">報酬額が販売単価より高い</Badge>
             ) : null}
           </div>
         </Td>
         <Td numeric align="right" className="whitespace-nowrap">
-          {yen(product.price)}
+          {noPrice ? (
+            <span className="font-medium text-warn-100">未入力</span>
+          ) : (
+            yen(product.price)
+          )}
         </Td>
         <Td align="center">
           {product.rewardTarget ? (

@@ -25,7 +25,47 @@ import {
   jpMonthLabel,
   yen,
 } from "@/components/ui";
+import {
+  parseSort,
+  readParam,
+  sortRows,
+  type Accessors,
+  type SearchParams,
+  type SortState,
+} from "@/lib/list-params";
+import { SortableTh } from "@/components/SortableTh";
+import { rankLabel } from "@/lib/labels";
 import { MonthSelect } from "./MonthSelect";
+
+const BASE = "/rewards";
+
+/**
+ * 見出しを押して並び替えられる列。
+ * 単価と報酬額はスタッフには出さないので、スタッフのときは並び替えにも使わせない。
+ */
+const SORT_COLUMNS = ["shipped", "customer", "product", "qty", "amount", "owner"];
+const REWARD_SORT_COLUMNS = [...SORT_COLUMNS, "unit", "reward"];
+
+/** 既定は出荷完了日の新しい順。 */
+const DEFAULT_SORT: SortState = { column: "", desc: false };
+
+type Row = Record<string, unknown>;
+
+const text = (r: Row, k: string): string => {
+  const v = r[k];
+  return v === null || v === undefined ? "" : String(v);
+};
+
+/**
+ * 売上にも報酬にも数えない受注か。
+ *
+ * キャンセルされた受注と、信販の審査が通らなかった受注は入金にならない。
+ * 支払通知のもとになる画面なので、金額にも台数にも入れない。
+ * 何件外したかは画面に出して、消えたことに気づけるようにする。
+ */
+function isStopped(r: Row): boolean {
+  return text(r, "ship_status") === "キャンセル" || text(r, "review_result") === "否決";
+}
 
 /** 報酬の合計。1件でも算出できないものがあれば null（0円と書かないため）。 */
 function sumReward(rows: OrderWithReward[]): number | null {
@@ -69,28 +109,30 @@ function groupByOwner(rows: OrderWithReward[], names: Map<string, string>): Owne
 export default async function RewardsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string }>;
+  searchParams: Promise<{ month?: string; sort?: string; dir?: string }>;
 }) {
   const viewer = await currentViewer();
   if (!viewer) redirect("/login");
   if (viewer.kind !== "agency") redirect("/admin/agencies");
 
-  const { month: monthParam } = await searchParams;
-  const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(monthParam ?? "")
-    ? monthParam!
-    : currentMonth();
+  const params: SearchParams = await searchParams;
+  const monthParam = readParam(params, "month");
+  const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(monthParam) ? monthParam : currentMonth();
   const months = recentMonths(12);
   const monthOptions = months.includes(month) ? months : [month, ...months];
 
   let rows: OrderWithReward[] = [];
   let names = new Map<string, string>();
-  let rankLabel = "";
+  /** 報酬の単価を引くときのランク（データベースの値）。表示には rankLabel() を通す。 */
+  let rewardRank = "";
   let rewardAvailable = true;
   let rankMissing = false;
   let errorMessage: string | null = null;
   // スタッフ（コード区分 02）には報酬の金額を出さない。
   // 2026-04-23 の打ち合わせで「金額が見えるのは親アカウントだけ」と決まっている。
   let isStaff = false;
+  /** キャンセル・審査否決のため集計から外した件数。 */
+  let stoppedCount = 0;
 
   try {
     const self = await findAgencyByCode(viewer.code);
@@ -99,16 +141,19 @@ export default async function RewardsPage({
     } else {
       const descendants = await listDescendants(self.code);
       names = new Map([self, ...descendants].map((a) => [a.code, a.name]));
-      rankLabel = effectiveRank(self);
+      rewardRank = effectiveRank(self);
       rewardAvailable = canComputeReward(self);
-      rankMissing = rankLabel === "";
+      rankMissing = rewardRank === "";
       isStaff = self.codeKind === "02";
 
       const { raw } = await listOrders(scopeCodes(self, descendants), {
         month,
         basis: "shipped",
       });
-      rows = attachRewards(raw, rankLabel).sort((a, b) =>
+      // キャンセルと審査否決は支払の対象にならないので、明細にも合計にも入れない。
+      const live = raw.filter((r) => !isStopped(r));
+      stoppedCount = raw.length - live.length;
+      rows = attachRewards(live, rewardRank).sort((a, b) =>
         (b.shippedAt || "").localeCompare(a.shippedAt || ""),
       );
     }
@@ -122,12 +167,31 @@ export default async function RewardsPage({
   // 金額を出してよいのは親アカウントだけ。スタッフには件数と売上だけ見せる。
   const showReward = !isStaff;
 
+  // 並び替え。単価と報酬額の列はスタッフには出さないので、選べる列も分ける。
+  const sort = parseSort(
+    params,
+    DEFAULT_SORT,
+    showReward ? REWARD_SORT_COLUMNS : SORT_COLUMNS,
+  );
+  const accessors: Accessors<OrderWithReward> = {
+    shipped: (r) => r.shippedAt,
+    customer: (r) => r.customerName,
+    product: (r) => r.productName,
+    qty: (r) => r.quantity || 1,
+    amount: (r) => r.amount,
+    owner: (r) => r.ownerCode,
+    unit: (r) => r.unitReward,
+    reward: (r) => r.reward,
+  };
+  const detail = sortRows(rows, sort.column, sort.desc, accessors);
+
   const units = sumUnits(rows);
   const salesTotal = rows.reduce((s, r) => s + r.amount, 0);
   const rewardTotal = showReward && rewardAvailable ? sumReward(rows) : null;
   const hasMissingUnit =
     showReward && (!rewardAvailable || rows.some((r) => r.unitReward === null));
   const groups = groupByOwner(rows, names);
+  const rewardRankText = rankLabel(rewardRank);
 
   // 「150台 × 62,700円」の形で見せられるのは、単価が1種類に揃っているときだけ。
   const distinctUnits = [...new Set(rows.map((r) => r.unitReward))];
@@ -165,8 +229,8 @@ export default async function RewardsPage({
         の受注が対象で、まだ出荷していない受注はここには出ません。
         お客様のお手元に届く「配達完了」より前の段階で対象になるため、
         顧客一覧の進み具合とは表示がずれることがあります。
-        {showReward && rankLabel
-          ? `報酬額は「${rankLabel}」としての単価で計算しています。`
+        {showReward && rewardRank
+          ? `報酬額は「${rewardRankText}」としての単価で計算しています。`
           : null}
       </Notice>
 
@@ -176,6 +240,14 @@ export default async function RewardsPage({
           この画面では、ご自身が売った件数と売上金額のみ表示しています。
         </Notice>
       )}
+
+      {stoppedCount > 0 ? (
+        <Notice tone="warn">
+          {jpMonthLabel(month)}に出荷が完了したもののうち {stoppedCount} 件は、キャンセル
+          または信販の審査が通らなかったため、この画面の台数・売上
+          {showReward ? "・報酬" : ""}には数えていません。内容は顧客一覧でご確認ください。
+        </Notice>
+      ) : null}
 
       <div className="grid gap-4 sm:grid-cols-3">
         <StatTile
@@ -226,18 +298,74 @@ export default async function RewardsPage({
           <Table>
             <thead>
               <tr>
-                <Th>出荷完了日</Th>
-                <Th>顧客名</Th>
-                <Th>商品名</Th>
-                <Th align="right">台数</Th>
-                <Th align="right">販売金額</Th>
-                {showReward ? <Th align="right">単価</Th> : null}
-                {showReward ? <Th align="right">報酬額</Th> : null}
-                <Th>担当コード</Th>
+                <SortableTh
+                  column="shipped"
+                  label="出荷完了日"
+                  sort={sort}
+                  basePath={BASE}
+                  params={params}
+                />
+                <SortableTh
+                  column="customer"
+                  label="顧客名"
+                  sort={sort}
+                  basePath={BASE}
+                  params={params}
+                />
+                <SortableTh
+                  column="product"
+                  label="商品名"
+                  sort={sort}
+                  basePath={BASE}
+                  params={params}
+                />
+                <SortableTh
+                  column="qty"
+                  label="台数"
+                  sort={sort}
+                  basePath={BASE}
+                  params={params}
+                  align="right"
+                />
+                <SortableTh
+                  column="amount"
+                  label="販売金額"
+                  sort={sort}
+                  basePath={BASE}
+                  params={params}
+                  align="right"
+                />
+                {showReward ? (
+                  <SortableTh
+                    column="unit"
+                    label="単価"
+                    sort={sort}
+                    basePath={BASE}
+                    params={params}
+                    align="right"
+                  />
+                ) : null}
+                {showReward ? (
+                  <SortableTh
+                    column="reward"
+                    label="報酬額"
+                    sort={sort}
+                    basePath={BASE}
+                    params={params}
+                    align="right"
+                  />
+                ) : null}
+                <SortableTh
+                  column="owner"
+                  label="担当コード"
+                  sort={sort}
+                  basePath={BASE}
+                  params={params}
+                />
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {detail.map((r) => (
                 <tr key={r.recordId}>
                   <Td numeric>{jpDate(r.shippedAt)}</Td>
                   <Td>{r.customerName || "—"}</Td>

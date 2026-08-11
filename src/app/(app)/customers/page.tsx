@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import { findAgencyByCode, listDescendants } from "@/lib/agencies";
@@ -32,10 +33,50 @@ import {
   yamatoTrackingUrl,
   type ProgressStep,
 } from "@/components/Progress";
-import { CustomerFilters, type OwnerOption } from "./filters";
+import {
+  ALL,
+  buildListHref,
+  matchesKeyword,
+  parseSort,
+  readParam,
+  sortRows,
+  type Accessors,
+  type FilterOption,
+  type SearchParams,
+  type SortState,
+} from "@/lib/list-params";
+import {
+  FilterActions,
+  FilterBar,
+  FilterSelect,
+  FilterSummary,
+  FilterText,
+  SortableTh,
+} from "@/components/SortableTh";
+import { codeKindLabel } from "@/lib/labels";
 
 export const metadata = { title: "顧客一覧｜VIS 代理店ポータル" };
 
+const BASE = "/customers";
+
+/** 見出しを押して並び替えられる列。URL を手で書き換えられても、ここに無い列は効かない。 */
+const SORT_COLUMNS = [
+  "date",
+  "customer",
+  "product",
+  "qty",
+  "amount",
+  "owner",
+  "staff",
+  "progress",
+  "review",
+  "ship",
+];
+
+/** 既定は受注日の新しい順（データベースから取ったままの並び）。 */
+const DEFAULT_SORT: SortState = { column: "", desc: false };
+
+/** データベースから届いた1行。必要な項目だけ text() で取り出す。 */
 type Row = Record<string, unknown>;
 
 /**
@@ -76,9 +117,9 @@ const text = (r: Row, k: string): string => {
 };
 
 /** "YYYY-MM" か "all" だけを受け付ける。それ以外は今月に落とす。 */
-function normalizeMonth(raw: string | undefined, fallback: string): string {
-  if (raw === "all") return "all";
-  if (raw && /^\d{4}-(0[1-9]|1[0-2])$/.test(raw)) return raw;
+function normalizeMonth(raw: string, fallback: string): string {
+  if (raw === ALL) return ALL;
+  if (/^\d{4}-(0[1-9]|1[0-2])$/.test(raw)) return raw;
   return fallback;
 }
 
@@ -88,32 +129,63 @@ function orderDate(v: string, withYear: boolean): string {
   return withYear ? `${v.slice(0, 4)}/${jpDate(v)}` : jpDate(v);
 }
 
+/**
+ * 受注1件に、一覧で出したいものを足したもの。
+ *
+ * 誰が売ったか（担当スタッフ）は受注の「売ったスタッフ」に入る。
+ * 入っていない受注もあるため、その場合は担当コードの持ち主が
+ * スタッフ・取次パートナーのときだけ、その人を担当として扱う。
+ */
+type OrderView = OrderWithReward & {
+  reviewResult: string;
+  deliveredOn: string;
+  /** 担当スタッフのコード。分からないときは空。 */
+  staffCode: string;
+  /** 担当スタッフの名前。分からないときは空。 */
+  staffName: string;
+  /** 担当スタッフの補足（スタッフ / 取次パートナー / 未登録の理由）。 */
+  staffNote: string;
+  /** キャンセル・審査否決で止まっているか。 */
+  stopped: boolean;
+  /** 進み具合の割合。止まっているものは 0。 */
+  percent: number;
+};
+
 export default async function CustomersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string; code?: string }>;
+  searchParams: Promise<{
+    month?: string;
+    code?: string;
+    q?: string;
+    order?: string;
+    sort?: string;
+    dir?: string;
+  }>;
 }) {
   const viewer = await currentViewer();
   if (!viewer) redirect("/login");
   if (viewer.kind !== "agency") redirect("/admin/agencies");
 
-  const { month: monthParam, code: codeParam } = await searchParams;
+  const params: SearchParams = await searchParams;
   const thisMonth = currentMonth();
   const months = recentMonths(12);
-  const month = normalizeMonth(monthParam, thisMonth);
-  const selectedCode = codeParam?.trim() ? codeParam.trim() : "all";
-  const periodLabel = month === "all" ? "全期間" : jpMonthLabel(month);
-  const allPeriod = month === "all";
+
+  // トスアップの「受注を見る」から来たときは、その受注1件だけを開く。
+  // どの月の受注か分からないので、期間は全期間にしておく。
+  const pinnedOrder = readParam(params, "order").replace(/[^0-9]/g, "");
+  const month = pinnedOrder ? ALL : normalizeMonth(readParam(params, "month"), thisMonth);
+  const selectedCode = readParam(params, "code") || ALL;
+  const keyword = readParam(params, "q");
+  const sort = parseSort(params, DEFAULT_SORT, SORT_COLUMNS);
+
+  const allPeriod = month === ALL;
+  const periodLabel = allPeriod ? "全期間" : jpMonthLabel(month);
 
   let self: Agency | null = null;
   let members: Agency[] = [];
-  let periodOrders: OrderWithReward[] = [];
+  let periodOrders: OrderView[] = [];
   let error: string | null = null;
-
-  // 受注1件ごとの「審査結果」と「配達完了日」。進み具合の判定に使う。
-  const reviewByOrder = new Map<string, string>();
-  const customerByOrder = new Map<string, string>();
-  const deliveredByCustomer = new Map<string, string>();
 
   try {
     self = await findAgencyByCode(viewer.code);
@@ -126,18 +198,24 @@ export default async function CustomersPage({
         scopeCodes(self, descendants),
         allPeriod ? {} : { month },
       );
-      periodOrders = orders;
 
+      // 受注1件ごとの「審査結果」「売ったスタッフ」「お客様」。
+      // 進み具合と担当スタッフの判定に使う。
+      const reviewByOrder = new Map<string, string>();
+      const staffByOrder = new Map<string, string>();
+      const customerByOrder = new Map<string, string>();
       for (const r of raw) {
         const id = text(r, "id");
         if (!id) continue;
         reviewByOrder.set(id, text(r, "review_result"));
+        staffByOrder.set(id, text(r, "staff_code"));
         const customerId = text(r, "customer_id");
         if (customerId) customerByOrder.set(id, customerId);
       }
 
       // 配達が終わった日は顧客台帳のほうに入る。
       // 顧客が紐づいている受注があるときだけ引きに行く。
+      const deliveredByCustomer = new Map<string, string>();
       const customerIds = [...new Set(customerByOrder.values())].filter((id) =>
         /^\d+$/.test(id),
       );
@@ -154,6 +232,56 @@ export default async function CustomersPage({
           // 配達完了日が読めなくても、出荷までの進み具合は表示できるので続ける
         }
       }
+
+      const memberByCode = new Map(members.map((m) => [m.code, m]));
+
+      /** 誰が売ったか。受注のスタッフ欄が空のときは担当コードから補う。 */
+      const staffOf = (o: OrderWithReward) => {
+        const code = staffByOrder.get(o.recordId) ?? "";
+        if (code) {
+          const person = memberByCode.get(code);
+          return {
+            staffCode: code,
+            staffName: person?.name ?? "",
+            staffNote: person
+              ? codeKindLabel(person.codeKind)
+              : "代理店一覧に該当なし",
+          };
+        }
+        // 取次紹介コードが入っている受注は、その取次パートナー本人が売った扱い。
+        const owner = memberByCode.get(o.ownerCode);
+        if (owner && (owner.codeKind === "01" || owner.codeKind === "02")) {
+          return {
+            staffCode: owner.code,
+            staffName: owner.name,
+            staffNote: codeKindLabel(owner.codeKind),
+          };
+        }
+        return {
+          staffCode: "",
+          staffName: "",
+          staffNote: "担当スタッフの記録なし",
+        };
+      };
+
+      periodOrders = orders.map((o) => {
+        const reviewResult = reviewByOrder.get(o.recordId) ?? "";
+        const deliveredOn =
+          deliveredByCustomer.get(customerByOrder.get(o.recordId) ?? "") ?? "";
+        const state = progressOf({
+          reviewResult,
+          shipStatus: o.shippingStatus,
+          deliveredOn,
+        });
+        return {
+          ...o,
+          ...staffOf(o),
+          reviewResult,
+          deliveredOn,
+          stopped: state.stopped,
+          percent: state.stopped ? 0 : state.percent,
+        };
+      });
     }
   } catch (e) {
     error =
@@ -165,7 +293,7 @@ export default async function CustomersPage({
   const header = (
     <PageHeader
       title="顧客一覧"
-      description="自分と配下が獲得した受注です。申込から商品のお届けまで、いまどこまで進んでいるかを一覧で確認できます。"
+      description="自分と配下が獲得した受注です。申込から商品のお届けまで、いまどこまで進んでいるかを一覧で確認できます。お客様のお名前・電話番号で探せます。"
     />
   );
 
@@ -180,16 +308,14 @@ export default async function CustomersPage({
 
   const nameByCode = new Map(members.map((m) => [m.code, m.name]));
 
-  /** その受注の進み具合を判定するための材料をそろえる。 */
-  const sourceOf = (o: OrderWithReward) => ({
-    reviewResult: reviewByOrder.get(o.recordId) ?? "",
-    shipStatus: o.shippingStatus,
-    deliveredOn: deliveredByCustomer.get(customerByOrder.get(o.recordId) ?? "") ?? "",
-  });
+  // トスアップから1件だけを開いているときは、その受注に絞る。
+  const scoped = pinnedOrder
+    ? periodOrders.filter((o) => o.recordId === pinnedOrder)
+    : periodOrders;
 
   // 担当コードごとの件数（期間で絞ったあと・担当で絞る前）
   const countByCode = new Map<string, number>();
-  for (const o of periodOrders) {
+  for (const o of scoped) {
     const key = o.ownerCode || "";
     countByCode.set(key, (countByCode.get(key) ?? 0) + 1);
   }
@@ -198,7 +324,7 @@ export default async function CustomersPage({
   const optionCodes = new Set<string>(members.map((m) => m.code).filter(Boolean));
   for (const code of countByCode.keys()) if (code) optionCodes.add(code);
 
-  const options: OwnerOption[] = [...optionCodes]
+  const ownerOptions: FilterOption[] = [...optionCodes]
     .map((code) => ({
       code,
       name: nameByCode.get(code) ?? "",
@@ -208,56 +334,143 @@ export default async function CustomersPage({
     .sort((a, b) => {
       if (a.isSelf !== b.isSelf) return a.isSelf ? -1 : 1;
       return a.code.localeCompare(b.code);
-    });
+    })
+    .map((o) => ({
+      value: o.code,
+      label: `${o.code}${o.name ? `　${o.name}` : ""}${o.isSelf ? "（自分）" : ""}`,
+      count: o.count,
+    }));
 
-  const rows =
-    selectedCode === "all"
-      ? periodOrders
-      : periodOrders.filter((o) => o.ownerCode === selectedCode);
+  const monthOptions: FilterOption[] = months.map((m) => ({
+    value: m,
+    label: `${jpMonthLabel(m)}${m === thisMonth ? "（今月）" : ""}`,
+    count: 0,
+  }));
 
-  const unitTotal = rows.reduce((s, o) => s + (o.quantity || 1), 0);
-  const salesTotal = rows.reduce((s, o) => s + o.amount, 0);
-  const selectedName = nameByCode.get(selectedCode) ?? "";
+  /* --- 絞り込み --- */
+  const found = scoped.filter((o) => {
+    if (selectedCode !== ALL && o.ownerCode !== selectedCode) return false;
+    // 2026-07-09 の回答書どおり、お客様の氏名と電話番号で探せるようにする。
+    return matchesKeyword(keyword, [o.customerName, o.phone]);
+  });
 
-  // 進み具合の内訳。件数だけ先に数えて、上の数字タイルに出す。
-  const states = rows.map((o) => progressOf(sourceOf(o)));
-  const shippedCount = states.filter((s) => !s.stopped && s.percent >= 80).length;
-  const stoppedCount = states.filter((s) => s.stopped).length;
+  /* --- 並び替え --- */
+  const accessors: Accessors<OrderView> = {
+    date: (o) => o.date,
+    customer: (o) => o.customerName,
+    product: (o) => o.productName,
+    qty: (o) => o.quantity || 1,
+    amount: (o) => o.amount,
+    owner: (o) => o.ownerCode,
+    staff: (o) => o.staffName || o.staffCode,
+    progress: (o) => o.percent,
+    review: (o) => o.reviewResult,
+    ship: (o) => o.shippingStatus,
+  };
+  const rows = sortRows(found, sort.column, sort.desc, accessors);
 
-  // 配達の完了日が入った受注があるかどうかで、凡例と注記の書き方を変える。
-  const deliveredCount = states.filter((s) => !s.stopped && s.percent >= 100).length;
+  // キャンセルと審査否決は、売上にも台数にも数えない。
+  // ただし表からは消さず、件数を別に出して気づけるようにする。
+  const live = rows.filter((o) => !o.stopped);
+  const stoppedCount = rows.length - live.length;
+  const unitTotal = live.reduce((s, o) => s + (o.quantity || 1), 0);
+  const salesTotal = live.reduce((s, o) => s + o.amount, 0);
+  const shippedCount = live.filter((o) => o.percent >= 80).length;
+  const deliveredCount = live.filter((o) => o.percent >= 100).length;
+
   const legendSteps =
     deliveredCount > 0
       ? PROGRESS_STEPS
       : PROGRESS_STEPS.filter((s) => s.key !== "delivered");
 
+  const selectedName = nameByCode.get(selectedCode) ?? "";
+  const isFiltered = Boolean(keyword) || selectedCode !== ALL;
+  const clearHref = buildListHref(BASE, params, { q: "", code: "" });
+  const allHref = buildListHref(BASE, params, {
+    q: "",
+    code: "",
+    order: "",
+    month: "",
+  });
+
   return (
     <div className="space-y-6">
       {header}
 
+      {pinnedOrder ? (
+        <Notice tone="info">
+          トスアップから受注番号 {pinnedOrder} を開いています。
+          <Link
+            href={allHref}
+            className="ml-1.5 underline underline-offset-2 hover:text-gold-300"
+          >
+            すべての受注に戻る
+          </Link>
+        </Notice>
+      ) : null}
+
       <Card>
-        <CustomerFilters
-          month={month}
-          months={months}
-          code={selectedCode}
-          options={options}
-          defaultMonth={thisMonth}
-        />
+        <FilterBar
+          action={BASE}
+          hidden={{
+            sort: sort.column,
+            dir: sort.column ? (sort.desc ? "desc" : "asc") : "",
+          }}
+        >
+          <FilterText
+            name="q"
+            label="お客様のお名前・電話番号"
+            value={keyword}
+            placeholder="例：山田／09012345678"
+            width="w-64"
+          />
+          <FilterSelect
+            name="month"
+            label="期間"
+            value={allPeriod ? ALL : month}
+            options={monthOptions}
+            allLabel="全期間"
+            showCount={false}
+            width="w-44"
+          />
+          <FilterSelect
+            name="code"
+            label="担当コード"
+            value={selectedCode}
+            options={ownerOptions}
+            allLabel={`すべての担当（${scoped.length}）`}
+            width="w-72"
+          />
+          <FilterActions clearHref={clearHref} filtered={isFiltered} />
+        </FilterBar>
       </Card>
+
+      {isFiltered ? (
+        <FilterSummary
+          total={scoped.length}
+          shown={rows.length}
+          clearHref={clearHref}
+          note={periodLabel}
+        />
+      ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatTile
           label="受注件数"
-          value={String(rows.length)}
+          value={String(live.length)}
           unit="件"
-          hint={periodLabel}
+          hint={
+            stoppedCount > 0
+              ? `${periodLabel}（中止 ${stoppedCount}件を除く）`
+              : periodLabel
+          }
         />
         <StatTile label="台数" value={String(unitTotal)} unit="台" hint="数量の合計" />
         <StatTile
           label="販売金額"
           value={yen(salesTotal)}
           tone="gold"
-          hint="お客様のお支払額の合計"
+          hint="お客様のお支払額の合計（中止ぶんを除く）"
         />
         <StatTile
           label="発送まで進んだ受注"
@@ -274,54 +487,140 @@ export default async function CustomersPage({
         />
       </div>
 
+      {stoppedCount > 0 ? (
+        <Notice tone="warn">
+          キャンセル・審査否決になった受注が {stoppedCount} 件あります。
+          台数・販売金額には数えていませんが、下の表には「中止」として残しています。
+        </Notice>
+      ) : null}
+
       <Card
         title={`受注明細（${periodLabel}${
-          selectedCode === "all" ? "" : `・${selectedCode}`
+          selectedCode === ALL ? "" : `・${selectedCode}`
         }）`}
         action={
           <span className="text-xs text-ink-400">
-            担当={selectedCode === "all" ? "すべて" : selectedCode}
+            担当={selectedCode === ALL ? "すべて" : selectedCode}
           </span>
         }
       >
         {rows.length === 0 ? (
-          selectedCode === "all" ? (
+          isFiltered ? (
             <EmptyState
-              title="まだ受注がありません"
-              description="QR2の決済が完了すると、この一覧に自動で表示されます。反映は数分以内です。"
+              title="条件に合う受注がありません"
+              description={`お名前・電話番号は一部でも探せます。担当コードを「すべての担当」に、期間を「全期間」に広げると見つかることがあります。${
+                selectedCode === ALL
+                  ? ""
+                  : `いまは ${selectedCode}${
+                      selectedName ? `（${selectedName}）` : ""
+                    } のぶんだけを表示する条件です。`
+              }`}
+            />
+          ) : pinnedOrder ? (
+            <EmptyState
+              title="この受注は見つかりませんでした"
+              description="成約したトスアップに紐づく受注が、まだ登録されていないか、ご自身の担当から外れています。本部にお問い合わせください。"
             />
           ) : (
             <EmptyState
-              title="この担当コードの受注はありません"
-              description={`${selectedCode}${
-                selectedName ? `（${selectedName}）` : ""
-              } の${periodLabel}の受注はまだありません。担当コードを「すべての担当」に戻すと、配下全体の受注を確認できます。`}
+              title={
+                allPeriod ? "まだ受注がありません" : `${periodLabel}の受注はありません`
+              }
+              description={
+                allPeriod
+                  ? "QR2の決済が完了すると、この一覧に自動で表示されます。反映は数分以内です。"
+                  : "期間を「全期間」に切り替えると、これまでの受注を確認できます。"
+              }
             />
           )
         ) : (
           <Table>
             <thead>
               <tr>
-                <Th>受注日</Th>
-                <Th>顧客名</Th>
-                <Th>商品名</Th>
-                <Th align="right">台数</Th>
-                <Th align="right">金額</Th>
-                <Th>担当コード</Th>
-                <Th>進み具合</Th>
-                <Th>審査結果</Th>
-                <Th>出荷状況・送り状番号</Th>
+                <SortableTh
+                  column="date"
+                  label="受注日"
+                  sort={sort}
+                  basePath={BASE}
+                  params={params}
+                />
+                <SortableTh
+                  column="customer"
+                  label="顧客名"
+                  sort={sort}
+                  basePath={BASE}
+                  params={params}
+                />
+                <Th>電話番号</Th>
+                <SortableTh
+                  column="product"
+                  label="商品名"
+                  sort={sort}
+                  basePath={BASE}
+                  params={params}
+                />
+                <SortableTh
+                  column="qty"
+                  label="台数"
+                  sort={sort}
+                  basePath={BASE}
+                  params={params}
+                  align="right"
+                />
+                <SortableTh
+                  column="amount"
+                  label="金額"
+                  sort={sort}
+                  basePath={BASE}
+                  params={params}
+                  align="right"
+                />
+                <SortableTh
+                  column="owner"
+                  label="担当コード"
+                  sort={sort}
+                  basePath={BASE}
+                  params={params}
+                />
+                <SortableTh
+                  column="staff"
+                  label="担当スタッフ"
+                  sort={sort}
+                  basePath={BASE}
+                  params={params}
+                />
+                <SortableTh
+                  column="progress"
+                  label="進み具合"
+                  sort={sort}
+                  basePath={BASE}
+                  params={params}
+                />
+                <SortableTh
+                  column="review"
+                  label="審査結果"
+                  sort={sort}
+                  basePath={BASE}
+                  params={params}
+                />
+                <SortableTh
+                  column="ship"
+                  label="出荷状況・送り状番号"
+                  sort={sort}
+                  basePath={BASE}
+                  params={params}
+                />
                 <Th>照合ステータス</Th>
               </tr>
             </thead>
             <tbody>
               {rows.map((o) => {
                 const name = nameByCode.get(o.ownerCode);
-                const source = sourceOf(o);
                 return (
                   <tr key={o.recordId}>
                     <Td numeric>{orderDate(o.date, allPeriod)}</Td>
                     <Td>{o.customerName || "—"}</Td>
+                    <Td numeric>{o.phone || "—"}</Td>
                     <Td>{o.productName || "—"}</Td>
                     <Td numeric align="right">
                       {o.quantity || 1}
@@ -345,10 +644,33 @@ export default async function CustomersPage({
                       </div>
                     </Td>
                     <Td>
-                      <Progress compact {...source} />
+                      {o.staffCode || o.staffName ? (
+                        <>
+                          <div className="text-ink-100">
+                            {o.staffName || "（名称未登録）"}
+                          </div>
+                          <div className="mt-1 text-xs text-ink-400">
+                            <span className="tabnum">{o.staffCode || "コードなし"}</span>
+                            {o.staffNote ? `・${o.staffNote}` : ""}
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-ink-500">—</span>
+                          <div className="mt-1 text-xs text-ink-400">{o.staffNote}</div>
+                        </>
+                      )}
                     </Td>
                     <Td>
-                      <StatusBadge status={source.reviewResult} />
+                      <Progress
+                        compact
+                        reviewResult={o.reviewResult}
+                        shipStatus={o.shippingStatus}
+                        deliveredOn={o.deliveredOn}
+                      />
+                    </Td>
+                    <Td>
+                      <StatusBadge status={o.reviewResult} />
                     </Td>
                     <Td>
                       <StatusBadge status={o.shippingStatus} />
@@ -377,7 +699,8 @@ export default async function CustomersPage({
             <tfoot>
               <tr>
                 <Td className="font-semibold text-ink-50">合計</Td>
-                <Td className="font-semibold text-ink-50">{rows.length}件</Td>
+                <Td className="font-semibold text-ink-50">{live.length}件</Td>
+                <Td> </Td>
                 <Td> </Td>
                 <Td numeric align="right" className="font-semibold text-ink-50">
                   {unitTotal}
@@ -386,8 +709,13 @@ export default async function CustomersPage({
                   {yen(salesTotal)}
                 </Td>
                 <Td> </Td>
-                <Td className="text-xs text-ink-400">発送まで進んだ受注 {shippedCount}件</Td>
                 <Td> </Td>
+                <Td className="text-xs text-ink-400">
+                  発送まで進んだ受注 {shippedCount}件
+                </Td>
+                <Td className="text-xs text-ink-400">
+                  {stoppedCount > 0 ? `中止 ${stoppedCount}件は合計に含めていません` : " "}
+                </Td>
                 <Td> </Td>
                 <Td> </Td>
               </tr>
@@ -413,6 +741,8 @@ export default async function CustomersPage({
 
       <Notice tone="info">
         担当コードは、取次紹介コードが入っている受注ではそのコード、入っていない受注では受注に記録された代理店コードです。
+        「担当スタッフ」は受注に記録された、実際に売った方です。記録が無い受注は、担当コードの持ち主が
+        取次パートナー・スタッフのときだけその方を出し、会社としての受注は「—」と表示します。
         コードの下の名前は代理店一覧から引いています。名前が出ない場合は、代理店一覧にそのコードが登録されていないか、
         配下から外れています。
       </Notice>

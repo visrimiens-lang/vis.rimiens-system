@@ -3,6 +3,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import { select, selectOne } from "@/lib/db";
+import { rankLabel, rankShort } from "@/lib/labels";
+import { digitsOf } from "@/lib/list-params";
 import {
   Badge,
   Card,
@@ -61,6 +63,15 @@ function fullDateTime(v: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+/**
+ * ヤマト運輸の追跡ページ。
+ * 番号にハイフンや空白が入っていても開けるよう、数字だけにして渡す。
+ */
+function trackingUrl(trackingNo: string): string {
+  const digits = digitsOf(trackingNo) || trackingNo;
+  return `https://toi.kuronekoyamato.co.jp/cgi-bin/tneko?number00=1&number01=${encodeURIComponent(digits)}`;
 }
 
 /** 項目1つぶんの表示。値が空なら「—」を出す。 */
@@ -202,6 +213,21 @@ export default async function AdminOrderDetailPage({
   const shipStatus = str(order, "ship_status");
   const matchStatus = str(order, "match_status");
   const referrerCode = str(order, "referrer_code");
+  const reviewResult = str(order, "review_result");
+  /**
+   * 取り消されたご注文。
+   * キャンセルと審査否決は、受注一覧の売上合計・支払対象額・代理店ごとの集計から外している。
+   * 判定を一覧（admin/orders/page.tsx）と同じにしておかないと、
+   * 一覧では消えているのに詳細では売上のように見える、という食い違いが起きる。
+   */
+  const voided = shipStatus === "キャンセル" || reviewResult === "否決";
+  /** 「キャンセル」「審査否決」「キャンセル・審査否決」。取り消しの理由をそのまま文章に差し込む。 */
+  const voidedLabel = [
+    shipStatus === "キャンセル" ? "キャンセル" : "",
+    reviewResult === "否決" ? "審査否決" : "",
+  ]
+    .filter(Boolean)
+    .join("・");
 
   /* --- 付随する情報。読めなくても受注そのものは出す --- */
   let rewards: Row[] = [];
@@ -256,6 +282,20 @@ export default async function AdminOrderDetailPage({
     .reduce((s, r) => s + num(r, "amount"), 0);
   const cancelled = rewards.filter((r) => str(r, "status") === "取消").length;
 
+  /**
+   * 取り消し扱いの受注に、支払対象のまま残っている報酬。
+   *
+   * 報酬は受注が登録された時点で「未確定」として立つ（lib/intake.ts の accrueRewards）。
+   * それを打ち消すマイナスは、出荷状況をキャンセルにしたときにしか立たない
+   * （lib/rewards.ts の onShipStatusChanged）。
+   * 一方で受注一覧は、審査否決の受注も支払対象額から外している。
+   * そのため審査否決だけの受注は、一覧では 0 円なのにこの画面には金額が残り、
+   * 同じ受注の報酬見込みが一覧と詳細で食い違って見える。
+   * 数字そのものを消すかどうかは運用の判断が要るので、ここでは
+   * 「支払対象にならない」と断り書きを出して、一覧と読み方を揃える。
+   */
+  const rewardLeftOver = voided && confirmed + pending > 0;
+
   const needsCheck = matchStatus === "要確認";
   const rewardOff = product !== null && str(product, "reward_target") === "対象外";
   const productUnknown = Boolean(productName) && product === null;
@@ -271,8 +311,12 @@ export default async function AdminOrderDetailPage({
         <StatTile
           label="ご請求額"
           value={yen(amount)}
-          tone="gold"
-          hint={`${productName || "商品名なし"}・${quantity.toLocaleString("ja-JP")} 台`}
+          tone={voided ? "warn" : "gold"}
+          hint={
+            voided
+              ? `${productName || "商品名なし"}・${quantity.toLocaleString("ja-JP")} 台（売上には数えていません）`
+              : `${productName || "商品名なし"}・${quantity.toLocaleString("ja-JP")} 台`
+          }
         />
         <StatTile
           label="出荷状況"
@@ -289,10 +333,13 @@ export default async function AdminOrderDetailPage({
         <StatTile
           label="確定した報酬"
           value={yen(confirmed)}
+          tone={voided ? "warn" : "default"}
           hint={
             rewardError
               ? "報酬を読み込めませんでした"
-              : `未確定 ${yen(pending)}${cancelled > 0 ? `・取消 ${cancelled} 件` : ""}`
+              : `未確定 ${yen(pending)}${cancelled > 0 ? `・取消 ${cancelled} 件` : ""}${
+                  voided ? "（取り消し扱いのため支払対象になりません）" : ""
+                }`
           }
         />
         <StatTile
@@ -308,6 +355,31 @@ export default async function AdminOrderDetailPage({
           }
         />
       </div>
+
+      {voided ? (
+        <Notice tone="bad">
+          <p>
+            このご注文は{voidedLabel}です。受注一覧の売上合計・支払対象額・代理店ごとの集計には
+            数えていません。下の「このご注文から発生した報酬」に金額が残っていても、
+            支払対象にはなりません。
+            取り消しを取り下げる場合は、下の「出荷を手配する」で出荷状況を、
+            「審査結果と紹介元を直す」で審査結果を戻してください。
+          </p>
+          {shipStatus === "キャンセル" ? (
+            <p className="mt-2.5">
+              ただし、出荷状況を戻しても、キャンセル時に取り消した報酬は自動では戻りません。
+              報酬は下の一覧をご確認のうえ、担当者にご相談ください。
+            </p>
+          ) : null}
+          {rewardLeftOver ? (
+            <p className="mt-2.5">
+              なお、報酬を打ち消すマイナス（相殺）は、出荷状況をキャンセルにしたときにだけ自動で立ちます。
+              そのため下の一覧には、支払対象にならない金額がそのまま残って見えることがあります。
+              帳簿の上でも消す場合は、担当者にご相談ください。
+            </p>
+          ) : null}
+        </Notice>
+      ) : null}
 
       {needsCheck ? (
         <Notice tone="warn">
@@ -357,12 +429,14 @@ export default async function AdminOrderDetailPage({
             <span className="tabnum">{quantity.toLocaleString("ja-JP")} 台</span>
           </Field>
           <Field label="ご請求額">
-            <span className="tabnum text-gold-300">{yen(amount)}</span>
+            <span className={cn("tabnum", voided ? "text-ink-500 line-through" : "text-gold-300")}>
+              {yen(amount)}
+            </span>
           </Field>
           <Field label="お支払い方法">{str(order, "payment_method")}</Field>
           <Field label="審査結果">
-            {str(order, "review_result") ? (
-              <StatusBadge status={str(order, "review_result")} />
+            {reviewResult ? (
+              <StatusBadge status={reviewResult} />
             ) : (
               <span className="text-ink-500">まだ結果が入っていません</span>
             )}
@@ -417,7 +491,8 @@ export default async function AdminOrderDetailPage({
           <Field label="担当スタッフ">
             <AgencyCell code={str(order, "staff_code")} names={names} />
           </Field>
-          <Field label="2次代理店（統括）">
+          {/* データベースの値は「2次代理店」のまま。画面の呼び方だけ labels.ts に揃える。 */}
+          <Field label={rankLabel("2次代理店")}>
             <AgencyCell code={str(order, "niji_code")} names={names} />
           </Field>
           <Field label="ゼロ次代理店">
@@ -445,9 +520,10 @@ export default async function AdminOrderDetailPage({
           <Field label="送り状番号">
             {str(order, "tracking_no") ? (
               <a
-                href={`https://toi.kuronekoyamato.co.jp/cgi-bin/tneko?number01=${encodeURIComponent(str(order, "tracking_no"))}`}
+                href={trackingUrl(str(order, "tracking_no"))}
                 target="_blank"
                 rel="noreferrer"
+                title="ヤマト運輸の追跡ページを開きます"
                 className="tabnum text-ink-100 underline underline-offset-2 hover:text-gold-300"
               >
                 {str(order, "tracking_no")}
@@ -502,7 +578,17 @@ export default async function AdminOrderDetailPage({
             }
           />
         ) : (
-          <Table>
+          <>
+            {voided ? (
+              <div className="px-5 pt-5">
+                <Notice tone="warn">
+                  このご注文は{voidedLabel}（取り消し扱い）のため、
+                  ここに出ている報酬は支払対象になりません。
+                  受注一覧の支払対象額でも 0 円として扱っています。
+                </Notice>
+              </div>
+            ) : null}
+            <Table>
             <thead>
               <tr>
                 <Th>受け取る代理店</Th>
@@ -525,7 +611,7 @@ export default async function AdminOrderDetailPage({
                     <Td>
                       <AgencyCell code={code} names={names} />
                     </Td>
-                    <Td>{str(r, "agency_rank") || "—"}</Td>
+                    <Td>{str(r, "agency_rank") ? rankShort(str(r, "agency_rank")) : "—"}</Td>
                     <Td>{str(r, "kind") || "—"}</Td>
                     <Td numeric className="whitespace-nowrap">
                       {str(r, "month") ? jpMonthLabel(str(r, "month")) : "—"}
@@ -559,7 +645,14 @@ export default async function AdminOrderDetailPage({
                 <Td>{null}</Td>
                 <Td>{null}</Td>
                 <Td>{null}</Td>
-                <Td numeric align="right" className="font-semibold text-gold-400">
+                <Td
+                  numeric
+                  align="right"
+                  className={cn(
+                    "font-semibold",
+                    voided ? "text-ink-500 line-through" : "text-gold-400",
+                  )}
+                >
                   {yen(confirmed + pending)}
                 </Td>
                 <Td className="text-xs text-ink-400">
@@ -569,12 +662,16 @@ export default async function AdminOrderDetailPage({
                 <Td>{null}</Td>
               </tr>
             </tfoot>
-          </Table>
+            </Table>
+          </>
         )}
         {rewards.length > 0 ? (
           <p className="border-t border-ink-800 px-5 py-3.5 text-xs leading-relaxed text-ink-400">
             報酬は出荷済にした時点で確定します。キャンセルにすると、同額のマイナスを立てて相殺します
             （支払済のぶんを消すと帳簿が合わなくなるため、行そのものは残します）。
+            {voided
+              ? "このご注文は取り消し扱いのため、上の金額は支払対象になりません。"
+              : ""}
           </p>
         ) : null}
       </Card>

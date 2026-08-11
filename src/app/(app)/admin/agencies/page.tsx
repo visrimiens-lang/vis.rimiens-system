@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { currentViewer, listCodesWithPassword } from "@/lib/auth";
+import { PASSWORD_FIELD, currentViewer } from "@/lib/auth";
+import { select } from "@/lib/db";
 import { DEFAULT_SLOT_LIMIT, countsTowardSlot, listAllAgencies } from "@/lib/agencies";
 import {
   ALL,
@@ -15,6 +16,7 @@ import {
   type SearchParams,
   type SortState,
 } from "@/lib/list-params";
+import { channelLabel, rankLabel, rankShort, statusTone } from "@/lib/labels";
 import type { Agency } from "@/lib/types";
 import {
   Badge,
@@ -23,7 +25,6 @@ import {
   Notice,
   PageHeader,
   StatTile,
-  StatusBadge,
   Table,
   Td,
   cn,
@@ -71,10 +72,15 @@ const SORT_COLUMNS = [
   "slot",
   "status",
   "email",
+  "phone",
+  "password",
   "created",
 ];
 
 const DEFAULT_SORT: SortState = { column: "code", desc: false };
+
+/** ログイン情報の発行状況で絞り込むときの合図。 */
+const PASSWORD_FILTERS = ["none", "issued"];
 
 /** ランクは五十音順ではなく、上下関係の順に並べたい。 */
 function rankOrder(v: string): number | null {
@@ -92,6 +98,31 @@ function toTab(v: string): Tab {
   return v === "partner" || v === "staff" ? v : "agency";
 }
 
+/**
+ * ポータルのログイン情報（パスワード）を発行済みの代理店コードを集める。
+ *
+ * ここで自分で問い合わせているのは、失敗を必ず呼び出し側に伝えるため。
+ * 「取得できなかった」と「1件も発行されていない」を取り違えると、
+ * 稼働中の代理店まで「未発行」と表示してしまい、本部がそれを信じて
+ * 再発行すると、いま使われているパスワードが使えなくなる。
+ * 失敗したときは例外をそのまま投げ、画面側で「確認できません」と出す。
+ */
+async function loadCodesWithPassword(): Promise<Set<string>> {
+  // 判定に要るのは2項目だけ。ハッシュを含む全項目は引かない。
+  const rows = await select<Record<string, unknown>>(
+    `agencies?select=code,${PASSWORD_FIELD}&order=code.asc`,
+  );
+  const out = new Set<string>();
+  for (const r of rows) {
+    const hash = r[PASSWORD_FIELD];
+    const code = r.code;
+    if (hash === null || hash === undefined || String(hash) === "") continue;
+    if (code === null || code === undefined || String(code) === "") continue;
+    out.add(String(code));
+  }
+  return out;
+}
+
 export default async function AdminAgenciesPage({
   searchParams,
 }: {
@@ -102,6 +133,7 @@ export default async function AdminAgenciesPage({
     rank?: string;
     channel?: string;
     area?: string;
+    pw?: string;
     sort?: string;
     dir?: string;
   }>;
@@ -117,18 +149,34 @@ export default async function AdminAgenciesPage({
   const rank = readChoice(params, "rank", RANKS);
   const channel = readParam(params, "channel") || ALL;
   const area = readParam(params, "area") || ALL;
+  const askedPw = readChoice(params, "pw", PASSWORD_FILTERS);
   const sort = parseSort(params, DEFAULT_SORT, SORT_COLUMNS);
 
   let all: Agency[] = [];
+  // ポータルのログイン情報を発行済みの代理店コード。
+  // 一覧の列と絞り込みの両方で使うので、行を組み立てる前に引いておく。
+  // null は「取得できなかった」という意味。「1件も発行されていない」と区別する。
+  let withPassword: Set<string> | null = null;
   let loadError: string | null = null;
-  try {
-    all = await listAllAgencies();
-  } catch (e) {
+  // 代理店マスタが読めても、発行状況の問い合わせだけが失敗することがある。
+  // 片方の失敗でもう片方を巻き添えにしないよう、それぞれの結果を別々に見る。
+  const [agencyResult, passwordResult] = await Promise.allSettled([
+    listAllAgencies(),
+    loadCodesWithPassword(),
+  ]);
+  if (agencyResult.status === "fulfilled") {
+    all = agencyResult.value;
+  } else {
     loadError =
-      e instanceof Error
-        ? e.message
+      agencyResult.reason instanceof Error
+        ? agencyResult.reason.message
         : "代理店マスタの読み込みに失敗しました。時間をおいて開き直してください。";
   }
+  if (passwordResult.status === "fulfilled") withPassword = passwordResult.value;
+
+  // 発行済みかどうかが分かっているときだけ、パスワードでの絞り込みを受け付ける。
+  const passwordKnown = withPassword !== null;
+  const pw = passwordKnown ? askedPw : ALL;
 
   const header = (
     <PageHeader
@@ -144,7 +192,7 @@ export default async function AdminAgenciesPage({
         <Notice tone="bad">
           代理店マスタを読み込めませんでした。{loadError}
           <br />
-          しばらく待っても直らない場合は、kintone の接続設定（接続先URLと認証情報）をご確認ください。
+          しばらく待っても直らない場合は、データベースの接続設定（接続先URLと認証情報）をご確認ください。
         </Notice>
       </div>
     );
@@ -165,12 +213,19 @@ export default async function AdminAgenciesPage({
   const pending = all.filter((a) => a.slotRequestStatus === "申請中");
 
   /* --- 絞り込み --- */
+  /** 発行済みなら true、未発行なら false、発行状況を確認できなければ null。 */
+  const hasPassword = (a: Agency): boolean | null =>
+    withPassword ? Boolean(a.code) && withPassword.has(a.code) : null;
+
   const matches = (a: Agency) => {
-    if (!matchesKeyword(keyword, [a.code, a.name, a.representative])) return false;
+    if (!matchesKeyword(keyword, [a.code, a.name, a.representative, a.email, a.phone]))
+      return false;
     if (status !== ALL && a.status !== status) return false;
     if (rank !== ALL && a.rank !== rank) return false;
     if (channel !== ALL && a.channel !== channel) return false;
     if (area !== ALL && a.area !== area) return false;
+    if (pw === "none" && hasPassword(a)) return false;
+    if (pw === "issued" && !hasPassword(a)) return false;
     return true;
   };
 
@@ -196,6 +251,13 @@ export default async function AdminAgenciesPage({
     slot: (a) => usedByParent.get(a.code) ?? 0,
     status: (a) => statusOrder(a.status),
     email: (a) => a.email,
+    phone: (a) => a.phone,
+    // 未発行を先に出す（＝手当てが要るものを上に集める）。
+    // 確認できないときは空欄扱いにして、並び順で優劣を付けない。
+    password: (a) => {
+      const issued = hasPassword(a);
+      return issued === null ? null : issued ? 1 : 0;
+    },
     created: (a) => a.createdAt,
   };
   const rows = sortRows(filtered[tab], sort.column, sort.desc, accessors);
@@ -203,29 +265,64 @@ export default async function AdminAgenciesPage({
   const current = TABS.find((t) => t.key === tab)!;
   const tabRows = inTab[tab];
   const isFiltered =
-    Boolean(keyword) || status !== ALL || rank !== ALL || channel !== ALL || area !== ALL;
+    Boolean(keyword) ||
+    status !== ALL ||
+    rank !== ALL ||
+    channel !== ALL ||
+    area !== ALL ||
+    pw !== ALL;
   const clearHref = buildListHref(BASE, params, {
     keyword: "",
     status: "",
     rank: "",
     channel: "",
     area: "",
+    pw: "",
   });
 
+  /* --- よく使う絞り込み（毎日の承認待ち探しを1押しにする） --- */
+  const quickFilters: { key: string; label: string; href: string; active: boolean }[] = [
+    {
+      key: "idle",
+      label: "未稼働だけ",
+      href: buildListHref(BASE, params, {
+        status: status === "未稼働" ? "" : "未稼働",
+      }),
+      active: status === "未稼働",
+    },
+  ];
+  // 発行状況が確認できないときは、絞り込みも件数も出さない（未発行と断定しない）。
+  if (passwordKnown) {
+    quickFilters.push({
+      key: "nopw",
+      label: "パスワード未発行だけ",
+      href: buildListHref(BASE, params, { pw: pw === "none" ? "" : "none" }),
+      active: pw === "none",
+    });
+  }
+  const noPasswordCount = tabRows.filter((a) => hasPassword(a) === false).length;
+
   // 選択肢は、いま開いているタブに実際にある値から作る（他のタブの値は出さない）
+  // 絞り込みに渡す値はデータベースのままにして、画面に出す文言だけ呼び方を差し替える。
   const statusOptions = buildOptions(tabRows, (a) => a.status, STATUSES, status);
-  const rankOptions = buildOptions(tabRows, (a) => a.rank, RANKS, rank);
-  const channelOptions = buildOptions(tabRows, (a) => a.channel, CHANNELS, channel);
+  const rankOptions = buildOptions(tabRows, (a) => a.rank, RANKS, rank).map((o) => ({
+    ...o,
+    label: rankLabel(o.value),
+  }));
+  const channelOptions = buildOptions(tabRows, (a) => a.channel, CHANNELS, channel).map(
+    (o) => ({ ...o, label: channelLabel(o.value) }),
+  );
   const areaOptions = buildOptions(tabRows, (a) => a.area, [], area);
 
   // ログイン情報を発行できる相手（解約済みは除く）
-  const withPassword = await listCodesWithPassword();
+  // 発行状況が確認できないときは「発行済み」と印を付けられない。
+  // 代わりに、発行の欄そのものに注意書きを出す。
   const loginTargets = all
     .filter((a) => a.status !== "停止・解約" && a.code)
     .map((a) => ({
       code: a.code,
       name: a.name || "（名称未登録）",
-      hasPassword: withPassword.has(a.code),
+      hasPassword: withPassword ? withPassword.has(a.code) : false,
     }));
 
   return (
@@ -275,9 +372,20 @@ export default async function AdminAgenciesPage({
       {unclassified.length > 0 ? (
         <Notice tone="warn">
           コード区分が入っていない登録が {unclassified.length} 件あります。どのタブにも出てこないため、
-          kintone の代理店マスタでコード区分（00＝代理店 / 01＝取次 / 02＝スタッフ）を入れてください。
+          代理店の詳細画面でコード区分（00＝代理店 / 01＝取次 / 02＝スタッフ）を入れてください。
         </Notice>
       ) : null}
+
+      {passwordKnown ? null : (
+        <Notice tone="warn">
+          ログイン情報の発行状況を取得できませんでした。
+          発行済みか未発行かが分からないため、「パスワード」の列は「—（確認できません）」と表示し、
+          パスワードでの絞り込みと未発行の件数は出していません
+          {askedPw === ALL ? "" : "（お使いだった絞り込みも一時的に外しています）"}。
+          この状態でパスワードを発行すると、すでに使われているパスワードがある場合は使えなくなります。
+          時間をおいて画面を開き直し、発行状況が出てからお進みください。
+        </Notice>
+      )}
 
       <nav className="flex flex-wrap items-center gap-1 rounded-xl border border-ink-800 bg-ink-900/70 p-1">
         {TABS.map((t) => {
@@ -306,10 +414,42 @@ export default async function AdminAgenciesPage({
       </nav>
 
       <Card>
+        <div className="flex flex-wrap items-center gap-2 border-b border-ink-800 px-5 py-3.5">
+          <span className="text-xs font-medium tracking-wide text-ink-300">
+            よく使う絞り込み
+          </span>
+          {quickFilters.map((q) => (
+            <Link
+              key={q.key}
+              href={q.href}
+              aria-pressed={q.active}
+              className={cn(
+                "rounded-lg border px-3 py-1.5 text-sm transition",
+                q.active
+                  ? "border-gold-500/50 bg-gold-500/12 text-gold-300"
+                  : "border-ink-700 text-ink-200 hover:border-ink-600 hover:text-ink-50",
+              )}
+            >
+              {q.label}
+              {q.active ? <span className="ml-1.5 text-xs">（解除）</span> : null}
+            </Link>
+          ))}
+          {passwordKnown ? (
+            <span className="text-xs text-ink-400">
+              このタブで、パスワード未発行は {noPasswordCount} 件です。
+            </span>
+          ) : (
+            <span className="text-xs text-ink-400">
+              パスワードの発行状況は確認できませんでした。
+            </span>
+          )}
+        </div>
+
         <FilterBar
           action={BASE}
           hidden={{
             tab: tab === "agency" ? "" : tab,
+            pw: pw === ALL ? "" : pw,
             sort: sort.column,
             dir: sort.desc ? "desc" : "asc",
           }}
@@ -318,7 +458,7 @@ export default async function AdminAgenciesPage({
             name="keyword"
             label="キーワード"
             value={keyword}
-            placeholder="コード・名前・代表者"
+            placeholder="コード・名前・代表者・メール・電話"
             width="w-60"
           />
           <FilterSelect
@@ -347,7 +487,13 @@ export default async function AdminAgenciesPage({
           shown={rows.length}
           unit={current.unit}
           clearHref={clearHref}
-          note={`${current.label}のタブ`}
+          note={`${current.label}のタブ${
+            pw === "none"
+              ? "・パスワード未発行だけ"
+              : pw === "issued"
+                ? "・パスワード発行済だけ"
+                : ""
+          }`}
         />
       ) : null}
 
@@ -358,9 +504,20 @@ export default async function AdminAgenciesPage({
             description={emptyDescription(tab, isFiltered)}
           />
         ) : tab === "agency" ? (
-          <AgencyTable rows={rows} usedByParent={usedByParent} sort={sort} params={params} />
+          <AgencyTable
+            rows={rows}
+            usedByParent={usedByParent}
+            hasPassword={hasPassword}
+            sort={sort}
+            params={params}
+          />
         ) : (
-          <PeopleTable rows={rows} sort={sort} params={params} />
+          <PeopleTable
+            rows={rows}
+            hasPassword={hasPassword}
+            sort={sort}
+            params={params}
+          />
         )}
       </Card>
 
@@ -374,6 +531,16 @@ export default async function AdminAgenciesPage({
       <ResetRequests />
 
       <Card title="ポータルのログイン情報を発行">
+        {passwordKnown ? null : (
+          <div className="px-5 pt-5">
+            <Notice tone="warn">
+              いま、どの代理店にパスワードが発行済みかを確認できていません。
+              一覧の「（発行済み）」の印も出せていないため、すでに発行されている相手に
+              気づかず再発行してしまうおそれがあります。再発行すると、いま使われている
+              パスワードは使えなくなります。発行状況が表示されるまでお待ちください。
+            </Notice>
+          </div>
+        )}
         <IssuePassword agencies={loginTargets} />
       </Card>
     </div>
@@ -385,11 +552,14 @@ export default async function AdminAgenciesPage({
 function AgencyTable({
   rows,
   usedByParent,
+  hasPassword,
   sort,
   params,
 }: {
   rows: Agency[];
   usedByParent: Map<string, number>;
+  /** ポータルのログイン情報を発行済みか（確認できないときは null） */
+  hasPassword: (a: Agency) => boolean | null;
   sort: SortState;
   params: SearchParams;
 }) {
@@ -416,6 +586,9 @@ function AgencyTable({
           {th("parent", "上位代理店")}
           {th("slot", "枠", "right")}
           {th("status", "稼働ステータス")}
+          {th("email", "メールアドレス")}
+          {th("phone", "電話番号")}
+          {th("password", "パスワード")}
           {th("created", "登録日")}
         </tr>
       </thead>
@@ -446,8 +619,8 @@ function AgencyTable({
                   ) : null}
                 </div>
               </Td>
-              <Td>{a.rank || "—"}</Td>
-              <Td>{a.channel || "—"}</Td>
+              <Td className="whitespace-nowrap">{rankShort(a.rank, a.codeKind)}</Td>
+              <Td>{channelLabel(a.channel)}</Td>
               <Td>{a.area || "—"}</Td>
               <Td>
                 <Parent agency={a} />
@@ -466,7 +639,16 @@ function AgencyTable({
                 ) : null}
               </Td>
               <Td>
-                <StatusBadge status={a.status} />
+                <Status status={a.status} />
+              </Td>
+              <Td>
+                <Mail email={a.email} />
+              </Td>
+              <Td numeric className="whitespace-nowrap">
+                <Tel phone={a.phone} />
+              </Td>
+              <Td className="whitespace-nowrap">
+                <PasswordMark issued={hasPassword(a)} />
               </Td>
               <Td numeric className="whitespace-nowrap">
                 {jpDate(a.createdAt)}
@@ -483,10 +665,13 @@ function AgencyTable({
 
 function PeopleTable({
   rows,
+  hasPassword,
   sort,
   params,
 }: {
   rows: Agency[];
+  /** ポータルのログイン情報を発行済みか（確認できないときは null） */
+  hasPassword: (a: Agency) => boolean | null;
   sort: SortState;
   params: SearchParams;
 }) {
@@ -500,10 +685,13 @@ function PeopleTable({
         <tr>
           {th("code", "コード")}
           {th("name", "氏名")}
+          {th("rank", "区分")}
           {th("channel", "販路種別")}
           {th("parent", "上位代理店")}
-          {th("email", "メールアドレス")}
           {th("status", "稼働ステータス")}
+          {th("email", "メールアドレス")}
+          {th("phone", "電話番号")}
+          {th("password", "パスワード")}
           {th("created", "登録日")}
         </tr>
       </thead>
@@ -525,24 +713,22 @@ function PeopleTable({
             <Td>
               <div className="truncate text-ink-100">{a.name || "（名称未登録）"}</div>
             </Td>
-            <Td>{a.channel || "—"}</Td>
+            <Td className="whitespace-nowrap">{rankShort(a.rank, a.codeKind)}</Td>
+            <Td>{channelLabel(a.channel)}</Td>
             <Td>
               <Parent agency={a} />
             </Td>
             <Td>
-              {a.email ? (
-                <a
-                  href={`mailto:${a.email}`}
-                  className="text-ink-200 underline underline-offset-2 hover:text-gold-300"
-                >
-                  {a.email}
-                </a>
-              ) : (
-                <span className="text-ink-400">—</span>
-              )}
+              <Status status={a.status} />
             </Td>
             <Td>
-              <StatusBadge status={a.status} />
+              <Mail email={a.email} />
+            </Td>
+            <Td numeric className="whitespace-nowrap">
+              <Tel phone={a.phone} />
+            </Td>
+            <Td className="whitespace-nowrap">
+              <PasswordMark issued={hasPassword(a)} />
             </Td>
             <Td numeric className="whitespace-nowrap">
               {jpDate(a.createdAt)}
@@ -552,6 +738,50 @@ function PeopleTable({
       </tbody>
     </Table>
   );
+}
+
+/* ---------- 表の中の小さな部品 ---------- */
+
+/** 稼働ステータス。色は labels.ts の statusTone に合わせる。 */
+function Status({ status }: { status: string }) {
+  if (!status) return <span className="text-ink-400">—</span>;
+  return <Badge tone={statusTone(status)}>{status}</Badge>;
+}
+
+/** 本部から連絡するときのために、そのまま押せる形にしておく。 */
+function Mail({ email }: { email: string }) {
+  if (!email) return <span className="text-ink-400">—</span>;
+  return (
+    <a
+      href={`mailto:${email}`}
+      className="text-ink-200 underline underline-offset-2 hover:text-gold-300"
+    >
+      {email}
+    </a>
+  );
+}
+
+function Tel({ phone }: { phone: string }) {
+  if (!phone) return <span className="text-ink-400">—</span>;
+  return (
+    <a
+      href={`tel:${phone.replace(/[^0-9+]/g, "")}`}
+      className="text-ink-200 underline underline-offset-2 hover:text-gold-300"
+    >
+      {phone}
+    </a>
+  );
+}
+
+/**
+ * ポータルにログインできる状態かどうか。未発行はこのあと発行する相手。
+ * 発行状況そのものを取得できなかったときは、未発行と決めつけずに「確認できません」と出す。
+ */
+function PasswordMark({ issued }: { issued: boolean | null }) {
+  if (issued === null) {
+    return <span className="text-ink-400">—（確認できません）</span>;
+  }
+  return issued ? <Badge tone="good">発行済</Badge> : <Badge tone="warn">未発行</Badge>;
 }
 
 function Parent({ agency }: { agency: Agency }) {
@@ -579,7 +809,7 @@ function emptyTitle(tab: Tab, filtered: boolean): string {
 
 function emptyDescription(tab: Tab, filtered: boolean): string {
   if (filtered) {
-    return "条件を変えてお試しください。キーワードは法人名・代理店コード・代表者名の一部で探せます。別のタブに入っている可能性もあるので、タブの数字もご確認ください。";
+    return "条件を変えてお試しください。キーワードは法人名・代理店コード・代表者名・メールアドレス・電話番号の一部で探せます。「よく使う絞り込み」を押している場合は、もう一度押すと解除できます。別のタブに入っている可能性もあるので、タブの数字もご確認ください。";
   }
   if (tab === "agency") {
     return "代理店の申込が承認され、代理店マスタにコード区分 00 で登録されると、ここに自動で表示されます。";

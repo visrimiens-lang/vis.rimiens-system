@@ -12,6 +12,12 @@ import { audit, selectOne, update } from "@/lib/db";
  * kintone を解約したあと、宛先の誤りを直す場所がここしか無くなるため、
  * 出荷前に気づいた誤りをその場で直せるようにしてある。
  *
+ * 担当スタッフ（staff_code）もここから直せる。
+ * 2026-08-07 の打合せで「誰が売ったかを追えない」と指摘があった列で、
+ * お申し込みの取り込みでは入らないため、空欄のまま残る方がいる。
+ * 本部が聞き取って埋められる場所を1つ用意しておかないと、列を出しても埋まらない。
+ * 担当代理店・紹介元と違って報酬の計算には使っていないので、この画面から直してよい。
+ *
  * 消す操作はわざと用意していない。
  * お客様の登録は保証・保守・報酬の裏付けになるので、
  * 間違えて消してしまうと元に戻せない。取り消しが必要なときは
@@ -85,6 +91,15 @@ const schema = z.object({
     .trim()
     .max(100, "領収書のあて名は100文字以内で入力してください。"),
   note: z.string().trim().max(2000, "本部メモは2000文字以内で入力してください。"),
+  // 代理店コードと同じ形（例：RIM0003）。空欄＝まだ分からない、として保存する。
+  staffCode: z
+    .string()
+    .trim()
+    .max(20, "担当スタッフのコードは20文字以内で入力してください。")
+    .regex(
+      /^[A-Za-z0-9-]*$/,
+      "担当スタッフのコードは半角の英数字とハイフンで入力してください（例：RIM0003）。",
+    ),
 });
 
 type Input = z.infer<typeof schema>;
@@ -106,6 +121,7 @@ const FIELDS: { column: string; label: string; of: (v: Input) => string }[] = [
   { column: "building", label: "建物名・部屋番号", of: (v) => v.building },
   { column: "receipt_name", label: "領収書のあて名", of: (v) => v.receiptName },
   { column: "note", label: "本部メモ", of: (v) => v.note },
+  { column: "staff_code", label: "担当スタッフ", of: (v) => v.staffCode },
 ];
 
 type Parsed = { ok: true; value: Input } | { ok: false; error: string };
@@ -121,6 +137,7 @@ function parse(formData: FormData): Parsed {
     building: String(formData.get("building") ?? ""),
     receiptName: String(formData.get("receiptName") ?? ""),
     note: String(formData.get("note") ?? ""),
+    staffCode: String(formData.get("staffCode") ?? ""),
   });
 
   if (!result.success) {
@@ -201,6 +218,28 @@ export async function updateCustomerAction(
     };
   }
 
+  /*
+   * 担当スタッフのコードを入れ直したときは、代理店一覧に載っているかを見ておく。
+   * 報酬の支払先ではないので入力そのものは止めない（まだ登録前の方を聞き取れた場合に
+   * 記録できなくなるほうが困る）。ただし打ち間違いにはその場で気づけるよう、
+   * 保存後のお知らせに一言そえる。
+   */
+  let staffNote = "";
+  if ("staff_code" in patch && value.staffCode) {
+    try {
+      const agency = await selectOne<Row>(
+        `agencies?select=code,name&code=eq.${encodeURIComponent(value.staffCode)}`,
+      );
+      staffNote = agency
+        ? `　担当スタッフは「${s_(agency, "name") || value.staffCode}」として記録しました。`
+        : `　なお、担当スタッフのコード「${value.staffCode}」は代理店一覧に見つかりませんでした。` +
+          "打ち間違いがないかご確認ください。";
+    } catch {
+      // 確認できなくても、担当スタッフを記録すること自体は妨げない
+      staffNote = "　担当スタッフのコードが代理店一覧にあるかは確認できませんでした。";
+    }
+  }
+
   try {
     await update(query, patch);
   } catch (e) {
@@ -223,12 +262,12 @@ export async function updateCustomerAction(
   const shipped = s_(before, "ship_status") === "出荷済";
   const addressTouched = "住所" in changes || "郵便番号" in changes || "建物名・部屋番号" in changes;
 
-  return {
-    ok:
-      addressTouched && shipped
-        ? `${label} 様の${changed}を直しました。この方はすでに出荷済みです。届け先が変わる場合は、配送業者への転送手配もあわせてご確認ください。`
-        : addressTouched
-          ? `${label} 様の${changed}を直しました。出荷前であれば、新しいお届け先で発送されます。`
-          : `${label} 様の${changed}を直しました。`,
-  };
+  const done =
+    addressTouched && shipped
+      ? `${label} 様の${changed}を直しました。この方はすでに出荷済みです。届け先が変わる場合は、配送業者への転送手配もあわせてご確認ください。`
+      : addressTouched
+        ? `${label} 様の${changed}を直しました。出荷前であれば、新しいお届け先で発送されます。`
+        : `${label} 様の${changed}を直しました。`;
+
+  return { ok: done + staffNote };
 }

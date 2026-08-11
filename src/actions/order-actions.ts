@@ -3,13 +3,19 @@
 import { revalidatePath } from "next/cache";
 import { currentViewer } from "@/lib/auth";
 import { audit, select, selectOne, update } from "@/lib/db";
-import { confirmRewards, reverseRewards } from "@/lib/rewards";
+import {
+  confirmRewards,
+  onReviewResultChanged,
+  reverseRewards,
+  type ReviewRewardOutcome,
+} from "@/lib/rewards";
 
 /**
  * 受注の更新（本部だけが行う）。
  *
  * kintone App10 でやっていた「出荷の手配」と「審査・照合の直し」をここに移す。
  * 出荷済にすると報酬が確定し、キャンセルにすると報酬が取り消される。
+ * 審査結果を否決にしたときも同じく報酬を取り消す（売上に数えないものは報酬も残さない）。
  * 報酬の計算そのものは src/lib/rewards.ts が持っているので、ここからは呼ぶだけにする。
  */
 
@@ -25,6 +31,31 @@ const MATCH_STATUSES = ["照合済", "要確認", "直販"];
 
 const NOT_FOUND =
   "対象のご注文が見つかりませんでした。画面を開き直してから、もう一度お試しください。";
+
+/**
+ * 同じ受注を同時に保存したときの言葉。
+ *
+ * 報酬の取消は「同額のマイナスを立てる」ため、二人が同時に保存すると
+ * マイナスが二組立ち、支払額を余計に差し引いてしまう。
+ * あとから来たほうは何も書かずにここで止める。
+ */
+const RACED =
+  "このご注文は、ほかの画面（別のタブや別の担当者）から先に更新されました。" +
+  "報酬を二重に動かさないよう、今回の保存は行っていません。" +
+  "画面を開き直して、いまの内容をご確認のうえ、もう一度お試しください。";
+
+/**
+ * 「読んだときのままの行」だけを更新するための絞り込み条件。
+ *
+ * 受注を読んでから更新するまでの間に、ほかの画面が同じ列を書き換えていたら、
+ * この条件に合う行が無くなり、更新は0件で終わる。
+ * 呼んだ側は0件を「自分は負けた」と読み替えて、報酬には触らずに止める。
+ * （PostgREST は値が null の行を eq. では拾えないので、null は is.null で分ける。）
+ */
+function stillEquals(column: string, raw: unknown): string {
+  if (raw === null || raw === undefined) return `${column}=is.null`;
+  return `${column}=eq.${encodeURIComponent(String(raw))}`;
+}
 
 /**
  * 本部以外は一切書き換えできない。
@@ -140,6 +171,44 @@ async function noRewardNote(orderId: string, shipped: boolean): Promise<string> 
   return `${head}この受注の報酬はすでに取り消されています。${tail}`;
 }
 
+/**
+ * 否決を「電話確認待ち」や未設定に戻したときに、報酬がいまどうなっているかを文にする。
+ *
+ * 売上から外しているのは審査結果が「否決」のときだけなので（受注一覧・詳細のどちらも）、
+ * 否決を解いた瞬間にその受注は売上に戻る。ところが報酬は否決のときに取り消したままで、
+ * 「承認」にするまで計上し直されない。
+ * この「売上には数えるのに報酬は取消のまま」という食い違いを黙って作らないよう、
+ * 何もしなかったときこそ、いまの姿をはっきり伝える。
+ */
+async function heldRewardNote(orderId: string): Promise<string> {
+  const tail = "計上し直す場合は、審査結果を「承認」にしてください。";
+
+  let rows: Row[];
+  try {
+    rows = await select<Row>(`rewards?select=status,amount&order_id=eq.${orderId}`);
+  } catch {
+    return (
+      `この受注の報酬は取り消したままになっているおそれがあります。${tail}` +
+      "下の報酬一覧をご確認ください。"
+    );
+  }
+
+  // 取り消されていない、金額がプラスの行（＝まだ生きている報酬）
+  const live = rows.filter((r) => n_(r, "amount") > 0 && s_(r, "status") !== "取消");
+  if (live.length > 0) {
+    return (
+      `この受注の報酬 ${live.length} 件は計上されたままです。` +
+      "取り消す場合は、審査結果を「否決」にしてください。"
+    );
+  }
+
+  const cancelled = rows.filter((r) => n_(r, "amount") > 0 && s_(r, "status") === "取消");
+  if (cancelled.length === 0) {
+    return "この受注には報酬が1件も計上されていません。";
+  }
+  return `この受注の報酬 ${cancelled.length} 件は取り消したままです。${tail}`;
+}
+
 /* ══════════════════════════ 出荷の更新 ══════════════════════════ */
 
 /**
@@ -223,12 +292,29 @@ export async function updateShipmentAction(
       };
     }
 
-    await update(`orders?id=eq.${id}`, {
-      ship_status: next,
-      tracking_no: tracking || null,
-      // 出荷済で日付が空なら、今日の日付を入れておく（報酬の締めに使うため）
-      shipped_on: shippedOn ?? (next === "出荷済" ? todayInJapan() : null),
-    });
+    // 「読んだときの出荷状況のままの行」だけを書き換える。
+    // 同じ受注を2つの画面で開いて、両方からキャンセルを保存したときに、
+    // どちらも「前は出荷待ち」と読んだまま報酬の取消に進み、
+    // 同じ報酬に2組のマイナスが立つのを防ぐ（勝った1回だけが下の報酬処理に進む）。
+    const saved = await update<Row>(
+      `orders?id=eq.${id}&${stillEquals("ship_status", order["ship_status"])}`,
+      {
+        ship_status: next,
+        tracking_no: tracking || null,
+        // 出荷済で日付が空なら、今日の日付を入れておく（報酬の締めに使うため）
+        shipped_on: shippedOn ?? (next === "出荷済" ? todayInJapan() : null),
+      },
+    );
+    if (saved.length === 0) {
+      // 自分が読んでから保存するまでの間に、ほかの画面が出荷状況を変えた。
+      // 報酬には触らずに終える。
+      await audit(await actorName(), "出荷状況の更新の中止", { type: "order", key: id }, {
+        理由: "ほかの画面が先に更新した",
+        読んだときの出荷状況: before || "（未設定）",
+        保存しようとした出荷状況: next,
+      });
+      return { error: RACED };
+    }
   } catch (e) {
     return failed("出荷状況を保存できませんでした。", e);
   }
@@ -262,8 +348,17 @@ export async function updateShipmentAction(
     ).length;
     // 相殺のために立てたマイナスの報酬
     const offset = rewardRows.filter((r) => n_(r, "amount") < 0).length;
+    // すでに取消の印がついた元の報酬。上のマイナスと対になる。
+    const cancelled = rewardRows.filter(
+      (r) => n_(r, "amount") > 0 && s_(r, "status") === "取消",
+    ).length;
 
-    if (live > 0 && offset > 0) {
+    // 対になる取消済みの行より多くマイナスが立っているときだけ、取消が途中で止まったと見る。
+    // 「マイナスが1件でもあれば途中」とはしない。審査の否決と承認を行き来した受注には、
+    // 前の周回で正しく完了したマイナスと取消済みの行が残っており、
+    // それを途中と見なすとキャンセルの取消が二度とできなくなるため
+    // （報酬の計上し直しは lib/rewards.ts の onReviewResultChanged）。
+    if (live > 0 && offset > cancelled) {
       // 前回の取消が途中で止まっている。ここでやり直すとマイナスが二重に立ち、
       // 支払額を余計に差し引いてしまうため、報酬には触らずに本部へ知らせる。
       await audit(await actorName(), "報酬取消の中断", { type: "order", key: id }, {
@@ -353,10 +448,14 @@ export async function updateShipmentAction(
 /* ══════════════════════ 審査・照合の更新 ══════════════════════ */
 
 /**
- * 審査結果・信販受付番号・照合状態・紹介元コードを直す。
+ * 審査結果・信販受付番号・照合状態・紹介元コード・担当スタッフのコードを直す。
  *
- * 紹介元コードは報酬の支払先そのものなので、
- * 代理店マスタに無いコードは保存させない（払い先の無い報酬を作らないため）。
+ * 紹介元コードと担当スタッフのコードは、どちらも代理店マスタに実在するコードだけを通す。
+ * 紹介元は報酬の支払先そのもので（払い先の無い報酬を作らないため）、
+ * 担当スタッフは「誰が売ったか」の裏付けになるので、打ち間違いをその場で弾く。
+ *
+ * 審査結果を変えると報酬が動く（否決＝取消／否決から承認に戻す＝計上し直し）。
+ * 同じ値のまま保存し直しても報酬に触らないよう、実際に変わったときだけ呼ぶ。
  */
 export async function updateOrderAction(
   _prev: OrderActionState,
@@ -376,6 +475,16 @@ export async function updateOrderAction(
   const creditRef = text(formData, "creditRefNo");
   if (creditRef.length > 60) {
     return { error: "信販受付番号が長すぎます。信販会社から届いた番号をご確認ください。" };
+  }
+
+  // 否決にするときの理由（信販の否決通知番号など）。任意。
+  // 報酬の取消理由としてそのまま残すので、あとから「なぜ取り消したか」を追える。
+  const rejectReason = text(formData, "rejectReason");
+  if (rejectReason.length > 100) {
+    return {
+      error:
+        "否決の理由が長すぎます。100文字以内で、信販の否決通知番号など要点だけを入力してください。",
+    };
   }
 
   const matchStatus = text(formData, "matchStatus");
@@ -404,19 +513,53 @@ export async function updateOrderAction(
     };
   }
 
+  /*
+   * 担当スタッフのコード。
+   * 空欄で保存しても、いま記録されているコードは消さない。
+   * この欄は申込の取り込みで自動的に入る（誰が売ったかの記録）ので、
+   * 審査結果を直すつもりの保存で消えてしまうと、本部が代理店ごとの支払いを検証できなくなる。
+   * 消すときは、画面のチェックで「空にする」とはっきり伝えてもらう。
+   */
+  const staff = text(formData, "staffCode");
+  const clearStaff = text(formData, "clearStaffCode") === "true";
+  if (staff && !/^[A-Za-z0-9-]{1,20}$/.test(staff)) {
+    return {
+      error: "担当スタッフのコードは半角の英数字で入力してください（例：RIM0201）。",
+    };
+  }
+
   let label = "このご注文";
   let beforeReferrer = "";
   let beforeMatch = "";
+  let beforeReview = "";
+  let beforeStaff = "";
   let referrerName = "";
+  let staffName = "";
+  let staffKind = "";
 
   try {
     const order = await selectOne<Row>(
-      `orders?select=id,customer_name,review_result,credit_ref_no,match_status,referrer_code&id=eq.${id}`,
+      `orders?select=id,customer_name,review_result,credit_ref_no,match_status,referrer_code,staff_code&id=eq.${id}`,
     );
     if (!order) return { error: NOT_FOUND };
     label = customerLabel(order);
     beforeReferrer = s_(order, "referrer_code");
     beforeMatch = s_(order, "match_status");
+    beforeReview = s_(order, "review_result");
+    beforeStaff = s_(order, "staff_code");
+
+    // 否決も、出荷の「キャンセル」と同じで報酬の取消につながる。
+    // プルダウンを選んで一度保存するだけでマイナスが立ってしまわないよう、
+    // 確認を通っていなければ、審査結果を書き換える前に止める。
+    // すでに否決の受注をもう一度保存するとき（前回失敗した取消のやり直しなど）は、
+    // 画面に確認欄が出ないうえ、確認はその1回目に済んでいるので求めない。
+    if (review === "否決" && beforeReview !== "否決" && text(formData, "confirmReject") !== "true") {
+      return {
+        error:
+          "審査結果を「否決」にすると、この受注から発生した報酬が取り消されます。" +
+          "確認のチェックを入れてから、もう一度お試しください。",
+      };
+    }
 
     // 払い先のないコードを入れさせない
     if (referrer) {
@@ -433,14 +576,95 @@ export async function updateOrderAction(
       referrerName = s_(agency, "name");
     }
 
-    await update(`orders?id=eq.${id}`, {
+    // 担当スタッフも、実在するコードだけを通す（打ち間違いをそのまま記録しない）
+    if (staff) {
+      const person = await selectOne<Row>(
+        `agencies?select=code,name,code_kind&code=eq.${encodeURIComponent(staff)}`,
+      );
+      if (!person) {
+        return {
+          error:
+            `担当スタッフのコード「${staff}」は代理店一覧に登録されていません。` +
+            "コードの打ち間違いがないかご確認ください。まだ登録前の方の場合は、先にスタッフを登録してください。",
+        };
+      }
+      staffName = s_(person, "name");
+      staffKind = s_(person, "code_kind");
+    }
+
+    const patch: Record<string, string | null> = {
       review_result: review || null,
       credit_ref_no: creditRef || null,
       match_status: matchStatus,
       referrer_code: referrer || null,
-    });
+    };
+    // 空欄のときは、はっきり「空にする」と言われた場合だけ消す
+    if (staff) patch.staff_code = staff;
+    else if (clearStaff) patch.staff_code = null;
+
+    // 「読んだときの審査結果のままの行」だけを書き換える。
+    // 同じ受注を2つの画面で開いて、両方から否決を保存したときに、
+    // どちらも「前は承認」と読んだまま報酬の取消に進み、
+    // 同じ報酬に2組のマイナスが立つのを防ぐ。
+    // 更新できた1回だけが下の報酬処理に進み、負けたほうは何もせずに終わる。
+    // 審査結果を変えない保存（照合や紹介元だけを直すとき）は、値が同じなので条件に合い、
+    // これまでどおり通る。
+    const saved = await update<Row>(
+      `orders?id=eq.${id}&${stillEquals("review_result", order["review_result"])}`,
+      patch,
+    );
+    if (saved.length === 0) {
+      // 自分が読んでから保存するまでの間に、ほかの画面が審査結果を変えた。
+      // 報酬には触らずに終える。
+      await audit(await actorName(), "受注内容の更新の中止", { type: "order", key: id }, {
+        理由: "ほかの画面が先に更新した",
+        読んだときの審査結果: beforeReview || "（未設定）",
+        保存しようとした審査結果: review || "（未設定）",
+      });
+      return { error: RACED };
+    }
   } catch (e) {
     return failed("審査・照合の内容を保存できませんでした。", e);
+  }
+
+  /* --- 審査結果が変わったときだけ、報酬を動かす --- */
+  // 同じ値のまま保存し直したときに走らせない。走らせると、
+  // 否決の受注を保存するたびにマイナスが増え、支払額を余計に差し引いてしまう。
+  let outcome: ReviewRewardOutcome | null = null;
+  if (review !== beforeReview) {
+    try {
+      // 否決のときだけ、本部が書いた理由を報酬の取消理由として渡す。
+      outcome = await onReviewResultChanged(id, review, review === "否決" ? rejectReason : "");
+    } catch (e) {
+      // 審査結果の保存は済んでいる。報酬だけが取り残された状態を、はっきり伝える。
+      await audit(await actorName(), "審査結果に伴う報酬処理の失敗", { type: "order", key: id }, {
+        審査結果: `${beforeReview || "（未設定）"} → ${review || "（未設定）"}`,
+        理由: reason(e),
+      });
+      revalidatePath("/admin/orders");
+      revalidatePath(`/admin/orders/${id}`);
+      return {
+        error:
+          `審査結果は「${review || "未設定"}」に保存しましたが、報酬の処理に失敗しました。${reason(e)} ` +
+          "下の報酬一覧をご確認のうえ、もう一度この操作を行ってください。",
+        at: Date.now(),
+      };
+    }
+
+    if (outcome.action === "中断") {
+      await audit(await actorName(), "報酬取消の中断", { type: "order", key: id }, {
+        審査結果: `${beforeReview || "（未設定）"} → ${review || "（未設定）"}`,
+        理由: outcome.reason,
+      });
+      revalidatePath("/admin/orders");
+      revalidatePath(`/admin/orders/${id}`);
+      return {
+        error:
+          `審査結果は「${review || "未設定"}」に保存しました。ただし、${outcome.reason}` +
+          "下の報酬一覧をご確認のうえ、担当者にご連絡ください。",
+        at: Date.now(),
+      };
+    }
   }
 
   /* --- すでに報酬が立っている受注で紹介元を変えたら、そのことを伝える --- */
@@ -460,15 +684,24 @@ export async function updateOrderAction(
   }
 
   await audit(await actorName(), "受注内容の更新", { type: "order", key: id }, {
-    審査結果: review || "（未設定）",
+    審査結果: `${beforeReview || "（未設定）"} → ${review || "（未設定）"}`,
     信販受付番号: creditRef || null,
     照合: `${beforeMatch || "（未設定）"} → ${matchStatus}`,
     紹介元: `${beforeReferrer || "（なし）"} → ${referrer || "（なし）"}`,
+    担当スタッフ: staff
+      ? `${beforeStaff || "（なし）"} → ${staff}`
+      : clearStaff && beforeStaff
+        ? `${beforeStaff} → （なし）`
+        : null,
+    // 0件だったことも残す。あとから「なぜ報酬が動いていないのか」を追えるようにする。
+    報酬: outcome ? `${outcome.action}${outcome.count > 0 ? ` ${outcome.count} 件` : ""}` : null,
+    否決の理由: review === "否決" && review !== beforeReview ? rejectReason || null : null,
   });
 
   revalidatePath("/admin/orders");
   revalidatePath(`/admin/orders/${id}`);
   revalidatePath("/rewards");
+  if (outcome && outcome.count > 0) revalidatePath("/dashboard");
 
   const parts = [`${label}の内容を更新しました。`];
   parts.push(`審査結果は「${review || "未設定"}」、照合の状態は「${matchStatus}」です。`);
@@ -477,5 +710,51 @@ export async function updateOrderAction(
   } else if (beforeReferrer) {
     parts.push("紹介元コードを空にしました。");
   }
+
+  /* --- 担当スタッフ（誰が売ったか） --- */
+  if (staff && staff !== beforeStaff) {
+    parts.push(
+      `担当スタッフを ${staff}${staffName ? `（${staffName}）` : ""} にしました。` +
+        // スタッフ以外のコード（会社・取次パートナー）でも記録は許すが、気づけるようにしておく
+        (staffKind && staffKind !== "02"
+          ? "このコードはスタッフ（区分02）として登録されていません。相違がないかご確認ください。"
+          : ""),
+    );
+  } else if (!staff && clearStaff && beforeStaff) {
+    parts.push("担当スタッフのコードを空にしました。");
+  }
+
+  /* --- 審査結果に伴う報酬の動き --- */
+  // 何もしなかったときも、その理由をそのまま伝える。
+  // 「更新しました」とだけ返すと、報酬が取り消されていない否決の受注を見落とすため。
+  if (outcome) {
+    if (outcome.action === "取消") {
+      parts.push(
+        `審査が否決になったため、この受注の報酬 ${outcome.count} 件を取り消しました` +
+          "（同額のマイナスを立てて相殺しています）。" +
+          // 書いてもらった理由は、報酬の取消理由としてそのまま残る。残したことを伝える。
+          (rejectReason ? `取消の理由として「${rejectReason}」を残しました。` : ""),
+      );
+    } else if (outcome.action === "計上し直し") {
+      parts.push(
+        `審査が承認に戻ったため、この受注の報酬 ${outcome.count} 件を計上し直しました` +
+          "（取り消した分は帳簿に残したままです）。" +
+          (outcome.reason ? outcome.reason : ""),
+      );
+    } else if (beforeReview === "否決" && review !== "承認") {
+      // 否決を「電話確認待ち」や未設定に戻したとき。
+      // 「承認」に戻したのに何も動かなかった場合は、そのときの理由
+      //（すでに計上済み・出荷状況がキャンセル など）のほうが大事なので、下の枝に任せる。
+      // この受注は売上に戻る（売上から外しているのは「否決」のときだけ）のに、
+      // 報酬は取り消したままになる。lib/rewards.ts が返す
+      // 「審査の結果が出るまで、報酬はそのままにしています。」では実態が伝わらないため、
+      // 報酬の今の姿を調べて言い換える。
+      parts.push(await heldRewardNote(id));
+    } else if (outcome.reason) {
+      // 承認・否決に限らず、何もしなかった理由は必ず添える。
+      parts.push(outcome.reason);
+    }
+  }
+
   return { ok: parts.join("") + rewardWarning, at: Date.now() };
 }

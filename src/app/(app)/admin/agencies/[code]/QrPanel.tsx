@@ -1,11 +1,13 @@
 "use client";
 
-import { useActionState, useState } from "react";
-import { Check, Copy, Download, QrCode } from "lucide-react";
+import { useActionState, useEffect, useState } from "react";
+import { Ban, Check, Copy, Download, QrCode, ShieldAlert } from "lucide-react";
 import {
   approveQr2Action,
+  freezeQrAction,
   issueQrAction,
   rejectQr2Action,
+  unfreezeQrAction,
   type QrActionState,
 } from "@/actions/qr-actions";
 import {
@@ -31,6 +33,23 @@ const quietBtn =
   "inline-flex items-center gap-2 rounded-lg border border-ink-700 px-3.5 py-2 text-sm font-medium text-ink-200 transition hover:border-ink-600 hover:text-ink-50 disabled:cursor-not-allowed disabled:text-ink-500";
 const dangerBtn =
   "inline-flex items-center gap-2 rounded-lg border border-bad-500/50 bg-bad-500/15 px-4 py-2 text-sm font-semibold text-bad-100 transition hover:bg-bad-500/25 disabled:cursor-not-allowed disabled:opacity-50";
+
+/**
+ * 停止（凍結）したことを見分けるための目印。
+ * ★ 保存する側（actions/qr-actions.ts）にも同じ文字列を置いてある。
+ *   片方だけ変えるとこの画面が停止中を見分けられなくなるので、必ず両方そろえること。
+ */
+const FREEZE_MARK = "【QR停止】";
+
+/** いま停止中か。停止は「差戻し」の欄を目印付きで使っている。 */
+function isFrozen(qr2Status: string, rejectedNote: string): boolean {
+  return qr2Status === QR2_REJECTED && rejectedNote.startsWith(FREEZE_MARK);
+}
+
+/** 停止したときの理由。目印を外して読む。 */
+function freezeReasonOf(rejectedNote: string): string {
+  return rejectedNote.slice(FREEZE_MARK.length).trim();
+}
 
 /**
  * 本部が代理店へお渡しするQRを発行する画面。
@@ -61,10 +80,19 @@ export function QrPanel({ agency }: { agency: QrSource }) {
     return <TossPartnerGuide code={a.code} name={a.name} />;
   }
 
+  // コンプライアンス対応で止めている最中かどうか。止めている間は発行も承認もできない。
+  const frozen = isFrozen(a.qr2Status, a.qr2RejectedNote);
+  const freezeReason = frozen ? freezeReasonOf(a.qr2RejectedNote) : "";
+
   return (
-    <Card title="QRのご案内（発行）">
+    <Card title="QRのご案内（発行・停止）">
       <div className="divide-y divide-ink-800">
-        <Qr1Section code={a.code} issuedUrl={a.qr1Url} suspended={a.status === "停止・解約"} />
+        <Qr1Section
+          code={a.code}
+          issuedUrl={a.qr1Url}
+          suspended={a.status === "停止・解約"}
+          frozen={frozen}
+        />
         <Qr2Section
           code={a.code}
           issuedUrl={a.qr2Url}
@@ -74,6 +102,14 @@ export function QrPanel({ agency }: { agency: QrSource }) {
           requestedOn={a.qr2RequestedOn}
           rejectedNote={a.qr2RejectedNote}
           suspended={a.status === "停止・解約"}
+          frozen={frozen}
+        />
+        <FreezeSection
+          code={a.code}
+          name={a.name}
+          issued={Boolean(a.qr1Url || a.qr2Url)}
+          frozen={frozen}
+          reason={freezeReason}
         />
       </div>
     </Card>
@@ -131,13 +167,16 @@ function Qr1Section({
   code,
   issuedUrl,
   suspended,
+  frozen,
 }: {
   code: string;
   issuedUrl: string;
   suspended: boolean;
+  /** コンプライアンス対応でこの代理店のQRを止めているか。 */
+  frozen: boolean;
 }) {
   const [state, run, pending] = useActionState(issueQrAction, initial);
-  const url = state.url || issuedUrl;
+  const url = frozen ? "" : state.url || issuedUrl;
 
   return (
     <section className="space-y-4 px-5 py-5">
@@ -156,13 +195,21 @@ function Qr1Section({
             この代理店コードをご記入いただいてください。
           </p>
         </div>
-        <Badge tone={url ? "good" : "neutral"}>{url ? "発行済み" : "未発行"}</Badge>
+        <Badge tone={frozen ? "bad" : url ? "good" : "neutral"}>
+          {frozen ? "停止中" : url ? "発行済み" : "未発行"}
+        </Badge>
       </div>
 
       {suspended ? (
         <Notice tone="warn">
           この代理店は停止・解約のため、新しいご案内は発行できません。
           発行が必要な場合は、先に稼働状況を戻してください。
+        </Notice>
+      ) : null}
+
+      {frozen ? (
+        <Notice tone="bad">
+          この代理店のQRは停止中です。発行し直すには、下の「QRの停止」欄で停止を解除してください。
         </Notice>
       ) : null}
 
@@ -178,7 +225,11 @@ function Qr1Section({
       <form action={run} className="flex flex-wrap items-center gap-3">
         <input type="hidden" name="code" value={code} />
         <input type="hidden" name="kind" value="qr1" />
-        <button type="submit" disabled={pending || suspended} className={primaryBtn}>
+        <button
+          type="submit"
+          disabled={pending || suspended || frozen}
+          className={primaryBtn}
+        >
           <QrCode className="h-4 w-4" />
           {pending ? "発行中…" : url ? "QR1を作り直す" : "QR1を発行"}
         </button>
@@ -205,6 +256,7 @@ function Qr2Section({
   requestedOn,
   rejectedNote,
   suspended,
+  frozen,
 }: {
   code: string;
   issuedUrl: string;
@@ -214,6 +266,8 @@ function Qr2Section({
   requestedOn: string;
   rejectedNote: string;
   suspended: boolean;
+  /** コンプライアンス対応でこの代理店のQRを止めているか。 */
+  frozen: boolean;
 }) {
   const [issueState, issue, issuing] = useActionState(issueQrAction, initial);
   const [approveState, approve, approving] = useActionState(approveQr2Action, initial);
@@ -221,7 +275,7 @@ function Qr2Section({
   const [rejectOpen, setRejectOpen] = useState(false);
 
   const passed = trainingStatus === TRAINING_PASSED;
-  const url = issueState.url || issuedUrl;
+  const url = frozen ? "" : issueState.url || issuedUrl;
   const busy = issuing || approving || rejecting;
 
   return (
@@ -238,7 +292,9 @@ function Qr2Section({
             発行には本部の承認が必要です。
           </p>
         </div>
-        <Badge tone={url ? "good" : "neutral"}>{url ? "発行済み" : "未発行"}</Badge>
+        <Badge tone={frozen ? "bad" : url ? "good" : "neutral"}>
+          {frozen ? "停止中" : url ? "発行済み" : "未発行"}
+        </Badge>
       </div>
 
       <dl className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border border-ink-800 bg-ink-850/60 px-4 py-3 text-sm">
@@ -268,8 +324,19 @@ function Qr2Section({
         </Notice>
       ) : null}
 
-      {/* 研修に合格していない間は、どの状態でも発行できない */}
-      {!passed ? (
+      {/*
+        上から順に、発行できない理由の重い方から出す。
+        1. 停止中（コンプライアンス対応で止めている）
+        2. 研修に合格していない
+        どちらでもなければ、承認と発行の欄を出す。
+      */}
+      {frozen ? (
+        <Notice tone="bad">
+          この代理店のQRは停止中です。ご契約のご案内（QR2）は発行できません。
+          止めた理由の確認と解除は、下の「QRの停止」欄から行ってください。
+          解除しても、発行の承認からのやり直しになります。
+        </Notice>
+      ) : !passed ? (
         <Notice tone="warn">
           研修に合格していません（現在：{trainingStatus || "未受講"}）。
           ご契約のご案内（QR2）は、研修に合格した方にのみお渡しできます。
@@ -417,6 +484,280 @@ function Qr2Section({
       <Result state={rejectState} />
       <Result state={issueState} />
     </section>
+  );
+}
+
+/* ─────────── QRの停止（コンプライアンス対応） ─────────── */
+
+/**
+ * 出しているQRを止める欄と、その解除。
+ *
+ * 広告の出し方や説明の仕方に問題が見つかったときに、本部がその場で
+ * 新しいお客様の流入を止められるようにする（コンプライアンス対応）。
+ * 稼働状況は変えないので、ポータルへのログインや受注・報酬の確認はこれまでどおり。
+ * 代理店そのものを止めるときは、上の「稼働状況の切り替え」を使う。
+ */
+function FreezeSection({
+  code,
+  name,
+  issued,
+  frozen,
+  reason,
+}: {
+  code: string;
+  name: string;
+  /** いずれかのご案内を発行済みか。発行していなければ止める対象がない。 */
+  issued: boolean;
+  frozen: boolean;
+  /** 止めたときの理由。 */
+  reason: string;
+}) {
+  const [freezeState, freeze, freezing] = useActionState(freezeQrAction, initial);
+  const [unfreezeState, unfreeze, unfreezing] = useActionState(unfreezeQrAction, initial);
+  const [freezeOpen, setFreezeOpen] = useState(false);
+  const [unfreezeOpen, setUnfreezeOpen] = useState(false);
+
+  const who = name || code;
+
+  // 保存が終わって画面が新しくなったら、開いていた入力欄を閉じる
+  useEffect(() => {
+    setFreezeOpen(false);
+    setUnfreezeOpen(false);
+  }, [frozen]);
+
+  return (
+    <section className="space-y-4 px-5 py-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-ink-100">
+            <ShieldAlert className={cn("h-4 w-4", frozen ? "text-bad-100" : "text-gold-400")} />
+            QRの停止
+          </h3>
+          <p className="mt-1.5 text-sm leading-relaxed text-ink-300">
+            広告の出し方や説明の仕方に問題が見つかったときなど、
+            この代理店へのご案内をすぐに止めるための操作です。
+            稼働状況は変わりません（ポータルへのログインや、受注・報酬の確認はこれまでどおりです）。
+          </p>
+        </div>
+        {frozen ? <Badge tone="bad">停止中</Badge> : null}
+      </div>
+
+      {frozen ? (
+        <div className="space-y-4">
+          <div className="space-y-2 rounded-lg border border-bad-500/60 bg-bad-500/15 px-4 py-3">
+            <p className="text-sm font-semibold text-bad-100">
+              停止中です（理由：{reason || "記録が残っていません"}）
+            </p>
+            <p className="text-sm leading-relaxed text-bad-100">
+              体験のご案内（QR1）とご契約のご案内（QR2）のURLは消してあります。
+              この画面からも、代理店へのご案内メールからもお渡しできません。
+              いつ・誰が・どの理由で止めたかは、下の「操作の記録」でご確認いただけます。
+            </p>
+          </div>
+
+          <Notice tone="warn">
+            すでにお客様のお手元にあるQR（印刷物・画面の保存）は、読み取り先が当システムの外
+            （公式LINE・お支払いのフォーム）にあるため、この操作では読み取れなくなりません。
+            出回っているQRの回収と、お客様へのご案内は別途お願いします。
+          </Notice>
+
+          {!unfreezeOpen ? (
+            <button
+              type="button"
+              onClick={() => setUnfreezeOpen(true)}
+              disabled={unfreezing}
+              className={primaryBtn}
+            >
+              停止を解除して再発行できる状態にする
+            </button>
+          ) : (
+            <ConfirmReasonForm
+              code={code}
+              action={unfreeze}
+              pending={unfreezing}
+              label="停止を解除する理由（必須）"
+              placeholder="例：ご本人と面談し、広告の表現を修正いただいたことを確認しました。"
+              hint={
+                "解除しても、止める前のURLは戻りません。体験のご案内（QR1）は発行し直し、" +
+                "ご契約のご案内（QR2）は「発行を承認する」からやり直しになります。" +
+                "何を確かめて再開したのかを、必ず残してください。"
+              }
+              confirmQuestion={(v) =>
+                `${who} のQRの停止を解除します（理由：${v}）。解除後は、ご案内を発行し直してください。よろしいですか？`
+              }
+              submitLabel="はい、停止を解除する"
+              pendingLabel="解除中…"
+              tone="primary"
+              onCancel={() => setUnfreezeOpen(false)}
+            />
+          )}
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="rounded-lg border border-ink-800 bg-ink-850/60 px-4 py-3">
+            <p className="text-sm font-medium text-ink-100">停止すると、こうなります</p>
+            <ul className="mt-2 space-y-1.5 text-sm leading-relaxed text-ink-300">
+              <li>
+                ・体験のご案内（QR1）とご契約のご案内（QR2）のURLを消します。この画面からも、
+                ご案内メールからもお渡しできなくなります。
+              </li>
+              <li>
+                ・ご契約のご案内（QR2）は「差戻し」に戻ります。再開するときは、
+                本部の承認と発行をやり直していただきます。
+              </li>
+              <li>
+                ・稼働状況は変えません。ポータルへのログインはこれまでどおりできます
+                （代理店そのものを止めるときは、上の「稼働状況の切り替え」をお使いください）。
+              </li>
+              <li>
+                ・すでにお客様のお手元にあるQRは、読み取り先が当システムの外にあるため、
+                この操作では読み取れなくなりません。回収とお客様へのご案内は別途お願いします。
+              </li>
+            </ul>
+          </div>
+
+          {!issued ? (
+            <Notice tone="info">
+              この代理店にはまだご案内を発行していないため、止める対象がありません。
+              これから発行しないようにしたい場合は、上の「発行を見送る」をお使いください。
+            </Notice>
+          ) : !freezeOpen ? (
+            <button
+              type="button"
+              onClick={() => setFreezeOpen(true)}
+              disabled={freezing}
+              className={dangerBtn}
+            >
+              <Ban className="h-4 w-4" />
+              このQRを停止する
+            </button>
+          ) : (
+            <ConfirmReasonForm
+              code={code}
+              action={freeze}
+              pending={freezing}
+              label="停止する理由（必須）"
+              placeholder="例：効果を断定する表現でSNS広告を出しているとのご指摘があり、確認が済むまで停止します。"
+              hint={
+                "後から「なぜ止めたのか」を確かめられるよう、必ず記録に残します。" +
+                "この画面にも表示されますので、事実が分かるように書いてください。"
+              }
+              confirmQuestion={(v) =>
+                `${who} のQRを停止します（理由：${v}）。発行済みのご案内URLは消え、解除しても同じURLは戻りません。よろしいですか？`
+              }
+              submitLabel="はい、いますぐ停止する"
+              pendingLabel="停止中…"
+              tone="danger"
+              onCancel={() => setFreezeOpen(false)}
+            />
+          )}
+        </div>
+      )}
+
+      <Result state={freezeState} />
+      <Result state={unfreezeState} />
+    </section>
+  );
+}
+
+/**
+ * 理由を書いてから、もう一度確かめて実行するフォーム。
+ *
+ * 停止も解除も取り消しにくい操作なので、押し間違いで進んでしまわないよう
+ * 「よろしいですか？」を必ず1回はさむ。理由が空のままでは先へ進めない。
+ */
+function ConfirmReasonForm({
+  code,
+  action,
+  pending,
+  label,
+  placeholder,
+  hint,
+  confirmQuestion,
+  submitLabel,
+  pendingLabel,
+  tone,
+  onCancel,
+}: {
+  code: string;
+  action: (formData: FormData) => void;
+  pending: boolean;
+  label: string;
+  placeholder: string;
+  hint: string;
+  /** 確認の問いかけ。入力された理由を受け取って文にする。 */
+  confirmQuestion: (reason: string) => string;
+  submitLabel: string;
+  pendingLabel: string;
+  tone: "danger" | "primary";
+  onCancel: () => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const ready = reason.trim().length > 0;
+
+  return (
+    <form action={action} className="space-y-3">
+      <input type="hidden" name="code" value={code} />
+      <label className="block">
+        <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-ink-400">
+          {label}
+        </span>
+        <textarea
+          name="reason"
+          rows={3}
+          required
+          maxLength={400}
+          value={reason}
+          onChange={(e) => {
+            setReason(e.target.value);
+            // 書き換えたら、確認はやり直してもらう
+            setConfirming(false);
+          }}
+          placeholder={placeholder}
+          disabled={pending}
+          className="mt-1.5 w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2.5 text-sm leading-relaxed text-ink-50 transition focus:border-gold-500 focus:outline-none disabled:opacity-60"
+        />
+      </label>
+      <p className="text-xs leading-relaxed text-ink-400">{hint}</p>
+
+      {confirming ? (
+        <div className="space-y-3 rounded-lg border border-warn-500/40 bg-warn-500/10 px-4 py-3">
+          <p className="text-sm leading-relaxed text-warn-100">{confirmQuestion(reason.trim())}</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="submit"
+              disabled={pending || !ready}
+              className={tone === "danger" ? dangerBtn : primaryBtn}
+            >
+              {pending ? pendingLabel : submitLabel}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              disabled={pending}
+              className={quietBtn}
+            >
+              理由を書き直す
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setConfirming(true)}
+            disabled={pending || !ready}
+            className={quietBtn}
+          >
+            {ready ? "入力した内容を確かめる" : "理由を入力してください"}
+          </button>
+          <button type="button" onClick={onCancel} disabled={pending} className={quietBtn}>
+            やめる
+          </button>
+        </div>
+      )}
+    </form>
   );
 }
 

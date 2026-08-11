@@ -46,7 +46,15 @@ import {
   yen,
 } from "@/components/ui";
 import { Progress } from "@/components/Progress";
+import { AutoRefresh } from "@/components/AutoRefresh";
 import { rankLabel } from "@/lib/labels";
+
+/**
+ * 自動更新の間隔（秒）。
+ * ダッシュボードは設計書どおり30秒。顧客一覧より頻度を落としてあるのは、
+ * この画面が集計（今月の受注・売上・枠）中心で、1件ずつの動きを追う画面ではないため。
+ */
+const REFRESH_SECONDS = 30;
 
 /** 直近の受注1件。進み具合を出すために審査結果と配達完了日も持たせる。 */
 type RecentOrder = OrderWithReward & { reviewResult: string; deliveredOn: string };
@@ -194,7 +202,13 @@ export default async function DashboardPage() {
   if (loadError) {
     return (
       <div className="space-y-6">
-        <PageHeader title="ダッシュボード" description={`${jpMonthLabel(month)}の状況`} />
+        {/* 通信が一時的に途切れただけのことが多いので、この画面でも自動更新は続ける。
+            会場で待っているうちに自然に直れば、操作しなくても表示が戻る。 */}
+        <PageHeader
+          title="ダッシュボード"
+          description={`${jpMonthLabel(month)}の状況`}
+          actions={<AutoRefresh seconds={REFRESH_SECONDS} label="ダッシュボード" />}
+        />
         <Notice tone="bad">
           データの取得に失敗しました。{loadError}
           <br />
@@ -239,7 +253,12 @@ export default async function DashboardPage() {
       <PageHeader
         title="ダッシュボード"
         description={`${self.name}（${self.code}）／ ${jpMonthLabel(month)}の状況です。自分ぶんと配下ぶんを合わせて集計しています。`}
-        actions={<Badge tone="gold">{rankText}</Badge>}
+        actions={
+          <>
+            <Badge tone="gold">{rankText}</Badge>
+            <AutoRefresh seconds={REFRESH_SECONDS} label="ダッシュボード" />
+          </>
+        }
       />
 
       {/* 1. 今月の要約 */}

@@ -45,8 +45,18 @@ import {
   FilterText,
   SortableTh,
 } from "@/components/SortableTh";
+import { AutoRefresh } from "@/components/AutoRefresh";
 
 const BASE = "/admin/orders";
+
+/**
+ * 自動更新の間隔（秒）。
+ * 本部の受注一覧は設計書どおり30秒。催事の最中に新しい受注が入ってくるので、
+ * 開いたままでも件数が増えていくようにする。
+ * 画面を新しくしても URL は変わらないため、期間・代理店・出荷状況などの絞り込みと、
+ * 見出しを押して決めた並び順、毎朝の確認（未出荷など）の指定はそのまま残る。
+ */
+const REFRESH_SECONDS = 30;
 
 export const metadata = { title: "受注一覧（本部）｜VIS 代理店ポータル" };
 
@@ -407,6 +417,7 @@ export default async function AdminOrdersPage({
     <PageHeader
       title="受注一覧（全代理店）"
       description="全代理店の受注をまとめて確認できます。期間・代理店・出荷状況・決済方法・照合状態で絞り込め、注文者名や送り状番号でも探せます。表の見出しを押すと並び替わります。キャンセルと審査否決の受注は、売上・支払対象額には数えていません。"
+      actions={<AutoRefresh seconds={REFRESH_SECONDS} label="受注一覧" />}
     />
   );
 

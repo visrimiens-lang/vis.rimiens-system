@@ -268,10 +268,28 @@ export default async function AdminOrderDetailPage({
   for (const a of agencies) names.set(str(a, "code"), str(a, "name"));
 
   // 紹介元コードの入力候補。解約済みは外す（新しく紹介元に据えることはないため）。
-  const referrerOptions: ReferrerOption[] = agencies
+  // コード区分（00=会社 / 01=取次パートナー / 02=スタッフ）も渡す。
+  // 担当スタッフの候補をスタッフだけに絞るのに使う。
+  const selectable: ReferrerOption[] = agencies
     .filter((a) => str(a, "status") !== "停止・解約" && str(a, "code"))
-    .map((a) => ({ code: str(a, "code"), name: str(a, "name") }))
-    .slice(0, 500);
+    .map((a) => ({
+      code: str(a, "code"),
+      name: str(a, "name"),
+      kind: str(a, "code_kind"),
+    }));
+
+  const referrerOptions: ReferrerOption[] = selectable.slice(0, 500);
+  /**
+   * 担当スタッフの入力候補。スタッフ（コード区分 02）だけを出す。
+   *
+   * 紹介元の候補とは別に作る。同じ配列を使い回すと、上限（500件）に達したときに
+   * スタッフが1人も候補に出ない、ということが起こり得るため。
+   * コード区分がどこにも入っていない場合は 0 件になってしまうので、
+   * そのときは渡さず、入力欄の側で全件を候補にしてもらう。
+   */
+  const staffOnly = selectable.filter((o) => o.kind === "02").slice(0, 500);
+  const staffOptions: ReferrerOption[] | undefined =
+    staffOnly.length > 0 ? staffOnly : undefined;
 
   /* --- 報酬の集計 --- */
   const confirmed = rewards
@@ -546,6 +564,8 @@ export default async function AdminOrderDetailPage({
         matchStatus={matchStatus}
         referrerCode={referrerCode}
         referrerOptions={referrerOptions}
+        staffCode={str(order, "staff_code")}
+        staffOptions={staffOptions}
       />
 
       <Card

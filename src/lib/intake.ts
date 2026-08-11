@@ -373,17 +373,179 @@ export type OrderApplication = {
   amount: number;
   quantity?: number;
   paymentMethod?: string;
-  /** 代理店コード。UTAGE の ?ref= で渡ってくる */
+  /**
+   * 代理店コード。UTAGE の ?ref= で渡ってくる。
+   * スタッフや取次パートナーのコードが入ってくることもある（下の resolveAttribution を参照）。
+   */
   agencyCode?: string;
+  /** 誰が売ったか。フォームに担当者コードの欄があるときに渡ってくる */
+  staffCode?: string;
   stripePaymentId?: string;
 };
+
+/** 代理店マスタを1件引く。 */
+async function agencyByCode(code: string): Promise<Row | null> {
+  const c = (code || "").trim();
+  if (!c) return null;
+  return selectOne<Row>(`agencies?select=*&code=eq.${encodeURIComponent(c)}`);
+}
+
+/** 受注1件の「誰が売ったか」と「どの代理店の売上か」。 */
+export type SalesAttribution = {
+  /** 売上を付ける代理店（会社） */
+  agencyCode: string;
+  /** 実際に売った個人（コード区分 02） */
+  staffCode: string;
+  /** 紹介した取次パートナー（コード区分 01） */
+  referrerCode: string;
+  /** 2次代理店（統括） */
+  nijiCode: string;
+  /** ゼロ次代理店 */
+  zerothCode: string;
+};
+
+/**
+ * 渡されたコードから、売上の付け先と担当者を割り出す。
+ *
+ * UTAGE の ?ref= には代理店コードが入る決まりだが、実際には
+ * スタッフ（コード区分 02）や取次パートナー（同 01）のコードで来ることがある。
+ * それをそのまま agency_code に入れると、
+ *   ・「誰が売ったか」が顧客管理側に残らない（2026-08-07 会議での指摘）
+ *   ・売上が個人に付き、所属先の代理店に付かない
+ * という2つの取りこぼしが起きる。そこで区分ごとに置き場所を分ける。
+ *
+ *   区分 02（スタッフ）        … staff_code に本人、agency_code に所属先（上位）
+ *   区分 01（取次パートナー）  … referrer_code に本人、agency_code に所属先（上位）
+ *   区分 00（会社）・マスタ未登録 … agency_code にそのまま
+ *
+ * 上位が分からない（parent_code が空）ときは、本人のコードを売上の付け先として残す。
+ * 付け先が消えると、報酬が誰にも計上されなくなるため。
+ */
+export async function resolveAttribution(
+  rawAgencyCode: string,
+  rawStaffCode = "",
+): Promise<SalesAttribution> {
+  const out: SalesAttribution = {
+    agencyCode: (rawAgencyCode || "").trim(),
+    staffCode: (rawStaffCode || "").trim(),
+    referrerCode: "",
+    nijiCode: "",
+    zerothCode: "",
+  };
+
+  const given = out.agencyCode;
+  const ref = await agencyByCode(given);
+  const refKind = s_(ref, "code_kind");
+
+  if (ref && refKind === KIND_STAFF) {
+    // スタッフ本人が売った。売上は所属先の代理店に付ける。
+    if (!out.staffCode) out.staffCode = s_(ref, "code");
+    out.agencyCode = s_(ref, "parent_code") || s_(ref, "code");
+  } else if (ref && refKind === KIND_REFERRER) {
+    // 取次パートナーの紹介。紹介報酬は本人、販売報酬は所属先に立てる。
+    out.referrerCode = s_(ref, "code");
+    out.agencyCode = s_(ref, "parent_code") || s_(ref, "code");
+  }
+
+  // コードが無く、担当者だけが分かっているときは、その方の所属先を売上の付け先にする
+  if (!out.agencyCode && out.staffCode) {
+    const person = await agencyByCode(out.staffCode);
+    if (person && s_(person, "code_kind") === KIND_STAFF) {
+      out.agencyCode = s_(person, "parent_code") || s_(person, "code");
+    }
+  }
+
+  // 付け先が決まったら、そこから階層をたどる
+  if (out.agencyCode) {
+    const seller =
+      ref && s_(ref, "code") === out.agencyCode ? ref : await agencyByCode(out.agencyCode);
+    if (seller) {
+      // ゼロ次が空なら、コードの頭の英字（組織）で補う
+      out.zerothCode = s_(seller, "zeroth_code") || orgPrefixOf(s_(seller, "code"));
+      // 自分が2次代理店ならそのまま、下位なら上位をたどる
+      out.nijiCode =
+        s_(seller, "rank") === "2次代理店" ? s_(seller, "code") : s_(seller, "parent_code");
+    }
+  }
+
+  return out;
+}
+
+/**
+ * 受注のお客様を顧客台帳に結びつける。見つからなければ新しく作る。
+ *
+ * 顧客一覧は、受注の customer_id から顧客台帳の配達完了日を引いて進み具合を出している。
+ * ここが空のままだと、どれだけ配達が終わっても「出荷済 80%」で止まって見える。
+ *
+ * 照合は電話番号で行う。台帳には記号を落とした電話番号の列が無いので、
+ * 下4桁で絞ってから、記号を落とした形で突き合わせる。
+ *
+ * すでにある台帳の内容は上書きしない（本部が聞き取って直した内容を消さないため）。
+ * 空いている欄だけを埋める。
+ */
+export async function linkCustomer(app: {
+  name: string;
+  phone?: string;
+  email?: string;
+  zip?: string;
+  address?: string;
+  building?: string;
+  agencyCode?: string;
+  staffCode?: string;
+  referrerCode?: string;
+}): Promise<number | null> {
+  const name = (app.name || "").trim();
+  if (!name) return null;
+
+  const normalized = normalizePhone(app.phone ?? "");
+
+  let found: Row | null = null;
+  if (normalized) {
+    const tail = normalized.slice(-4);
+    const rows = await select<Row>(
+      `customers?select=id,name,phone,agency_code,staff_code,referrer_code&phone=like.*${encodeURIComponent(tail)}&limit=50`,
+    );
+    found = rows.find((c) => normalizePhone(s_(c, "phone")) === normalized) ?? null;
+  }
+
+  const attribution: Record<string, string> = {};
+  if (app.agencyCode) attribution["agency_code"] = app.agencyCode;
+  if (app.staffCode) attribution["staff_code"] = app.staffCode;
+  if (app.referrerCode) attribution["referrer_code"] = app.referrerCode;
+
+  if (found) {
+    const patch: Record<string, string> = {};
+    for (const [column, value] of Object.entries(attribution)) {
+      if (!s_(found, column)) patch[column] = value;
+    }
+    if (Object.keys(patch).length > 0) {
+      await update(`customers?id=eq.${encodeURIComponent(s_(found, "id"))}`, patch);
+    }
+    return Number(found["id"]) || null;
+  }
+
+  const [row] = await insert<Row>("customers", [
+    {
+      name,
+      phone: app.phone || null,
+      email: app.email || null,
+      zip: app.zip || null,
+      address: app.address || null,
+      building: app.building || null,
+      ...attribution,
+    },
+  ]);
+  return Number(row?.["id"]) || null;
+}
 
 /**
  * 受注を登録する。
  *
- * 代理店コードから階層（2次代理店・ゼロ次代理店）を自動で埋める。
+ * 渡されたコードから「誰が売ったか（担当スタッフ・取次パートナー）」と
+ * 「どの代理店の売上か」を割り出し、階層（2次代理店・ゼロ次代理店）まで埋める。
  * 電話番号が一致するトスアップがあれば、その取次店を紹介元として結びつける
  * （これまで Make のシナリオC がやっていた照合）。
+ * あわせてお客様を顧客台帳に結びつける（進み具合の表示に使う）。
  */
 export async function registerOrder(app: OrderApplication): Promise<IntakeResult> {
   const name = (app.customerName || "").trim();
@@ -396,27 +558,16 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
     if (dup) return { ok: true, code: String(dup["id"]), message: "この決済は登録済みです。" };
   }
 
-  // 代理店コードから階層をたどる
-  let agency: Row | null = null;
-  let nijiCode = "";
-  let zerothCode = "";
-  if (app.agencyCode) {
-    agency = await selectOne<Row>(
-      `agencies?select=*&code=eq.${encodeURIComponent(app.agencyCode.trim())}`,
-    );
-    if (agency) {
-      // ゼロ次が空なら、コードの頭の英字（組織）で補う
-      zerothCode = s_(agency, "zeroth_code") || orgPrefixOf(s_(agency, "code"));
-      // 自分が2次代理店ならそのまま、下位なら上位をたどる
-      nijiCode =
-        s_(agency, "rank") === "2次代理店" ? s_(agency, "code") : s_(agency, "parent_code");
-    }
-  }
+  // 渡されたコードの持ち主を見て、売上の付け先と担当者を分ける
+  const who = await resolveAttribution(app.agencyCode ?? "", app.staffCode ?? "");
+  const { agencyCode, staffCode, nijiCode, zerothCode } = who;
 
   // 電話番号でトスアップと照合する
   const normalized = normalizePhone(app.phone ?? "");
   let referrerCode = "";
   let matchStatus = "直販";
+  // 成約に書き換えるトスアップは、照合で選んだこの1件だけ
+  let matchedLeadId = "";
   if (normalized) {
     const leads = await select<Row>(
       `leads?select=id,referrer_code,status&phone_normalized=eq.${normalized}&order=tossed_at.asc`,
@@ -424,6 +575,7 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
     const open = leads.filter((l) => s_(l, "status") !== "不成立");
     if (open.length === 1) {
       referrerCode = s_(open[0], "referrer_code");
+      matchedLeadId = s_(open[0], "id");
       matchStatus = "照合済";
     } else if (open.length > 1) {
       // 複数見つかったら自動で決めず、本部の確認に回す
@@ -433,8 +585,39 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
     }
   }
 
+  // 取次パートナーのコードで来た受注は、その方が紹介元。
+  // トスアップの照合と食い違うときは、どちらが紹介元か決めずに本部の確認に回す。
+  const leadMatched = referrerCode;
+  if (who.referrerCode) {
+    if (!referrerCode) {
+      referrerCode = who.referrerCode;
+      matchStatus = "照合済";
+    } else if (referrerCode !== who.referrerCode) {
+      matchStatus = "要確認";
+    }
+  }
+
+  // お客様を顧客台帳に結びつける。台帳が作れなくても受注の登録は止めない。
+  let customerId: number | null = null;
+  try {
+    customerId = await linkCustomer({
+      name,
+      phone: app.phone,
+      email: app.email,
+      zip: app.zip,
+      address: app.address,
+      building: app.building,
+      agencyCode,
+      staffCode,
+      referrerCode,
+    });
+  } catch (e) {
+    console.error("[customer]", e);
+  }
+
   const [order] = await insert<Row>("orders", [
     {
+      customer_id: customerId,
       customer_name: name,
       phone: app.phone || null,
       zip: app.zip || null,
@@ -444,7 +627,8 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
       quantity: app.quantity ?? 1,
       amount: app.amount ?? 0,
       payment_method: app.paymentMethod || null,
-      agency_code: app.agencyCode || null,
+      agency_code: agencyCode || null,
+      staff_code: staffCode || null,
       niji_code: nijiCode || null,
       zeroth_code: zerothCode || null,
       referrer_code: referrerCode || null,
@@ -454,10 +638,12 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
     },
   ]);
 
-  // トスアップを成約にする
-  if (referrerCode && matchStatus === "照合済" && normalized) {
+  // トスアップを成約にする（電話番号で照合できたときだけ）。
+  // 書き換えるのは照合で選んだ1件だけ。同じ電話番号・同じ取次店の行がほかにあっても巻き込まない。
+  // すでに成約になっている行は、前の受注番号を残すためそのままにする。
+  if (leadMatched && matchStatus === "照合済" && matchedLeadId) {
     await update(
-      `leads?phone_normalized=eq.${normalized}&referrer_code=eq.${encodeURIComponent(referrerCode)}`,
+      `leads?id=eq.${encodeURIComponent(matchedLeadId)}&status=neq.${encodeURIComponent("成約")}`,
       {
         status: "成約",
         closed_on: new Date().toISOString().slice(0, 10),
@@ -470,6 +656,11 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
     顧客: name,
     金額: app.amount,
     照合: matchStatus,
+    受け取ったコード: (app.agencyCode || "").trim() || null,
+    代理店: agencyCode || null,
+    担当スタッフ: staffCode || null,
+    紹介元: referrerCode || null,
+    顧客台帳: customerId,
   });
 
   // 報酬を計上し、獲得した代理店に知らせる。

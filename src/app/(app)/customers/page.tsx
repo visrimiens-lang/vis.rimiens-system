@@ -54,10 +54,19 @@ import {
   SortableTh,
 } from "@/components/SortableTh";
 import { codeKindLabel } from "@/lib/labels";
+import { AutoRefresh } from "@/components/AutoRefresh";
 
 export const metadata = { title: "顧客一覧｜VIS 代理店ポータル" };
 
 const BASE = "/customers";
+
+/**
+ * 自動更新の間隔（秒）。
+ * 催事の会場で審査の結果をその場で見たい、という要望に合わせて設計書どおり10秒。
+ * 画面を新しくしても URL は変わらないので、期間・担当コード・お名前での絞り込みと、
+ * 見出しを押して決めた並び順はそのまま残る。
+ */
+const REFRESH_SECONDS = 10;
 
 /** 見出しを押して並び替えられる列。URL を手で書き換えられても、ここに無い列は効かない。 */
 const SORT_COLUMNS = [
@@ -294,6 +303,7 @@ export default async function CustomersPage({
     <PageHeader
       title="顧客一覧"
       description="自分と配下が獲得した受注です。申込から商品のお届けまで、いまどこまで進んでいるかを一覧で確認できます。お客様のお名前・電話番号で探せます。"
+      actions={<AutoRefresh seconds={REFRESH_SECONDS} label="顧客一覧" />}
     />
   );
 

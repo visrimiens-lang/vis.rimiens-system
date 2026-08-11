@@ -133,6 +133,43 @@ function customerLabel(order: Row): string {
   return name ? `${name} 様` : "このご注文";
 }
 
+/*
+ * ───────── 受注の言葉 → 顧客台帳の言葉 ─────────
+ *
+ * 出荷や審査の状態は、受注と顧客台帳の両方が持っている。
+ * 受注だけを直すと、お客様一覧が「配達完了 100%」なのに「未出荷」と出る。
+ * 実際にそうなっていたので、受注を直したら顧客台帳にも写す。
+ *
+ * 2つの台帳で言葉が違うので、ここで言い換える。
+ * データベースの値の言葉づかいは変えない（既存のデータと絞り込みが壊れるため）。
+ */
+
+/**
+ * 受注の出荷状況 → 顧客台帳の出荷状況。
+ *
+ * 顧客台帳が持てるのは「未出荷 / 出荷手配中 / 出荷済」の3つだけで、
+ * 「キャンセル」は持てない（中止は決済状況の「否決・キャンセル」で表す取り決め）。
+ * キャンセルのときは null を返し、出荷状況には触らない。
+ * ここで「キャンセル」を書こうとすると、顧客台帳への書き込みがまるごと失敗し、
+ * 配達完了日も送り状番号も入らなくなる。
+ */
+function customerShipStatus(orderShipStatus: string): string | null {
+  if (orderShipStatus === "キャンセル") return null;
+  return orderShipStatus === "出荷待ち" ? "未出荷" : orderShipStatus;
+}
+
+/**
+ * 受注の審査結果 → 顧客台帳の審査状況。
+ * 「電話確認待ち」は、まだ結果が出ていないので顧客台帳では「申込中」のまま。
+ * 空（未設定）のときは書き換えない（null を返す）。
+ */
+function customerReviewStatus(reviewResult: string): string | null {
+  if (reviewResult === "承認") return "審査完了";
+  if (reviewResult === "否決") return "審査NG";
+  if (reviewResult === "電話確認待ち") return "申込中";
+  return null;
+}
+
 /**
  * 確定・取消の対象が1件も無かったときに、その理由を調べて文にする。
  *
@@ -268,18 +305,31 @@ export async function updateShipmentAction(
     return { error: "出荷日は「2026-08-11」のような形式で入力してください。" };
   }
 
+  /*
+   * 配達完了日。お客様の進捗を「配達完了」まで進めるために使う。
+   * 置き場所は顧客台帳（customers.delivered_on）で、受注ではない。
+   * 進捗の表示（components/Progress.tsx）とお客様一覧が、そこを見ているため。
+   */
+  const deliveredOn = readDate(formData, "deliveredOn");
+  if (deliveredOn === undefined) {
+    return { error: "配達完了日は「2026-08-11」のような形式で入力してください。" };
+  }
+
   let before = "";
   let label = "このご注文";
   let rewardNote = "";
+  let deliveryNote = "";
+  let customerId = "";
 
   try {
     const order = await selectOne<Row>(
-      `orders?select=id,customer_name,ship_status,tracking_no,shipped_on&id=eq.${id}`,
+      `orders?select=id,customer_id,customer_name,ship_status,tracking_no,shipped_on&id=eq.${id}`,
     );
     if (!order) return { error: NOT_FOUND };
 
     before = s_(order, "ship_status");
     label = customerLabel(order);
+    customerId = s_(order, "customer_id");
 
     // キャンセルは報酬の取消につながる。押し間違いを防ぐため、確認を通っていなければ止める。
     // すでにキャンセルの受注をもう一度保存するとき（前回失敗した取消のやり直しなど）は、
@@ -419,11 +469,52 @@ export async function updateShipmentAction(
     }
   }
 
+  /*
+   * 配達完了日を顧客台帳に書く。
+   *
+   * ここで失敗しても出荷の記録と報酬はそのままにする（配達日は後から入れ直せる）。
+   * 受注に顧客が紐づいていないときは書けないので、その旨をそのまま伝える。
+   * 黙って何もしないと「入れたのに進捗が変わらない」と見えてしまうため。
+   */
+  if (!customerId) {
+    if (deliveredOn) {
+      deliveryNote =
+        "配達完了日は保存できませんでした。このご注文はまだお客様と結びついていません。" +
+        "お客様を紐づけてから、もう一度お試しください。";
+    }
+  } else {
+    try {
+      const mirrorShip = customerShipStatus(next);
+      await update<Row>(`customers?id=eq.${encodeURIComponent(customerId)}`, {
+        delivered_on: deliveredOn,
+        tracking_no: tracking || null,
+        // 出荷の状態も顧客台帳に写す（キャンセルのときは触らない）
+        ...(mirrorShip ? { ship_status: mirrorShip } : {}),
+        // キャンセルはお客様の決済状況で表す。
+        // 進み具合（components/Progress.tsx）は決済状況の「否決・キャンセル」を
+        // 見て「中止」と出すため、ここを揃えないと止まった案件が進行中に見える。
+        ...(next === "キャンセル" ? { payment_status: "否決・キャンセル" } : {}),
+      });
+      deliveryNote = deliveredOn ? `配達完了日を ${deliveredOn} として記録しました。` : "";
+    } catch (e) {
+      await audit(await actorName(), "顧客台帳への反映の失敗", { type: "order", key: id }, {
+        顧客: customerId,
+        配達完了日: deliveredOn,
+        出荷状況: customerShipStatus(next),
+        理由: reason(e),
+      });
+      deliveryNote =
+        `お客様の台帳に反映できませんでした。${reason(e)} ` +
+        "お客様一覧の進み具合が古いままになっています。";
+    }
+  }
+
   await audit(await actorName(), "出荷状況の更新", { type: "order", key: id }, {
     前: before || "（未設定）",
     後: next,
     送り状番号: tracking || null,
     出荷日: shippedOn ?? (next === "出荷済" ? todayInJapan() : null),
+    配達完了日: deliveredOn,
     // 0件だったことも残す。あとから「なぜ報酬が立っていないのか」を追えるようにする。
     報酬件数: rewardCount,
   });
@@ -432,12 +523,16 @@ export async function updateShipmentAction(
   revalidatePath(`/admin/orders/${id}`);
   revalidatePath("/rewards");
   revalidatePath("/dashboard");
+  // 進捗は顧客の画面にも出るので、そちらも作り直す
+  revalidatePath("/customers");
+  revalidatePath("/admin/customers");
 
   const backwards = before === "出荷済" && next !== "出荷済" && next !== "キャンセル";
   return {
     ok:
       `${label}の出荷状況を「${next}」に更新しました。` +
       (rewardNote ? ` ${rewardNote}` : "") +
+      (deliveryNote ? ` ${deliveryNote}` : "") +
       (backwards
         ? " すでに確定した報酬はそのまま残ります。報酬まで取り消す場合は「キャンセル」を選んでください。"
         : ""),
@@ -536,10 +631,12 @@ export async function updateOrderAction(
   let referrerName = "";
   let staffName = "";
   let staffKind = "";
+  let reviewCustomerId = "";
+  let mirrorNote = "";
 
   try {
     const order = await selectOne<Row>(
-      `orders?select=id,customer_name,review_result,credit_ref_no,match_status,referrer_code,staff_code&id=eq.${id}`,
+      `orders?select=id,customer_id,customer_name,review_result,credit_ref_no,match_status,referrer_code,staff_code&id=eq.${id}`,
     );
     if (!order) return { error: NOT_FOUND };
     label = customerLabel(order);
@@ -547,6 +644,7 @@ export async function updateOrderAction(
     beforeMatch = s_(order, "match_status");
     beforeReview = s_(order, "review_result");
     beforeStaff = s_(order, "staff_code");
+    reviewCustomerId = s_(order, "customer_id");
 
     // 否決も、出荷の「キャンセル」と同じで報酬の取消につながる。
     // プルダウンを選んで一度保存するだけでマイナスが立ってしまわないよう、
@@ -683,8 +781,42 @@ export async function updateOrderAction(
     }
   }
 
+  /*
+   * 審査結果と担当スタッフを顧客台帳にも写す。
+   * お客様一覧の進み具合は顧客台帳の審査状況を見ているため、
+   * 受注だけを直すと「承認したのに申込中のまま」になる。
+   * 写せなくても受注の更新は取り消さない（あとから直せるため）。
+   */
+  const reviewMirror = customerReviewStatus(review);
+  if (reviewCustomerId && (reviewMirror || staff || clearStaff)) {
+    const patch: Record<string, unknown> = {};
+    if (reviewMirror) patch["review_status"] = reviewMirror;
+    // 否決は決済状況にも出す（進み具合が「中止」になる）。
+    // 承認に戻したときは決済状況を触らない。実際に決済が通ったかは別の話なので、
+    // ここで「決済完了」に書き換えてしまうと事実と違う値が入る。
+    if (review === "否決") patch["payment_status"] = "否決・キャンセル";
+    if (staff) patch["staff_code"] = staff;
+    else if (clearStaff) patch["staff_code"] = null;
+    try {
+      await update<Row>(
+        `customers?id=eq.${encodeURIComponent(reviewCustomerId)}`,
+        patch,
+      );
+    } catch (e) {
+      await audit(await actorName(), "顧客台帳への反映の失敗", { type: "order", key: id }, {
+        顧客: reviewCustomerId,
+        審査状況: reviewMirror,
+        理由: reason(e),
+      });
+      mirrorNote =
+        `お客様の台帳には反映できませんでした。${reason(e)} ` +
+        "お客様一覧の進み具合が古いままになっています。";
+    }
+  }
+
   await audit(await actorName(), "受注内容の更新", { type: "order", key: id }, {
     審査結果: `${beforeReview || "（未設定）"} → ${review || "（未設定）"}`,
+    顧客台帳の審査状況: reviewMirror,
     信販受付番号: creditRef || null,
     照合: `${beforeMatch || "（未設定）"} → ${matchStatus}`,
     紹介元: `${beforeReferrer || "（なし）"} → ${referrer || "（なし）"}`,
@@ -702,6 +834,8 @@ export async function updateOrderAction(
   revalidatePath(`/admin/orders/${id}`);
   revalidatePath("/rewards");
   if (outcome && outcome.count > 0) revalidatePath("/dashboard");
+  revalidatePath("/customers");
+  revalidatePath("/admin/customers");
 
   const parts = [`${label}の内容を更新しました。`];
   parts.push(`審査結果は「${review || "未設定"}」、照合の状態は「${matchStatus}」です。`);
@@ -755,6 +889,8 @@ export async function updateOrderAction(
       parts.push(outcome.reason);
     }
   }
+
+  if (mirrorNote) parts.push(mirrorNote);
 
   return { ok: parts.join("") + rewardWarning, at: Date.now() };
 }

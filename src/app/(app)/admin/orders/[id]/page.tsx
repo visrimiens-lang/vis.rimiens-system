@@ -236,15 +236,33 @@ export default async function AdminOrderDetailPage({
   let agencyError: string | null = null;
   let product: Row | null = null;
 
-  const [rewardResult, agencyResult, productResult] = await Promise.allSettled([
-    select<Row>(`rewards?select=*&order_id=eq.${id}&order=id.asc`),
-    select<Row>("agencies?select=code,name,status,code_kind&order=code.asc"),
-    productName
-      ? selectOne<Row>(
-          `products?select=name,reward_target,price_incl_tax&name=eq.${encodeURIComponent(productName)}`,
-        )
-      : Promise.resolve(null),
-  ]);
+  /*
+   * 配達完了日は顧客台帳に入っている（受注ではない）。
+   * 出荷フォームで直せるように、いまの値をここで読んでおく。
+   * 読めなくても画面は出す（配達完了日が空欄で始まるだけ）。
+   */
+  const customerId = str(order, "customer_id");
+
+  const [rewardResult, agencyResult, productResult, customerResult] =
+    await Promise.allSettled([
+      select<Row>(`rewards?select=*&order_id=eq.${id}&order=id.asc`),
+      select<Row>("agencies?select=code,name,status,code_kind&order=code.asc"),
+      productName
+        ? selectOne<Row>(
+            `products?select=name,reward_target,price_incl_tax&name=eq.${encodeURIComponent(productName)}`,
+          )
+        : Promise.resolve(null),
+      customerId
+        ? selectOne<Row>(
+            `customers?select=delivered_on&id=eq.${encodeURIComponent(customerId)}`,
+          )
+        : Promise.resolve(null),
+    ]);
+
+  const deliveredOn =
+    customerResult.status === "fulfilled"
+      ? str(customerResult.value, "delivered_on").slice(0, 10)
+      : "";
 
   if (rewardResult.status === "fulfilled") rewards = rewardResult.value;
   else {
@@ -559,6 +577,7 @@ export default async function AdminOrderDetailPage({
         shipStatus={shipStatus}
         trackingNo={str(order, "tracking_no")}
         shippedOn={str(order, "shipped_on").slice(0, 10)}
+        deliveredOn={deliveredOn}
         reviewResult={str(order, "review_result")}
         creditRefNo={str(order, "credit_ref_no")}
         matchStatus={matchStatus}

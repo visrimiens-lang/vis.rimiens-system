@@ -20,7 +20,17 @@ export class DbError extends Error {
     readonly status: number,
     readonly detail?: string,
   ) {
-    super(message);
+    /*
+     * 元の理由（detail）も message に含める。
+     *
+     * 画面や操作記録に出るのは message だけなので、含めないと
+     * 「データベースへの書き込みに失敗しました。」としか残らず、
+     * 決められた値以外を保存しようとしたのか、繋がらなかったのか、
+     * 権限の問題なのかが区別できない。
+     * 実際、顧客台帳の出荷状況に「キャンセル」を入れようとして失敗した件が
+     * これで分からず、原因の特定に遠回りした。
+     */
+    super(detail ? `${message}（${detail.slice(0, 200)}）` : message);
     this.name = "DbError";
   }
 }

@@ -36,6 +36,7 @@ export function ShipForm({
   shipStatus,
   trackingNo,
   shippedOn,
+  deliveredOn,
   reviewResult,
   creditRefNo,
   matchStatus,
@@ -48,6 +49,8 @@ export function ShipForm({
   shipStatus: string;
   trackingNo: string;
   shippedOn: string;
+  /** 顧客台帳の配達完了日。進捗を「配達完了」まで進めるのに使う。 */
+  deliveredOn: string;
   reviewResult: string;
   creditRefNo: string;
   matchStatus: string;
@@ -65,6 +68,7 @@ export function ShipForm({
         shipStatus={shipStatus}
         trackingNo={trackingNo}
         shippedOn={shippedOn}
+        deliveredOn={deliveredOn}
       />
       <ReviewSection
         orderId={orderId}
@@ -93,11 +97,13 @@ function ShipmentSection({
   shipStatus,
   trackingNo,
   shippedOn,
+  deliveredOn,
 }: {
   orderId: string;
   shipStatus: string;
   trackingNo: string;
   shippedOn: string;
+  deliveredOn: string;
 }) {
   const [state, run, pending] = useActionState(updateShipmentAction, initial);
   const [status, setStatus] = useState(shipStatus || "出荷待ち");
@@ -167,6 +173,20 @@ function ShipmentSection({
             />
             <span className={hintCls}>
               空のまま出荷済にすると、今日の日付が入ります。
+            </span>
+          </label>
+
+          <label className="block">
+            <span className={labelCls}>配達完了日</span>
+            <input
+              name="deliveredOn"
+              type="date"
+              defaultValue={deliveredOn}
+              disabled={pending}
+              className={`${inputCls} tabnum`}
+            />
+            <span className={hintCls}>
+              入れると、お客様の進捗が「配達完了」になります。空にすると戻せます。
             </span>
           </label>
         </div>

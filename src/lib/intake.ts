@@ -493,6 +493,12 @@ export async function linkCustomer(app: {
   agencyCode?: string;
   staffCode?: string;
   referrerCode?: string;
+  /**
+   * 顧客台帳の決済状況に入れる値（未決済 / 審査中 / 決済完了 / 否決・キャンセル）。
+   * 受注は決済が終わった知らせとして届くので、registerOrder は「決済完了」を渡す。
+   * これを入れないと、お届けまで終わったお客様が一覧で「未決済」のまま残る。
+   */
+  paymentStatus?: string;
 }): Promise<number | null> {
   const name = (app.name || "").trim();
   if (!name) return null;
@@ -518,6 +524,12 @@ export async function linkCustomer(app: {
     for (const [column, value] of Object.entries(attribution)) {
       if (!s_(found, column)) patch[column] = value;
     }
+    /*
+     * 決済状況は「空のときだけ入れる」ではなく、常に新しいほうで上書きする。
+     * 帰属（誰の売上か）は先に付いたものを尊重するが、決済状況は
+     * いちばん新しい決済の結果が正しいため。
+     */
+    if (app.paymentStatus) patch["payment_status"] = app.paymentStatus;
     if (Object.keys(patch).length > 0) {
       await update(`customers?id=eq.${encodeURIComponent(s_(found, "id"))}`, patch);
     }
@@ -532,6 +544,7 @@ export async function linkCustomer(app: {
       zip: app.zip || null,
       address: app.address || null,
       building: app.building || null,
+      ...(app.paymentStatus ? { payment_status: app.paymentStatus } : {}),
       ...attribution,
     },
   ]);
@@ -610,6 +623,8 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
       agencyCode,
       staffCode,
       referrerCode,
+      // 受注は決済が済んだ知らせとして届く（kintone 顧客管理と同じ言葉づかい）
+      paymentStatus: "決済完了",
     });
   } catch (e) {
     console.error("[customer]", e);
@@ -796,26 +811,53 @@ export async function notifyLicenseTest(opts: {
 /* ═══════════════════════ 受注の通知（Make #8） ═══════════════════════ */
 
 /**
- * 受注が入ったことを、獲得した代理店に知らせる。
+ * 受注が入ったことを、獲得した代理店と、実際に売った担当スタッフに知らせる。
  * 送信に失敗しても受注の登録は取り消さない。
+ *
+ * 宛先は最大2件になる。
+ *   ・売上の付け先（agency_code）… 会社。報酬の見込みも案内する。
+ *   ・担当スタッフ（staff_code）… 個人。報酬の金額は案内しない。
+ * スタッフが売ったとき、売上は所属先の会社に付く（resolveAttribution）ため、
+ * 会社だけに送ると「自分の成約が入ったことを本人が知らない」状態になる。
+ * 2026-08-07 会議「誰が売ったかを追える形にする」の趣旨に沿って本人にも送る。
+ *
+ * 同じ宛先に二重で送らないよう、メールアドレスで重複を除く
+ * （個人事業主など、会社と担当者が同じアドレスのことがあるため）。
  */
 export async function notifyAcquisition(orderId: string): Promise<void> {
   const order = await selectOne<Row>(`orders?select=*&id=eq.${encodeURIComponent(orderId)}`);
   if (!order) return;
-  const code = s_(order, "agency_code");
-  if (!code) return;
 
-  const agency = await selectOne<Row>(
-    `agencies?select=name,email&code=eq.${encodeURIComponent(code)}`,
-  );
-  const to = s_(agency, "email");
-  if (!to) return;
+  const agencyCode = s_(order, "agency_code");
+  const staffCode = s_(order, "staff_code");
+  const codes = [agencyCode, staffCode].filter(Boolean);
+  if (codes.length === 0) return;
 
-  const mail = acquisitionMail({
-    agencyName: s_(agency, "name"),
+  const detail = {
     customerName: s_(order, "customer_name"),
     amount: Number(order["amount"] ?? 0),
     productName: s_(order, "product_name"),
-  });
-  await sendMail(to, mail.subject, mail.body);
+  };
+
+  const sentTo = new Set<string>();
+  for (const code of codes) {
+    const agency = await selectOne<Row>(
+      `agencies?select=name,email,code_kind&code=eq.${encodeURIComponent(code)}`,
+    );
+    const to = s_(agency, "email").trim().toLowerCase();
+    if (!to || sentTo.has(to)) continue;
+    sentTo.add(to);
+
+    /*
+     * スタッフ本人あてでは、報酬の金額に触れない。
+     * マイページはスタッフに金額を出さない（2026-04-23 決定: 金額が見えるのは
+     * 親アカウントだけ）ため、書くと「見られると書いてあるのに出ない」となる。
+     */
+    const mail = acquisitionMail({
+      agencyName: s_(agency, "name"),
+      isStaff: s_(agency, "code_kind") === KIND_STAFF,
+      ...detail,
+    });
+    await sendMail(s_(agency, "email"), mail.subject, mail.body);
+  }
 }

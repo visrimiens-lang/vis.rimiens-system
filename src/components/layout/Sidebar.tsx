@@ -11,6 +11,7 @@ import {
   LayoutDashboard,
   LogOut,
   Map,
+  Inbox,
   Megaphone,
   Menu,
   Monitor,
@@ -57,6 +58,8 @@ const AGENCY_ITEMS: Item[] = [
 
 const HQ_ITEMS: Item[] = [
   { href: "/admin/orders", label: "受注一覧", icon: ShoppingCart },
+  // 取り込みに失敗した申込に気づける唯一の場所。上のほうに置く。
+  { href: "/admin/inbox", label: "受信箱", icon: Inbox },
   { href: "/admin/rewards", label: "報酬の支払", icon: Wallet },
   { href: "/admin/agencies", label: "代理店管理", icon: Building2 },
   { href: "/admin/customers", label: "顧客管理", icon: UserRound },

@@ -157,7 +157,19 @@ export async function canRegisterUnder(
 
 /**
  * 届いたものをそのまま保存する。
- * 同じ送信IDが再び届いても二重に登録しないよう、ここで弾く。
+ *
+ * 同じ送信IDが再び届いたときの扱いを、前回どうなったかで分ける。
+ *
+ *   前回うまくいっていた   → duplicate。もう一度処理しない（二重登録を防ぐ）。
+ *   前回しくじっていた     → duplicate にしない。同じ行を使ってやり直す。
+ *
+ * 「一度届いたら二度と処理しない」にしていると、
+ * 保存先が一時的に落ちていた等でしくじった申込を、
+ * JotForm 側から送り直しても「受付済みです」と返してしまい、
+ * その申込は永久に登録されないまま消える。
+ * 受け口はお客様の申込と決済の入口なので、やり直せることを優先する。
+ *
+ * 新しい行を作らず前回の行を使い回すので、受信箱に同じものが並ぶこともない。
  */
 export async function receive(
   source: string,
@@ -169,7 +181,19 @@ export async function receive(
     const seen = await selectOne<Row>(
       `inbox?select=id,processed&source=eq.${encodeURIComponent(source)}&external_id=eq.${encodeURIComponent(externalId)}`,
     );
-    if (seen) return { id: Number(seen["id"]), duplicate: true };
+    if (seen) {
+      const id = Number(seen["id"]);
+      // processed が true のときだけ「もう済んでいる」と見なす
+      if (seen["processed"] === true) return { id, duplicate: true };
+      // 前回しくじっている。届いた中身は最新のものに置き換えてやり直す。
+      await update(`inbox?id=eq.${id}`, {
+        payload,
+        form_id: formId,
+        error: null,
+        processed_at: null,
+      });
+      return { id, duplicate: false };
+    }
   }
   const [row] = await insert<Row>("inbox", [
     { source, external_id: externalId, form_id: formId, payload },

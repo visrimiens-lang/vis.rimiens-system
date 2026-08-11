@@ -93,8 +93,18 @@ export async function listOrders(
   if (wanted.length === 0) return { orders: [], raw: [] };
   const list = inList(wanted);
 
+  /*
+   * staff_code も見る。
+   *
+   * スタッフ（コード区分02）が売ると、売上の付け先は所属先の会社になり
+   * （src/lib/intake.ts の resolveAttribution）、agency_code には会社のコードが入る。
+   * そのため agency_code / niji_code / referrer_code だけを見ていると、
+   * スタッフ本人がログインしても自分の受注が1件も出てこない。
+   * ダッシュボードは「今月の受注 0件」、売上画面は「ご自身が売った件数と売上金額です」と
+   * 書いてあるのに永久に0のまま、という状態になっていた。
+   */
   const filters = [
-    `or=(agency_code.in.${list},niji_code.in.${list},referrer_code.in.${list})`,
+    `or=(agency_code.in.${list},niji_code.in.${list},referrer_code.in.${list},staff_code.in.${list})`,
     "order=ordered_on.desc",
   ];
   if (opts.month) {

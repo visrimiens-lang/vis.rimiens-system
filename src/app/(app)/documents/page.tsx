@@ -84,7 +84,7 @@ export default async function DocumentsPage() {
                   </div>
 
                   {d.description ? (
-                    <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-ink-300">
+                    <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed text-ink-300">
                       {d.description}
                     </p>
                   ) : null}

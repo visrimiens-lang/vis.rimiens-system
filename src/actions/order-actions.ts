@@ -95,11 +95,20 @@ function readOrderId(formData: FormData): string | null {
   return /^\d+$/.test(id) ? id : null;
 }
 
-/** 日付欄。空なら null、形式が違えば undefined を返す。 */
+/**
+ * 日付欄。空なら null、形式が違うか実在しない日付なら undefined を返す。
+ *
+ * 形だけを見ていると 2026-02-31 が通り、保存先が返す英語のエラーが
+ * そのまま画面に出てしまうため、ここで実在するかまで確かめる。
+ */
 function readDate(formData: FormData, key: string): string | null | undefined {
   const v = text(formData, key);
   if (!v) return null;
-  return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return undefined;
+  const [y, m, d] = v.split("-").map(Number);
+  if (m < 1 || m > 12 || d < 1) return undefined;
+  // 「翌月の0日」＝その月の末日
+  return d <= new Date(Date.UTC(y, m, 0)).getUTCDate() ? v : undefined;
 }
 
 /** 全角の英数字を半角に直す。送り状番号の貼り付け間違いを救うため。 */

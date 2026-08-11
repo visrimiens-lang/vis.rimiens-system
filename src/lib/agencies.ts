@@ -1,5 +1,5 @@
 import "server-only";
-import { select, selectOne, update, val } from "./db";
+import { select, selectAll, selectOne, update, val } from "./db";
 import type { Agency, AgencyRank, CodeKind, OrgNode, SalesChannel } from "./types";
 
 /** 枠の既定値。App9 側が未設定でもこの値で扱う。 */
@@ -49,9 +49,16 @@ function toAgency(r: Row): Agency {
 }
 
 
-/** 代理店を取る。並び順は必ず指定する（表示のたびに順序が変わらないように）。 */
+/**
+ * 代理店を取る。並び順は必ず指定する（表示のたびに順序が変わらないように）。
+ *
+ * selectAll を使い、保存先の1回あたりの上限（1000件）で切られないようにする。
+ * ここが切られると、枠の残りを数え間違えたり、組織図から枝が消えたりするが、
+ * 画面には何も出ないため気づけない。代理店は1社あたり100枠の設計なので、
+ * 取次パートナー・スタッフを含めれば1000件は現実に超えうる。
+ */
 async function fetchAgencies(filter: string): Promise<Agency[]> {
-  const rows = await select<Row>(
+  const rows = await selectAll<Row>(
     `agencies?select=*&${filter}`,
   );
   return rows.map(toAgency);

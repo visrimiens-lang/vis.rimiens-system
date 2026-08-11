@@ -85,7 +85,7 @@ export default async function AnnouncementsPage() {
                   </div>
                 </div>
                 {n.body ? (
-                  <p className="mt-2.5 whitespace-pre-wrap text-sm leading-relaxed text-ink-200">
+                  <p className="mt-2.5 whitespace-pre-wrap break-words text-sm leading-relaxed text-ink-200">
                     {n.body}
                   </p>
                 ) : null}

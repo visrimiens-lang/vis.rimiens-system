@@ -190,7 +190,7 @@ export function NoticeRow({
       </div>
 
       {notice.body ? (
-        <p className="mt-2.5 whitespace-pre-wrap text-sm leading-relaxed text-ink-300">
+        <p className="mt-2.5 whitespace-pre-wrap break-words text-sm leading-relaxed text-ink-300">
           {notice.body}
         </p>
       ) : (

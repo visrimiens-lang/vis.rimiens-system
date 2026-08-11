@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
   Building2,
   ClipboardList,
@@ -11,6 +12,7 @@ import {
   LogOut,
   Map,
   Megaphone,
+  Menu,
   Monitor,
   Package,
   Network,
@@ -20,9 +22,24 @@ import {
   ShoppingCart,
   UserRound,
   Wallet,
+  X,
 } from "lucide-react";
 import { logoutAction } from "@/actions/auth-actions";
 import { cn } from "@/components/ui";
+
+/**
+ * 画面の左に出るメニュー。
+ *
+ * パソコン（lg 以上）… 画面の左に貼り付いたまま動かない（sticky）。
+ *   本文だけがスクロールし、メニューは常に見えている。
+ *   項目が画面に収まらないときはメニューの中だけがスクロールする。
+ *
+ * スマホ・タブレット（lg 未満）… メニューはふだん隠れていて、
+ *   上部バーの「メニュー」ボタンで左から出てくる（ドロワー）。
+ *   240px のメニューを常に出すと、スマホでは本文の幅がほぼ残らないため。
+ *   閉じ方は3つ: 暗い背景を押す / 右上の×を押す / Esc キー。
+ *   ページを移動したときも自動で閉じる。
+ */
 
 type Item = { href: string; label: string; icon: React.ComponentType<{ className?: string }> };
 
@@ -51,6 +68,19 @@ const HQ_ITEMS: Item[] = [
   { href: "/admin/documents", label: "資料管理", icon: FileText },
 ];
 
+function Brand() {
+  return (
+    <div className="min-w-0">
+      <div className="text-[10px] font-medium uppercase tracking-[0.24em] text-gold-500">
+        VIS
+      </div>
+      <div className="mt-0.5 truncate text-sm font-semibold text-ink-50">
+        代理店ポータル
+      </div>
+    </div>
+  );
+}
+
 export function Sidebar({
   viewerLabel,
   viewerCode,
@@ -61,65 +91,140 @@ export function Sidebar({
   isHq: boolean;
 }) {
   const pathname = usePathname();
+  const [open, setOpen] = useState(false);
 
-  const render = (items: Item[], heading?: string) => (
-    <div className="space-y-1">
-      {heading ? (
-        <div className="px-3 pb-1.5 pt-5 text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-600">
-          {heading}
-        </div>
-      ) : null}
-      {items.map(({ href, label, icon: Icon }) => {
-        const active = pathname === href || pathname.startsWith(`${href}/`);
-        return (
-          <Link
-            key={href}
-            href={href}
-            className={cn(
-              "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition",
-              active
-                ? "bg-gold-500/12 text-gold-300"
-                : "text-ink-300 hover:bg-ink-850 hover:text-ink-100",
-            )}
-          >
-            <Icon className="h-4 w-4 shrink-0" />
-            <span className="truncate">{label}</span>
-          </Link>
-        );
-      })}
+  // ページを移動したら、開いていたドロワーを閉じる
+  useEffect(() => setOpen(false), [pathname]);
+
+  // ドロワーが開いている間: Esc で閉じる・背面のスクロールを止める
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
+
+  const nav = (onNavigate?: () => void) => (
+    <nav className="flex-1 overflow-y-auto px-3 py-4">
+      <div className="space-y-1">
+        {isHq ? (
+          <div className="px-3 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-600">
+            本部
+          </div>
+        ) : null}
+        {(isHq ? HQ_ITEMS : AGENCY_ITEMS).map(({ href, label, icon: Icon }) => {
+          const active = pathname === href || pathname.startsWith(`${href}/`);
+          return (
+            <Link
+              key={href}
+              href={href}
+              onClick={onNavigate}
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition",
+                active
+                  ? "bg-gold-500/12 text-gold-300"
+                  : "text-ink-300 hover:bg-ink-850 hover:text-ink-100",
+              )}
+            >
+              <Icon className="h-4 w-4 shrink-0" />
+              <span className="truncate">{label}</span>
+            </Link>
+          );
+        })}
+      </div>
+    </nav>
+  );
+
+  const footer = (
+    <div className="border-t border-ink-800 p-3">
+      <div className="px-2 pb-2">
+        <div className="truncate text-sm font-medium text-ink-100">{viewerLabel}</div>
+        {viewerCode ? (
+          <div className="tabnum truncate text-xs text-ink-500">{viewerCode}</div>
+        ) : null}
+      </div>
+      <form action={logoutAction}>
+        <button
+          type="submit"
+          className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-ink-400 transition hover:bg-ink-850 hover:text-ink-100"
+        >
+          <LogOut className="h-4 w-4" />
+          ログアウト
+        </button>
+      </form>
     </div>
   );
 
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r border-ink-800 bg-ink-900">
-      <div className="border-b border-ink-800 px-5 py-5">
-        <div className="text-[10px] font-medium uppercase tracking-[0.24em] text-gold-500">
-          VIS
+    <>
+      {/* ── パソコン: 画面に貼り付いたメニュー ── */}
+      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-ink-800 bg-ink-900 lg:flex">
+        <div className="border-b border-ink-800 px-5 py-5">
+          <Brand />
         </div>
-        <div className="mt-0.5 text-sm font-semibold text-ink-50">代理店ポータル</div>
-      </div>
+        {nav()}
+        {footer}
+      </aside>
 
-      <nav className="flex-1 overflow-y-auto px-3 py-4">
-        {isHq ? render(HQ_ITEMS, "本部") : render(AGENCY_ITEMS)}
-      </nav>
+      {/* ── スマホ: 上部バー ── */}
+      <header className="sticky top-0 z-40 flex items-center justify-between gap-3 border-b border-ink-800 bg-ink-950/90 px-4 py-2.5 backdrop-blur lg:hidden">
+        <Brand />
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label="メニューを開く"
+          aria-expanded={open}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-ink-700 text-ink-200 transition hover:bg-ink-850"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+      </header>
 
-      <div className="border-t border-ink-800 p-3">
-        <div className="px-2 pb-2">
-          <div className="truncate text-sm font-medium text-ink-100">{viewerLabel}</div>
-          {viewerCode ? (
-            <div className="tabnum truncate text-xs text-ink-500">{viewerCode}</div>
-          ) : null}
+      {/* ── スマホ: ドロワー ── */}
+      <div
+        className={cn("fixed inset-0 z-50 lg:hidden", open ? "" : "pointer-events-none")}
+        aria-hidden={!open}
+      >
+        {/* 暗い背景。押すと閉じる */}
+        <div
+          className={cn(
+            "absolute inset-0 bg-black/60 transition-opacity duration-200",
+            open ? "opacity-100" : "opacity-0",
+          )}
+          onClick={() => setOpen(false)}
+        />
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="メニュー"
+          className={cn(
+            "absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col border-r border-ink-800 bg-ink-900 shadow-2xl transition-transform duration-200",
+            open ? "translate-x-0" : "-translate-x-full",
+          )}
+        >
+          <div className="flex items-center justify-between border-b border-ink-800 py-3 pl-5 pr-3">
+            <Brand />
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              aria-label="メニューを閉じる"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-ink-300 transition hover:bg-ink-850 hover:text-ink-100"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          {nav(() => setOpen(false))}
+          {footer}
         </div>
-        <form action={logoutAction}>
-          <button
-            type="submit"
-            className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-ink-400 transition hover:bg-ink-850 hover:text-ink-100"
-          >
-            <LogOut className="h-4 w-4" />
-            ログアウト
-          </button>
-        </form>
       </div>
-    </aside>
+    </>
   );
 }

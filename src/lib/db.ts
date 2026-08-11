@@ -96,6 +96,46 @@ export function select<T>(query: string, opts: Options = {}): Promise<T[]> {
   return request<T[]>("GET", query, undefined, opts);
 }
 
+/**
+ * 保存先が1回に返す行数の上限。
+ *
+ * Supabase の既定がこの値で、クエリに limit=2000 と書いても 1000 で切られる。
+ * 「切られたこと」は応答に出ないので、多く書くほど気づけなくなる。
+ */
+const PAGE_SIZE = 1000;
+
+/**
+ * 条件に合う行を、上限で切られずに最後まで取る。
+ *
+ * 上の select は1回問い合わせて終わりなので、1000件を超えると
+ * 1001件目から先が黙って消える。代理店の一覧のように
+ * 「全部揃っている前提」で枠の残りを数えたり組織図を組み立てたりする用途では、
+ * 消えたことに気づけないまま結果だけがずれる。
+ * ここでは Range ヘッダで続きを取り、返ってきた数が1ページ未満になるまで繰り返す。
+ *
+ * query には order を必ず入れること。並び順が決まっていないと、
+ * ページの境目で同じ行が二度出たり抜けたりする。
+ *
+ * @param hardLimit 念のための打ち切り（暴走時の保険）。既定10万件。
+ */
+export async function selectAll<T>(
+  query: string,
+  opts: Options & { hardLimit?: number } = {},
+): Promise<T[]> {
+  const hardLimit = opts.hardLimit ?? 100_000;
+  const out: T[] = [];
+  for (let from = 0; from < hardLimit; from += PAGE_SIZE) {
+    const to = from + PAGE_SIZE - 1;
+    const page = await request<T[]>("GET", query, undefined, {
+      ...opts,
+      headers: { ...(opts.headers ?? {}), Range: `${from}-${to}`, "Range-Unit": "items" },
+    });
+    out.push(...page);
+    if (page.length < PAGE_SIZE) break;
+  }
+  return out;
+}
+
 /** 1件だけ取る。無ければ null。 */
 export async function selectOne<T>(query: string, opts: Options = {}): Promise<T | null> {
   const rows = await select<T>(query.includes("limit=") ? query : `${query}&limit=1`, opts);
@@ -159,6 +199,21 @@ export async function count(table: string, filter = ""): Promise<number> {
 /** 値を PostgREST の条件で使える形にする（カンマや括弧を含む値の事故を防ぐ）。 */
 export function val(v: string): string {
   return `"${v.replace(/"/g, '\\"')}"`;
+}
+
+/**
+ * `code=in.(...)` の中身を安全に組み立てる。
+ *
+ * 値には利用者が入れた文字がそのまま来ることがある（受注の ?ref= など）。
+ * 引用符を escape しないと条件を抜け出せてしまい、
+ * さらに & を符号化しないと PostgREST が「別の条件の指定」として読み、
+ * 誰にいくら払うかの元になる問い合わせを外から書き換えられる。
+ *
+ * 使い方: `agencies?select=code&code=${inList(codes)}`
+ */
+export function inList(values: string[]): string {
+  const body = values.map(val).join(",");
+  return `in.${encodeURIComponent(`(${body})`)}`;
 }
 
 /**

@@ -74,6 +74,21 @@ const MAX_HOPS = 20;
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * 実在する日付か。
+ *
+ * 形（0000-00-00）だけを見ていると 2026-02-31 や 2026-13-01 が通ってしまい、
+ * 保存先で弾かれた英語のエラーがそのまま画面に出る。
+ * ここで先に止めて、日本語で言い直す。
+ */
+function isRealDate(v: string): boolean {
+  if (!DATE_RE.test(v)) return false;
+  const [y, m, d] = v.split("-").map(Number);
+  if (m < 1 || m > 12 || d < 1) return false;
+  // 「翌月の0日」＝その月の末日
+  return d <= new Date(Date.UTC(y, m, 0)).getUTCDate();
+}
 const ZIP_RE = /^[0-9〒\- ]{3,10}$/;
 
 /* ═══════════════ 小さな道具 ═══════════════ */
@@ -387,15 +402,19 @@ export async function updateAgencyAction(
   if (t.zip !== s(current, "zip") && t.zip && !ZIP_RE.test(t.zip)) {
     return { error: "郵便番号は半角の数字とハイフンで入力してください。（例）812-0011" };
   }
-  if (birthday !== s(current, "birthday") && birthday && !DATE_RE.test(birthday)) {
-    return { error: "生年月日は「2000-04-01」の形式で入力してください。" };
+  if (birthday !== s(current, "birthday") && birthday && !isRealDate(birthday)) {
+    return {
+      error: "生年月日は「2000-04-01」の形式で、実在する日付を入力してください。",
+    };
   }
   if (
     trainingPassedOn !== s(current, "training_passed_on") &&
     trainingPassedOn &&
-    !DATE_RE.test(trainingPassedOn)
+    !isRealDate(trainingPassedOn)
   ) {
-    return { error: "研修に合格した日は「2026-08-11」の形式で入力してください。" };
+    return {
+      error: "研修に合格した日は「2026-08-11」の形式で、実在する日付を入力してください。",
+    };
   }
 
   const parentCode = text(formData, "parentCode");

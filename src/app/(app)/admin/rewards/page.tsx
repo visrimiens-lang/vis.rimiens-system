@@ -2,7 +2,7 @@ import { Fragment } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
-import { select } from "@/lib/db";
+import { select, selectAll } from "@/lib/db";
 import { rankLabel, rankShort } from "@/lib/labels";
 import { currentMonth, recentMonths } from "@/lib/orders";
 import {
@@ -76,13 +76,17 @@ export const metadata = { title: "報酬の支払管理（本部）｜VIS 代理
 /**
  * 一度に読み込む上限。
  *
- * 保存先（Supabase）は件数を指定しないと 1,000 行で黙って打ち切る。
- * 打ち切られたことに気づかないまま合計を出すと、振込額が少ないまま
- * 支払ってしまうため、こちらから上限を指定して、届いた件数が上限に
- * 達していたら「全部は出ていない」と画面に書く。
+ * 保存先（Supabase）は1回の問い合わせで 1,000 行までしか返さない。
+ * ここは振込額を出す画面なので、足りない状態で合計を出すと
+ * 少ない額のまま振り込んでしまう。そのため selectAll で
+ * 続きを取りきり、常に全件を合計する。
+ *
+ * この値は「さすがに多すぎる」を止めるための保険で、
+ * ふだんの取得件数の上限ではない。ここに達したときだけ
+ * 「全部は出ていない」と画面に書く。
  * 報酬は受注1件から階層ぶん（最大4行）立つので、受注一覧より多めにとる。
  */
-const LIMIT = 2000;
+const LIMIT = 20000;
 
 /** rewards.status に入る値。データベースの check 制約と同じ4つ。 */
 const REWARD_STATUSES = ["未確定", "確定", "支払済", "取消"];
@@ -652,11 +656,12 @@ export default async function AdminRewardsPage({
 
   try {
     const [rewardRows, agencyRows] = await Promise.all([
-      select<Row>(
+      selectAll<Row>(
         `rewards?select=*&month=eq.${encodeURIComponent(month)}` +
-          `&order=agency_code.asc,id.asc&limit=${LIMIT}`,
+          `&order=agency_code.asc,id.asc`,
+        { hardLimit: LIMIT },
       ),
-      select<Row>(
+      selectAll<Row>(
         "agencies?select=code,name,rank,channel,code_kind,status," +
           "bank_name,bank_branch,account_type,account_no,account_holder&order=code.asc",
       ),
@@ -676,7 +681,8 @@ export default async function AdminRewardsPage({
       title="報酬の支払管理"
       description="月次の締めに使う画面です。対象月の報酬を代理店ごとにまとめ、確定した報酬を支払済にして、いつ振り込んだかを記録します。配送が完了していない「未確定」の報酬は支払えません。"
       actions={
-        <div className="flex items-center gap-2 text-sm">
+        // flex-wrap: スマホで1行に収まらないときは折り返す（画面からはみ出させない）
+        <div className="flex flex-wrap items-center gap-2 text-sm">
           <Link href={linkTo({ month: shiftMonth(month, -1) })} className={quietLink}>
             ← 前の月
           </Link>

@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { audit, selectOne } from "@/lib/db";
 import { KIND_STAFF, markProcessed, receive, registerOrder } from "@/lib/intake";
@@ -20,6 +21,25 @@ import { KIND_STAFF, markProcessed, receive, registerOrder } from "@/lib/intake"
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+/**
+ * 合言葉をつき合わせる。長さや内容の違いで応答の速さが変わらないようにする。
+ *
+ * ふつうの !== は最初に違う文字が出た時点で終わるため、
+ * 応答の速さの差から1文字ずつ言い当てられる余地が残る。
+ * 実際に破るのは通信のばらつきがあって難しいが、
+ * 数行で塞げるうえ、受け口は決済と申込という金額に直結する入口なので揃えておく。
+ */
+function sameSecret(given: string, secret: string): boolean {
+  const a = Buffer.from(given);
+  const b = Buffer.from(secret);
+  if (a.length !== b.length) {
+    // 長さが違っても、比較の手間は同じだけかける
+    timingSafeEqual(b, b);
+    return false;
+  }
+  return timingSafeEqual(a, b);
+}
 
 function pick(data: Record<string, unknown>, ...names: string[]): string {
   for (const n of names) {
@@ -140,7 +160,7 @@ async function readPayload(req: NextRequest): Promise<Record<string, unknown>> {
 export async function POST(req: NextRequest) {
   const secret = process.env.WEBHOOK_TOKEN ?? "";
   const given = req.nextUrl.searchParams.get("token") ?? "";
-  if (!secret || given !== secret) {
+  if (!secret || !sameSecret(given, secret)) {
     return NextResponse.json({ ok: false, error: "認証に失敗しました。" }, { status: 401 });
   }
 
@@ -217,7 +237,7 @@ export async function GET(req: NextRequest) {
   if (!secret) {
     return NextResponse.json({ ok: false, error: "WEBHOOK_TOKEN が未設定です。" }, { status: 500 });
   }
-  if (given !== secret) {
+  if (!sameSecret(given, secret)) {
     return NextResponse.json({ ok: false, error: "合言葉が違います。" }, { status: 401 });
   }
   return NextResponse.json({ ok: true, message: "受け口は正常です。" });

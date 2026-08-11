@@ -43,7 +43,14 @@ export function PageHeader({
           <p className="mt-1.5 text-sm leading-relaxed text-ink-300">{description}</p>
         ) : null}
       </div>
-      {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+      {/*
+        max-w-full + flex-wrap: スマホで中身（自動更新の表示など）が
+        1行に収まらないとき、押し出さずに折り返すため。
+        shrink-0 にすると縮まず、画面の右へ10pxほどはみ出していた。
+      */}
+      {actions ? (
+        <div className="flex max-w-full flex-wrap items-center gap-2">{actions}</div>
+      ) : null}
     </header>
   );
 }

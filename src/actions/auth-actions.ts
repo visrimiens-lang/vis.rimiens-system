@@ -1,5 +1,6 @@
 "use server";
 
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import {
@@ -20,9 +21,17 @@ export async function loginAction(
   const id = String(formData.get("loginId") ?? "");
   const password = String(formData.get("password") ?? "");
 
+  /*
+   * 接続元のIPアドレス。Vercel が付ける x-forwarded-for の先頭が実際の接続元。
+   * 途中の中継が増えるとカンマ区切りで並ぶので、最初のものだけを見る。
+   * 取れなくても、ログインIDごとの回数制限は変わらず効く。
+   */
+  const head = await headers();
+  const clientIp = (head.get("x-forwarded-for") ?? "").split(",")[0].trim();
+
   let result;
   try {
-    result = await login(id, password);
+    result = await login(id, password, clientIp);
   } catch (e) {
     // 例外の中身には kintone の応答や環境変数名が入りうる。未認証の相手には出さない。
     console.error("[login]", e);

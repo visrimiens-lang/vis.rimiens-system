@@ -61,7 +61,12 @@ export function SortableTh({
         title={sortTitle(label, active, sort.desc)}
         aria-label={sortTitle(label, active, sort.desc)}
         className={cn(
-          "inline-flex items-center gap-1 transition",
+          /*
+            -mx-4 -my-2.5 px-4 py-2.5 で、Th のふちまでを押せる範囲にする。
+            これが無いと押せるのは文字の高さ（約16px）だけで、
+            スマホでは狙いにくく、隣の列の並び替えを押してしまう。
+          */
+          "-mx-4 -my-2.5 inline-flex items-center gap-1 px-4 py-2.5 transition",
           align === "right" && "flex-row-reverse",
           active ? "text-gold-300" : "text-ink-400 hover:text-ink-100",
         )}
@@ -200,7 +205,8 @@ export function FilterActions({
       {filtered ? (
         <Link
           href={clearHref}
-          className="text-xs text-ink-400 underline underline-offset-4 transition hover:text-ink-200"
+          // 指で押せる高さを確保する（文字だけだと約16px しかない）
+          className="inline-flex min-h-9 items-center px-1 text-xs text-ink-400 underline underline-offset-4 transition hover:text-ink-200"
         >
           {clearLabel}
         </Link>

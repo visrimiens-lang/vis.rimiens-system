@@ -3,7 +3,7 @@ import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
 import { cache } from "react";
 import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
-import { select, selectOne, update } from "./db";
+import { select, selectAll, selectOne, update } from "./db";
 import type { Viewer, AgencyRank } from "./types";
 import { clearFailures, isLocked, recordFailure } from "./rate-limit";
 
@@ -156,22 +156,41 @@ export type LoginResult = { ok: true; viewer: Viewer; fp: string } | { ok: false
  * 失敗の理由は呼び出し元に返さない。「そのコードは実在する」「まだパスワード未設定だ」
  * といった情報を未認証の相手に返すと、狙うべきアカウントを選別されてしまうため。
  */
-export async function login(loginId: string, password: string): Promise<LoginResult> {
+export async function login(
+  loginId: string,
+  password: string,
+  /** 接続元のIPアドレス。分からなければ空でよい（IDごとの制限だけが効く）。 */
+  clientIp = "",
+): Promise<LoginResult> {
   const id = loginId.trim();
   if (!id || !password) {
     await bcrypt.compare(password || "x", DUMMY_HASH);
     return { ok: false };
   }
 
-  const key = `login:${id.toLowerCase()}`;
+  /*
+   * 数え方は2通りにする。
+   *
+   * ログインID ごと … そのアカウントへの総当たりを止める。
+   * 接続元ごと      … 1か所から、いろいろなIDを次々に試すのを止める。
+   *
+   * IDだけで数えていると、5回ずつ相手を変えながら試す限りいくらでも続けられる。
+   * 代理店コードは QR や承認メールに載る準公開の情報なので、
+   * 「IDは分かっている前提で、当たりのアカウントを探す」やり方が現実的に成り立つ。
+   */
+  const idKey = `login:${id.toLowerCase()}`;
+  const ipKey = clientIp ? `login-ip:${clientIp}` : "";
+
   // ロック中でも、成功と同じだけ時間をかけてから同じ文面で返す
-  if (await isLocked(key)) {
+  if ((await isLocked(idKey)) || (ipKey && (await isLocked(ipKey)))) {
     await bcrypt.compare(password, DUMMY_HASH);
     return { ok: false };
   }
 
+  const key = idKey;
   const fail = async (): Promise<LoginResult> => {
-    await recordFailure(key);
+    await recordFailure(idKey);
+    if (ipKey) await recordFailure(ipKey);
     return { ok: false };
   };
 
@@ -182,6 +201,7 @@ export async function login(loginId: string, password: string): Promise<LoginRes
     const ok = await bcrypt.compare(password, hqHash);
     if (!ok) return fail();
     await clearFailures(key);
+    if (ipKey) await clearFailures(ipKey);
     return {
       ok: true,
       viewer: { kind: "hq", label: "VIS 本部" },
@@ -199,6 +219,7 @@ export async function login(loginId: string, password: string): Promise<LoginRes
   if (!record || !active || !hash || !ok) return fail();
 
   await clearFailures(key);
+  if (ipKey) await clearFailures(ipKey);
   return {
     ok: true,
     viewer: {
@@ -294,7 +315,9 @@ export async function changeOwnPassword(
 export async function listCodesWithPassword(): Promise<Set<string>> {
   try {
     // 判定に要るのは2項目だけ。ハッシュを含む全フィールドを引かない。
-    const rows = await select<Row>(
+    // selectAll で最後まで取る。1回の上限（1000件）で切られると、
+    // 発行済みの代理店が「未発行」に見え、再発行でいまのパスワードが無効になる。
+    const rows = await selectAll<Row>(
       `agencies?select=code,${PASSWORD_FIELD}&order=code.asc`,
     );
     const out = new Set<string>();

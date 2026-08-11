@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { PASSWORD_FIELD, currentViewer } from "@/lib/auth";
-import { select } from "@/lib/db";
+import { select, selectAll } from "@/lib/db";
 import { DEFAULT_SLOT_LIMIT, countsTowardSlot, listAllAgencies } from "@/lib/agencies";
 import {
   ALL,
@@ -109,7 +109,8 @@ function toTab(v: string): Tab {
  */
 async function loadCodesWithPassword(): Promise<Set<string>> {
   // 判定に要るのは2項目だけ。ハッシュを含む全項目は引かない。
-  const rows = await select<Record<string, unknown>>(
+  // selectAll で最後まで取る（1000件で切られると発行済みが「未発行」に見えるため）。
+  const rows = await selectAll<Record<string, unknown>>(
     `agencies?select=code,${PASSWORD_FIELD}&order=code.asc`,
   );
   const out = new Set<string>();

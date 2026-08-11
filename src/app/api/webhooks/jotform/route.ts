@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import {
   markProcessed,
@@ -37,6 +38,25 @@ export const dynamic = "force-dynamic";
  * JotForm の項目名は「q6_input3」「q60_inviteCode」のような形で届く。
  * 頭の「q番号_」を落として、後ろの名前だけで照合できるようにする。
  */
+/**
+ * 合言葉をつき合わせる。長さや内容の違いで応答の速さが変わらないようにする。
+ *
+ * ふつうの !== は最初に違う文字が出た時点で終わるため、
+ * 応答の速さの差から1文字ずつ言い当てられる余地が残る。
+ * 実際に破るのは通信のばらつきがあって難しいが、
+ * 数行で塞げるうえ、受け口は決済と申込という金額に直結する入口なので揃えておく。
+ */
+function sameSecret(given: string, secret: string): boolean {
+  const a = Buffer.from(given);
+  const b = Buffer.from(secret);
+  if (a.length !== b.length) {
+    // 長さが違っても、比較の手間は同じだけかける
+    timingSafeEqual(b, b);
+    return false;
+  }
+  return timingSafeEqual(a, b);
+}
+
 function normalizeKey(k: string): string {
   return k.replace(/^q\d+_/, "");
 }
@@ -104,7 +124,7 @@ export async function POST(req: NextRequest) {
   // 合言葉の確認。第三者に偽の申込を送られないようにする。
   const secret = process.env.WEBHOOK_TOKEN ?? "";
   const given = req.nextUrl.searchParams.get("token") ?? "";
-  if (!secret || given !== secret) {
+  if (!secret || !sameSecret(given, secret)) {
     return NextResponse.json({ ok: false, error: "認証に失敗しました。" }, { status: 401 });
   }
 
@@ -233,7 +253,7 @@ export async function GET(req: NextRequest) {
   if (!secret) {
     return NextResponse.json({ ok: false, error: "WEBHOOK_TOKEN が未設定です。" }, { status: 500 });
   }
-  if (given !== secret) {
+  if (!sameSecret(given, secret)) {
     return NextResponse.json({ ok: false, error: "合言葉が違います。" }, { status: 401 });
   }
   return NextResponse.json({ ok: true, message: "受け口は正常です。" });

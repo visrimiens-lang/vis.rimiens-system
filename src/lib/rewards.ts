@@ -1,5 +1,5 @@
 import "server-only";
-import { audit, insert, select, selectOne, update } from "./db";
+import { audit, insert, inList, select, selectOne, update } from "./db";
 
 /**
  * 報酬の計上。
@@ -174,8 +174,10 @@ export async function accrueRewards(
   const unique = [...new Set(codes)];
   if (unique.length === 0) return 0;
 
+  // コードは受注の ?ref= 由来で、利用者が打った文字がそのまま入ることがある。
+  // inList が引用符の escape と URL 符号化をまとめて行う（db.ts 参照）。
   const agencies = await select<Row>(
-    `agencies?select=code,rank,channel&code=in.(${unique.map((c) => `"${c}"`).join(",")})`,
+    `agencies?select=code,rank,channel&code=${inList(unique)}`,
   );
 
   const rows: Record<string, unknown>[] = [];
@@ -574,7 +576,7 @@ export async function monthlyRewards(
 ): Promise<MonthlyReward[]> {
   const list = codes.filter(Boolean);
   if (list.length === 0) return [];
-  const filters = [`agency_code=in.(${list.map((c) => `"${c}"`).join(",")})`];
+  const filters = [`agency_code=${inList(list)}`];
   if (month) filters.push(`month=eq.${month}`);
   const rows = await select<Row>(`rewards?select=*&${filters.join("&")}`);
 

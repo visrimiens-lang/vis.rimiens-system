@@ -38,7 +38,12 @@ export const KIND_STAFF = "02";       // スタッフ（代理店に所属する
 export const ZEROTH_CODE = "RIM";
 
 export type IntakeResult =
-  | { ok: true; code: string; message: string }
+  /**
+   * 登録できた。needsReview が true のときは登録自体は済んでいるが、
+   * 報酬が立たなかったなど本部の手当てが要る点が残っている。
+   * 受け口はこれを見て、受信箱に「取り込めていない」として残す。
+   */
+  | { ok: true; code: string; message: string; needsReview?: boolean }
   | { ok: false; message: string; needsReview?: boolean };
 
 /* ═══════════════════════ 代理店コードの採番 ═══════════════════════ */
@@ -676,6 +681,37 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
       `orders?select=id&stripe_payment_id=eq.${encodeURIComponent(app.stripePaymentId)}`,
     );
     if (dup) return { ok: true, code: String(dup["id"]), message: "この決済は登録済みです。" };
+  } else {
+    /*
+     * 決済の番号が入っていないとき。
+     *
+     * 番号があれば、それを鍵にして二重登録を防げる。無いときは鍵が無いので、
+     * このままだと同じ通知が二度届いただけで受注が2件立ち、報酬も満額もう1件分
+     * 計上される。確定・支払まで進めば実際に二重払いになる。
+     *
+     * そこで「同じお客様・同じ金額の受注が、ついさっき入っていないか」を見る。
+     * 人が続けて2回申し込むことは実務上まず無いので、5分以内に同じ内容が来たら
+     * 通知の二度届きとみなして、前の受注をそのまま返す。
+     * 番号がある通常のときは、この判定は通らない（上の分岐で終わる）。
+     */
+    const since = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const recent = await selectOne<Row>(
+      `orders?select=id,amount&customer_name=eq.${encodeURIComponent(name)}` +
+        `&amount=eq.${Number(app.amount ?? 0)}` +
+        `&created_at=gte.${encodeURIComponent(since)}&order=id.desc`,
+    );
+    if (recent) {
+      await audit("intake", "受注の二重登録を防いだ", { type: "order", key: s_(recent, "id") }, {
+        顧客: name,
+        金額: app.amount,
+        理由: "決済の番号が無く、5分以内に同じ内容の受注があるため",
+      });
+      return {
+        ok: true,
+        code: String(recent["id"]),
+        message: "この注文は登録済みです（同じ内容が続けて届いたため）。",
+      };
+    }
   }
 
   // 渡されたコードの持ち主を見て、売上の付け先と担当者を分ける
@@ -717,29 +753,16 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
     }
   }
 
-  // お客様を顧客台帳に結びつける。台帳が作れなくても受注の登録は止めない。
-  let customerId: number | null = null;
-  try {
-    customerId = await linkCustomer({
-      name,
-      phone: app.phone,
-      email: app.email,
-      zip: app.zip,
-      address: app.address,
-      building: app.building,
-      agencyCode,
-      staffCode,
-      referrerCode,
-      // 受注は決済が済んだ知らせとして届く（kintone 顧客管理と同じ言葉づかい）
-      paymentStatus: "決済完了",
-    });
-  } catch (e) {
-    console.error("[customer]", e);
-  }
-
+  /*
+   * 受注を先に立ててから、お客様を顧客台帳に結びつける。
+   *
+   * 逆にすると、顧客台帳だけ「決済完了」で増えたのに受注が無い、という状態が残りうる。
+   * そのお客様は本部の顧客一覧では正常な成約客に見えるのに、受注も報酬も無く、
+   * 件数が合わないことに気づくまで放置される。
+   * 受注さえ残っていれば、紐づけは受信箱から送り直すか本部が手で直せる。
+   */
   const [order] = await insert<Row>("orders", [
     {
-      customer_id: customerId,
       customer_name: name,
       phone: app.phone || null,
       zip: app.zip || null,
@@ -759,6 +782,38 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
       ship_status: "出荷待ち",
     },
   ]);
+
+  // 受注が残ったので、お客様を顧客台帳に結びつける。
+  // ここで失敗しても受注は消さない（進み具合の表示が出ないだけで、売上と報酬は残る）。
+  let customerId: number | null = null;
+  try {
+    customerId = await linkCustomer({
+      name,
+      phone: app.phone,
+      email: app.email,
+      zip: app.zip,
+      address: app.address,
+      building: app.building,
+      agencyCode,
+      staffCode,
+      referrerCode,
+      // 受注は決済が済んだ知らせとして届く（kintone 顧客管理と同じ言葉づかい）
+      paymentStatus: "決済完了",
+    });
+    if (customerId) {
+      await update(`orders?id=eq.${encodeURIComponent(String(order["id"]))}`, {
+        customer_id: customerId,
+      });
+    }
+  } catch (e) {
+    // 黙って消さない。本部が受注詳細で「顧客台帳の番号」が空なのを見て手当てできるよう記録に残す。
+    console.error("[customer]", e);
+    await audit("intake", "顧客台帳への紐づけの失敗", { type: "order", key: String(order["id"]) }, {
+      顧客: name,
+      電話: app.phone || null,
+      理由: e instanceof Error ? e.message : "原因を特定できませんでした。",
+    });
+  }
 
   // トスアップを成約にする（電話番号で照合できたときだけ）。
   // 書き換えるのは照合で選んだ1件だけ。同じ電話番号・同じ取次店の行がほかにあっても巻き込まない。
@@ -785,24 +840,60 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
     顧客台帳: customerId,
   });
 
-  // 報酬を計上し、獲得した代理店に知らせる。
-  // どちらも失敗しても受注の登録は取り消さない。
+  /*
+   * 報酬を計上し、獲得した代理店に知らせる。
+   * どちらも失敗しても受注の登録は取り消さない（お客様の注文が消えるほうが困る）。
+   *
+   * ただし黙って終わらせない。報酬の計上に失敗すると、代理店に払うべき報酬が
+   * 丸ごと立たない。代理店の画面は商品マスタから見込み額を計算して出すので
+   * 本人には報酬が見えているのに、本部の支払管理には1行も出ない、という
+   * いちばん気づきにくいずれ方をする。
+   * 失敗したことを呼び出し元に返し、受信箱にも残して本部が気づけるようにする。
+   */
+  let trouble = "";
   try {
     const { accrueRewards } = await import("./rewards");
-    await accrueRewards(String(order["id"]));
+    const n = await accrueRewards(String(order["id"]));
+    if (n === 0) {
+      trouble =
+        "報酬が1件も計上されませんでした。商品名が商品マスタと一致しているか、" +
+        "代理店コードが入っているかをご確認ください。";
+      await audit("intake", "報酬が計上されなかった受注", { type: "order", key: String(order["id"]) }, {
+        顧客: name,
+        商品名: app.productName || null,
+        代理店: agencyCode || null,
+      });
+    }
   } catch (e) {
+    const why = e instanceof Error ? e.message : "原因を特定できませんでした。";
     console.error("[reward]", e);
+    trouble = `報酬の計上に失敗しました。${why} 本部での手当てが必要です。`;
+    await audit("intake", "報酬計上の失敗", { type: "order", key: String(order["id"]) }, {
+      顧客: name,
+      金額: app.amount,
+      代理店: agencyCode || null,
+      理由: why,
+    });
   }
+
   try {
     await notifyAcquisition(String(order["id"]));
   } catch (e) {
+    // 通知が届かなくても受注と報酬は残る。気づけるように記録だけ残す。
     console.error("[notify]", e);
+    await audit("intake", "成約通知の失敗", { type: "order", key: String(order["id"]) }, {
+      顧客: name,
+      代理店: agencyCode || null,
+      理由: e instanceof Error ? e.message : "原因を特定できませんでした。",
+    });
   }
 
   return {
     ok: true,
     code: String(order["id"]),
-    message: `${name} 様のご注文を登録しました。`,
+    message: `${name} 様のご注文を登録しました。${trouble ? ` ${trouble}` : ""}`,
+    // 受け口はこれを見て、受信箱に「取り込めていない」として残す
+    needsReview: trouble ? true : undefined,
   };
 }
 

@@ -1,54 +1,37 @@
 import "server-only";
+import { dbConfigured, select } from "./db";
 
 /**
  * 「お知らせ」と「資料」の読み取り。保存先は Supabase。
  *
- * 受注・代理店・報酬は kintone が唯一の正（Make がそこへ書くため、複製すると
- * 必ず食い違う）。Supabase に置くのは kintone に存在しないポータル専用データだけ:
  *   - portal_notices    お知らせ
  *   - portal_documents  資料の一覧（ファイル本体は Storage の公開バケット portal-docs）
  *
- * 書き込みは本部が Supabase ダッシュボード（テーブルエディター／Storage）で行う。
- * ポータルは読み取り専用なので、RLS（公開行のみ SELECT 可）＋公開可能キーで足りる。
- * 秘密鍵（sb_secret_...）はこのアプリのどこにも置かない。
+ * ★ 読み取りはほかの画面と同じ経路（./db の select）を通す。
  *
- * SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY が未設定でも壊れない。
- * その場合は空配列を返し、画面側で「準備中」と案内する。
+ * 以前はここだけ公開鍵（SUPABASE_PUBLISHABLE_KEY）で直接読んでいた。
+ * それだと動くために2つの条件が余分に要る:
+ *   ・その環境変数が設定されていること
+ *   ・そのテーブルに「公開鍵でも読める」RLS の許可が付いていること
+ * どちらが欠けても中身が空で返り、画面には「準備中」とだけ出る。
+ * 本部は「お知らせを出した」と思っているのに代理店には1件も届かず、
+ * 本部の画面は正常に見えるので、電話が来るまで誰も気づけない。
+ * この画面はもともとサーバー側でしか動かないので、公開鍵を使う利点は無い。
  */
-
-const SUPABASE_URL = (process.env.SUPABASE_URL ?? "").replace(/\/$/, "");
-const SUPABASE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY ?? "";
-
-function configured(): boolean {
-  return Boolean(SUPABASE_URL && SUPABASE_KEY);
-}
 
 /** お知らせの保存先が用意されているか。 */
 export function noticesConfigured(): boolean {
-  return configured();
+  return dbConfigured();
 }
 
 /** 資料の保存先が用意されているか。 */
 export function documentsConfigured(): boolean {
-  return configured();
+  return dbConfigured();
 }
 
 async function rest<T>(path: string): Promise<T> {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-    headers: {
-      apikey: SUPABASE_KEY,
-      Authorization: `Bearer ${SUPABASE_KEY}`,
-    },
-    // お知らせ・資料は分単位で変わるものではない。60秒キャッシュする。
-    next: { revalidate: 60 },
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(
-      `お知らせ・資料の保存先に接続できませんでした (HTTP ${res.status})${body ? `: ${body.slice(0, 120)}` : ""}`,
-    );
-  }
-  return (await res.json()) as T;
+  // お知らせ・資料は分単位で変わるものではない。60秒使い回す。
+  return (await select<unknown>(path, { revalidate: 60 })) as T;
 }
 
 /* ---------- お知らせ ---------- */
@@ -72,7 +55,7 @@ type NoticeRow = {
 
 /** お知らせを取得する。重要なものが先、そのあと公開日の新しい順。 */
 export async function listNotices(): Promise<Notice[]> {
-  if (!configured()) return [];
+  if (!dbConfigured()) return [];
   const rows = await rest<NoticeRow[]>(
     "portal_notices?select=id,title,body,published_on,important" +
       "&published=eq.true&order=important.desc,published_on.desc,id.desc&limit=100",
@@ -122,7 +105,7 @@ type DocumentRow = {
 
 /** 資料を取得する。カテゴリ順 → 更新日の新しい順。 */
 export async function listDocuments(): Promise<DocumentItem[]> {
-  if (!configured()) return [];
+  if (!dbConfigured()) return [];
   const rows = await rest<DocumentRow[]>(
     "portal_documents?select=id,name,category,description,file_url,file_name,file_size,updated_on" +
       "&published=eq.true&order=updated_on.desc,id.desc&limit=300",

@@ -171,8 +171,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "内容を読み取れませんでした。" }, { status: 400 });
   }
 
+  /*
+   * 決済の番号。同じ通知が二度届いたときに、二重で受注を立てないための鍵になる。
+   *
+   * 項目名がぴったり一致するものだけを見る（pickExact）。
+   * pick は名前の一部が入っていれば拾うので、"id" を候補にすると
+   * "form_id" や "customer_id" のような別の欄を掴んでしまう。
+   * 掴む相手を間違えると、
+   *   ・その値が毎回同じ  → 正常な受注が全部「受付済み」で捨てられる
+   *   ・その値が毎回違う  → 本当の重複を見逃して二重に計上する
+   * のどちらかが起きる。決済の番号は金額に直結するので、当て推量で拾わない。
+   */
   const paymentId =
-    pick(data, "payment_id", "paymentId", "transaction_id", "charge_id", "id") || null;
+    pickExact(
+      data,
+      "payment_id", "paymentid",
+      "transaction_id", "transactionid",
+      "charge_id", "chargeid",
+      "決済ID", "決済番号",
+    ) || null;
 
   const box = await receive("utage", paymentId, null, data);
   if (box.duplicate) {
@@ -215,7 +232,14 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const trouble = [r.ok ? "" : r.message, staff.note].filter(Boolean).join(" ");
+    /*
+     * 受信箱に残す理由。
+     * 登録に失敗したときだけでなく、登録はできたが報酬が立たなかった等
+     * （needsReview）も残す。ここを拾わないと、報酬の抜けが誰の目にも触れない。
+     */
+    const trouble = [r.needsReview ? r.message : "", r.ok ? "" : r.message, staff.note]
+      .filter(Boolean)
+      .join(" ");
     await markProcessed(box.id, trouble || undefined);
     return NextResponse.json(staff.note ? { ...r, note: staff.note } : r, {
       status: r.ok ? 200 : 202,

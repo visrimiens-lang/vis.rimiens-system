@@ -7,6 +7,7 @@ import {
   confirmRewards,
   onReviewResultChanged,
   reverseRewards,
+  rewardStanding,
   type ReviewRewardOutcome,
 } from "@/lib/rewards";
 
@@ -388,7 +389,11 @@ export async function updateShipmentAction(
   if (next === "キャンセル") {
     let rewardRows: Row[];
     try {
-      rewardRows = await select<Row>(`rewards?select=status,amount&order_id=eq.${id}`);
+      // cancel_reason まで読む。読み落とすと、支払済のまま相殺した報酬を
+      // 「まだ生きている」と数えてしまい、下の halfDone が誤って立つ。
+      rewardRows = await select<Row>(
+        `rewards?select=id,status,amount,cancel_reason&order_id=eq.${id}`,
+      );
     } catch (e) {
       revalidatePath("/admin/orders");
       revalidatePath(`/admin/orders/${id}`);
@@ -401,23 +406,23 @@ export async function updateShipmentAction(
       };
     }
 
-    // 取り消されていない、プラスの報酬（＝まだ生きている報酬）
-    const live = rewardRows.filter(
-      (r) => n_(r, "amount") > 0 && s_(r, "status") !== "取消",
-    ).length;
-    // 相殺のために立てたマイナスの報酬
-    const offset = rewardRows.filter((r) => n_(r, "amount") < 0).length;
-    // すでに取消の印がついた元の報酬。上のマイナスと対になる。
-    const cancelled = rewardRows.filter(
-      (r) => n_(r, "amount") > 0 && s_(r, "status") === "取消",
-    ).length;
+    /*
+     * 報酬がいまどうなっているかの判断は rewardStanding（lib/rewards.ts）に任せる。
+     *
+     * ここで status だけを見て数えていたため、すでに相殺した「支払済」の報酬を
+     * 「まだ生きている」と数えていた。支払済の報酬は打ち切ったあとも
+     * status が「支払済」のまま残り、取消の理由（cancel_reason）で見分ける決まりのため。
+     * その結果、支払済の報酬があった受注をキャンセルすると、
+     * 2回目以降は保存のたびに「取消が途中で止まっています」と出続け、
+     * 送り状番号も配達完了日も入れられなくなっていた（帳簿は正しいのに操作だけが止まる）。
+     * 審査側（updateOrderAction）は同じ判断を rewardStanding で行っているので、そこに揃える。
+     */
+    const standing = rewardStanding(rewardRows);
+    const live = standing.live;
+    const offset = standing.offsets;
+    const cancelled = standing.reversed;
 
-    // 対になる取消済みの行より多くマイナスが立っているときだけ、取消が途中で止まったと見る。
-    // 「マイナスが1件でもあれば途中」とはしない。審査の否決と承認を行き来した受注には、
-    // 前の周回で正しく完了したマイナスと取消済みの行が残っており、
-    // それを途中と見なすとキャンセルの取消が二度とできなくなるため
-    // （報酬の計上し直しは lib/rewards.ts の onReviewResultChanged）。
-    if (live > 0 && offset > cancelled) {
+    if (live > 0 && standing.halfDone) {
       // 前回の取消が途中で止まっている。ここでやり直すとマイナスが二重に立ち、
       // 支払額を余計に差し引いてしまうため、報酬には触らずに本部へ知らせる。
       await audit(await actorName(), "報酬取消の中断", { type: "order", key: id }, {

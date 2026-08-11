@@ -27,6 +27,16 @@ export const KIND_COMPANY = "00";     // 会社としての代理店
 export const KIND_REFERRER = "01";    // 取次パートナー（紹介のみ）
 export const KIND_STAFF = "02";       // スタッフ（代理店に所属する個人）
 
+/**
+ * ゼロ次代理店（総販売代理店）のコード。
+ *
+ * エリア統括代理店の申込には招待コードが無い。上位は必ずここになる決まりなので、
+ * 招待コードを求めずにここへぶら下げる
+ * （make-blueprints/scenario-13-v3-FINAL3.json のエリア統括ルートが
+ *   上位代理店コードに "RIM" を直接書いているのと同じ扱い）。
+ */
+export const ZEROTH_CODE = "RIM";
+
 export type IntakeResult =
   | { ok: true; code: string; message: string }
   | { ok: false; message: string; needsReview?: boolean };
@@ -227,6 +237,12 @@ export type AgencyApplication = {
   inviteCode: string;
   /** 販路種別。会社登録のときに使う */
   channel?: string;
+  /**
+   * 申込フォームで選んだ代理店種別
+   * （エリア統括代理店 / 販売代理店 / サロン代理店 / 個人販売代理店）。
+   * ここからランク・販路種別・上位の決め方が変わる。
+   */
+  agencyType?: string;
   areaClass?: string;
   bank?: { name?: string; branch?: string; type?: string; number?: string; holder?: string };
   jotformId?: string;
@@ -234,11 +250,58 @@ export type AgencyApplication = {
   userAgent?: string;
 };
 
-/** フォームの種類から、コード区分と既定のランクを決める。 */
-function kindOf(formKind: AgencyApplication["formKind"]): { kind: string; rank: string } {
-  if (formKind === "取次パートナー登録") return { kind: KIND_REFERRER, rank: "取次店" };
-  if (formKind === "スタッフ登録") return { kind: KIND_STAFF, rank: "取次店" };
-  return { kind: KIND_COMPANY, rank: "2次代理店" };
+/**
+ * 会社としての申込で選ぶ「代理店種別」と、そこから決まる中身。
+ *
+ * 取り決めは make-blueprints/scenario-13-v3-FINAL3.json（Make のシナリオ#13）に
+ * 残っている 4 分岐と同じ。
+ *
+ *   エリア統括代理店 … ランク 2次代理店・販路種別 販売代理店・上位は Rimiens 固定
+ *   販売代理店       … ランク 取次店  ・販路種別 販売代理店      （3次）
+ *   サロン代理店     … ランク 取次店  ・販路種別 サロン代理店     （3次）
+ *   個人販売代理店   … ランク 取次店  ・販路種別 個人販売パートナー（3次）
+ *
+ * 代理店ランクの選択肢に「販売代理店」が無いため、3次は
+ * 「取次店 ＋ 販路種別」の組み合わせで表す。報酬の単価を引くときも
+ * この組み合わせを見る（src/lib/orders.ts の effectiveRank）。
+ */
+const AGENCY_TYPES: Record<
+  string,
+  { rank: string; channel: string; parentFixed?: string }
+> = {
+  エリア統括代理店: { rank: "2次代理店", channel: "販売代理店", parentFixed: ZEROTH_CODE },
+  販売代理店: { rank: "取次店", channel: "販売代理店" },
+  サロン代理店: { rank: "取次店", channel: "サロン代理店" },
+  個人販売代理店: { rank: "取次店", channel: "個人販売パートナー" },
+  // 申込フォームの表記ゆれを拾う
+  個人販売パートナー: { rank: "取次店", channel: "個人販売パートナー" },
+};
+
+/**
+ * フォームの種類と代理店種別から、コード区分・ランク・販路種別を決める。
+ *
+ * 代理店種別が読み取れなかったときは、いちばん影響の小さい3次として扱う。
+ * 以前はここが「会社の申込は全部2次代理店」だったため、
+ * 3次として申し込んだ会社が統括代理店として登録され、
+ * 報酬が1台あたり 35,200 円多く計上されるうえ、
+ * 本来の上位統括代理店には1円も計上されない状態になっていた。
+ */
+function kindOf(
+  formKind: AgencyApplication["formKind"],
+  agencyType = "",
+): { kind: string; rank: string; channel: string; parentFixed?: string } {
+  if (formKind === "取次パートナー登録") {
+    return { kind: KIND_REFERRER, rank: "取次店", channel: "サロン提携パートナー（取次）" };
+  }
+  if (formKind === "スタッフ登録") {
+    return { kind: KIND_STAFF, rank: "取次店", channel: "未設定" };
+  }
+  const t = AGENCY_TYPES[agencyType.trim()];
+  if (t) {
+    return { kind: KIND_COMPANY, rank: t.rank, channel: t.channel, parentFixed: t.parentFixed };
+  }
+  // 種別が分からないとき。多く払う側に倒さない。
+  return { kind: KIND_COMPANY, rank: "取次店", channel: "販売代理店" };
 }
 
 /**
@@ -261,19 +324,31 @@ export async function registerAgency(app: AgencyApplication): Promise<IntakeResu
     }
   }
 
-  const parent = await resolveParent(app.inviteCode);
+  const decided = kindOf(app.formKind, app.agencyType);
+  const { kind, rank } = decided;
+  // 申込フォームが販路種別を直接送ってきていればそれを優先する
+  const channel = app.channel || decided.channel;
+
+  /*
+   * 上位代理店を決める。
+   *
+   * エリア統括代理店は上位が Rimiens で固定なので、申込フォームに招待コードの欄が無い
+   * （JotForm③の仕様どおり）。招待コードを必須にしていたため、
+   * これから募集する統括代理店の申込が1件も登録できない状態だった。
+   */
+  const parent = decided.parentFixed
+    ? await agencyByCode(decided.parentFixed)
+    : await resolveParent(app.inviteCode);
+
   if (!parent) {
     return {
       ok: false,
       needsReview: true,
-      message: `招待コード「${app.inviteCode || "（未入力）"}」に合う上位代理店が見つかりませんでした。本部での確認が必要です。`,
+      message: decided.parentFixed
+        ? `上位となる代理店（${decided.parentFixed}）が見つかりませんでした。本部での確認が必要です。`
+        : `招待コード「${app.inviteCode || "（未入力）"}」に合う上位代理店が見つかりませんでした。本部での確認が必要です。`,
     };
   }
-
-  const { kind, rank } = kindOf(app.formKind);
-  const channel =
-    app.channel ||
-    (kind === KIND_REFERRER ? "サロン提携パートナー（取次）" : "未設定");
 
   const allowed = await canRegisterUnder(parent, kind, channel);
   if (!allowed.ok) return { ok: false, needsReview: true, message: allowed.reason };
@@ -298,7 +373,15 @@ export async function registerAgency(app: AgencyApplication): Promise<IntakeResu
       branch_no: Number(code.slice(-2)),
       parent_code: s_(parent, "code"),
       parent_name: s_(parent, "name"),
-      zeroth_code: s_(parent, "zeroth_code") || s_(parent, "code"),
+      /*
+       * ゼロ次（総販売代理店）は、上位に入っていればそれを引き継ぐ。
+       * 入っていないときは上位のコードではなく、組織を表す英字を使う。
+       * 上位のコードをそのまま入れると、たとえば RIM0003 の配下が
+       * ゼロ次＝RIM0003 になり、本来の総販売代理店 RIM に報酬が立たなくなる
+       * （3次が1台売るたびに 77,000 円が計上されない）。
+       * 受注時の判定（resolveAttribution）も組織の英字を使っているので、そこに揃える。
+       */
+      zeroth_code: s_(parent, "zeroth_code") || orgPrefixOf(s_(parent, "code")),
       invite_code: app.inviteCode || null,
       area_class: app.areaClass || null,
       status: "未稼働",

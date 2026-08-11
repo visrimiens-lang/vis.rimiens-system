@@ -460,7 +460,9 @@ export async function updateAgencyAction(
     }
     parentName = s(parent, "name");
     if (parentChanged) {
-      zeroth = s(parent, "zeroth_code") || s(parent, "code");
+      // 上位にゼロ次が無いときは組織の英字を使う（上位のコードを入れると
+      // 本来の総販売代理店に報酬が立たなくなる。src/lib/intake.ts と同じ扱い）
+      zeroth = s(parent, "zeroth_code") || orgPrefixOf(s(parent, "code"));
     }
   } else if (parentChanged) {
     parentName = "";
@@ -1297,7 +1299,8 @@ export async function createAgencyAction(
         branch_no: Number(code.slice(-2)) || null,
         parent_code: parentCode,
         parent_name: s(parent, "name"),
-        zeroth_code: s(parent, "zeroth_code") || s(parent, "code"),
+        // 上位にゼロ次が無いときは組織の英字を使う（理由は上と同じ）
+        zeroth_code: s(parent, "zeroth_code") || orgPrefixOf(s(parent, "code")),
         area_class: orNull(areaClass),
         status: "未稼働",
         email: orNull(t.email),

@@ -182,8 +182,17 @@ export async function accrueRewards(
 
   const rows: Record<string, unknown>[] = [];
   for (const a of agencies) {
-    // 販路種別が販売代理店なら、その単価を使う（ランクは取次店のままのことがあるため）
-    const rank = s_(a, "channel") === "販売代理店" ? "販売代理店" : s_(a, "rank");
+    /*
+     * 3次（販売代理店）は「ランク＝取次店 ＋ 販路種別＝販売代理店」で表す。
+     * 販路種別だけを見て上書きすると、
+     * 「ランク＝2次代理店 ＋ 販路種別＝販売代理店」で登録される
+     * エリア統括代理店まで3次の単価になり、7,700円少なく計上される。
+     * 判定は src/lib/orders.ts の effectiveRank と同じにそろえてある。
+     */
+    const rank =
+      s_(a, "rank") === "取次店" && s_(a, "channel") === "販売代理店"
+        ? "販売代理店"
+        : s_(a, "rank");
     const col = amountColumn(rank);
     if (!col) continue;
     const unit = n_(product, col);

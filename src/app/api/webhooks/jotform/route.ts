@@ -217,6 +217,14 @@ export async function POST(req: NextRequest) {
       shopName: pick(data, "input60", "店舗名", "屋号", "shop"),
       birthday: pick(data, "input19", "生年月日", "birthday"),
       inviteCode: pick(data, "input48", "inviteCode", "招待コード", "紹介コード", "上位代理店コード"),
+      /*
+       * 代理店種別（エリア統括代理店 / 販売代理店 / サロン代理店 / 個人販売代理店）。
+       * この1項目でランク・販路種別・上位の決まり方が変わる（intake.ts の kindOf）。
+       * 実フォーム 261833358386063 では q4_q4_radio2 に入っている
+       * （make-blueprints/scenario-13-v3-FINAL3.json のルーター条件と同じ項目）。
+       * pick は頭の「q番号_」を1つ落とすので、正規化後は q4_radio2 になる。
+       */
+      agencyType: pick(data, "代理店種別", "agencyType", "q4_radio2", "radio2") || undefined,
       channel: pick(data, "販路種別", "channel") || undefined,
       areaClass: pick(data, "エリア", "area") || undefined,
       bank: {

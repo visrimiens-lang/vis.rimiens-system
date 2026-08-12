@@ -187,7 +187,27 @@ async function load(code: string, month: string): Promise<Loaded | null> {
 export default async function DashboardPage() {
   const viewer = await currentViewer();
   if (!viewer) redirect("/login");
-  if (viewer.kind !== "agency") redirect("/admin/agencies");
+  /*
+   * 本部のコードでログインされたとき。
+   * このアプリは代理店向けの画面（マイページ）だけを提供しており、
+   * 本部の管理画面はまだ用意していない。
+   * 行き先が無いので、その旨を出して終わる。
+   */
+  if (viewer.kind !== "agency") {
+    return (
+      <div className="mx-auto max-w-lg py-20 text-center">
+        <h1 className="text-xl font-semibold text-ink-50">
+          本部の管理画面はまだご用意していません
+        </h1>
+        <p className="mt-4 text-sm leading-relaxed text-ink-300">
+          このポータルは、代理店・スタッフ・取次パートナーの皆さま向けの
+          マイページです。
+          <br />
+          代理店コードでログインしてご利用ください。
+        </p>
+      </div>
+    );
+  }
 
   const month = currentMonth();
 

@@ -4,24 +4,16 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
-  Building2,
   ClipboardList,
-  Boxes,
   FileText,
   LayoutDashboard,
   LogOut,
-  Map,
-  Inbox,
   Megaphone,
   Menu,
   Monitor,
-  Package,
   Network,
   Settings,
-  ShieldCheck,
   Users,
-  ShoppingCart,
-  UserRound,
   Wallet,
   X,
 } from "lucide-react";
@@ -56,21 +48,6 @@ const AGENCY_ITEMS: Item[] = [
   { href: "/settings", label: "アカウント設定", icon: Settings },
 ];
 
-const HQ_ITEMS: Item[] = [
-  { href: "/admin/orders", label: "受注一覧", icon: ShoppingCart },
-  // 取り込みに失敗した申込に気づける唯一の場所。上のほうに置く。
-  { href: "/admin/inbox", label: "受信箱", icon: Inbox },
-  { href: "/admin/rewards", label: "報酬の支払", icon: Wallet },
-  { href: "/admin/agencies", label: "代理店管理", icon: Building2 },
-  { href: "/admin/customers", label: "顧客管理", icon: UserRound },
-  { href: "/admin/products", label: "商品マスタ", icon: Package },
-  { href: "/admin/demo", label: "デモ機管理", icon: Boxes },
-  { href: "/admin/areas", label: "エリア枠", icon: Map },
-  { href: "/admin/requests", label: "増枠申請", icon: ShieldCheck },
-  { href: "/admin/notices", label: "お知らせ管理", icon: Megaphone },
-  { href: "/admin/documents", label: "資料管理", icon: FileText },
-];
-
 function Brand() {
   return (
     <div className="min-w-0">
@@ -87,11 +64,9 @@ function Brand() {
 export function Sidebar({
   viewerLabel,
   viewerCode,
-  isHq,
 }: {
   viewerLabel: string;
   viewerCode?: string;
-  isHq: boolean;
 }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -117,12 +92,7 @@ export function Sidebar({
   const nav = (onNavigate?: () => void) => (
     <nav className="flex-1 overflow-y-auto px-3 py-4">
       <div className="space-y-1">
-        {isHq ? (
-          <div className="px-3 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-600">
-            本部
-          </div>
-        ) : null}
-        {(isHq ? HQ_ITEMS : AGENCY_ITEMS).map(({ href, label, icon: Icon }) => {
+        {AGENCY_ITEMS.map(({ href, label, icon: Icon }) => {
           const active = pathname === href || pathname.startsWith(`${href}/`);
           return (
             <Link

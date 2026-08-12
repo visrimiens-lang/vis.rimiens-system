@@ -16,7 +16,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <Sidebar
         viewerLabel={viewer.label}
         viewerCode={viewer.kind === "agency" ? viewer.code : undefined}
-        isHq={viewer.kind === "hq"}
       />
       <main className="min-w-0 flex-1 bg-ink-950">
         <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">

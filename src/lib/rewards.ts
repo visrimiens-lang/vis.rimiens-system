@@ -1,5 +1,5 @@
 import "server-only";
-import { audit, insert, inList, select, selectOne, update } from "./db";
+import { audit, insert, inList, select, selectAll, selectOne, update } from "./db";
 
 /**
  * 報酬の計上。
@@ -124,6 +124,118 @@ function amountColumn(rank: string): string | null {
   return null;
 }
 
+/** 商品マスタが持っているランク別の単価の列。amountColumn が返すものと同じ並び。 */
+const AMOUNT_COLUMNS = ["amount_so", "amount_niji", "amount_toritsugi", "amount_hanbai"] as const;
+
+/** 単価をどう決めたか。監査ログに残して、あとから検算できるようにする。 */
+type RewardBasis = {
+  /** ランク別の単価。amountColumn が返す列名で引く。 */
+  unit: Record<string, number>;
+  /** どうやって商品マスタと突き合わせたか。 */
+  how: "商品名の完全一致" | "内訳への分解";
+  /** 単価の根拠にした商品名。完全一致なら1件、分解なら拾った全部。 */
+  used: string[];
+};
+
+/** 1つの商品からランク別の単価を取り出す。報酬対象外なら全部 0。 */
+function unitOf(product: Row): Record<string, number> {
+  const target = s_(product, "reward_target") !== "対象外";
+  const out: Record<string, number> = {};
+  for (const c of AMOUNT_COLUMNS) out[c] = target ? n_(product, c) : 0;
+  return out;
+}
+
+/**
+ * 受注の商品名から、ランク別の単価を決める。
+ *
+ * ■ なぜ完全一致だけでは足りないか
+ *
+ * UTAGE は本体・事務手数料・オプションをまとめて1回で決済する。
+ * そのとき商品名は、買ったものを並べた1本の文字列で届く。
+ * 実データの例（商品マスタ id=5）:
+ *   「眼筋トレーニングマシンVIS本体　185,000円 ／ 事務手数料　3,300円」
+ * よく出る組み合わせは1レコードとして登録されているので、当たれば完全一致で引ける。
+ *
+ * ところが OP①（ジェルパッド1年分の先行購入）が付いた組み合わせのレコードが無い。
+ * 完全一致だけだと1件も当たらず、報酬が丸ごと 0 円で計上される。
+ * 気づく手立ては受注詳細の警告だけなので、金額が合わないまま支払に進む恐れがある。
+ *
+ * ■ 当たらなかったときの分解のしかた
+ *
+ * 取扱中の商品名が受注の商品名の中に含まれるかを見て、
+ * 長い名前から順に、同じ文字を二度数えないように拾っていく。
+ *
+ * 長い名前から拾うのが要点。「眼筋トレーニングマシン」のような短い名前を先に取ると、
+ * 本来の「本体＋事務手数料」のレコードを取り逃がして単価が下がる。
+ *
+ * ■ 間違った分解を採らない仕組み
+ *
+ * 拾った商品の税込価格の合計が、実際に決済された金額とぴったり一致したときだけ採用する。
+ * 一致しなければ単価を決めず、今までどおり 0 件で返して本部の確認に回す。
+ * 決済額との照合を通すので、分解を取り違えたまま報酬を立てることはない。
+ *
+ * 足し合わせてよいことは実データで確かめてある:
+ *     id=5  本体＋事務手数料        188,300 / 総販 77,000 / 2次 62,700 / 販代 55,000 / 取次 27,500
+ *   ＋ id=15 3年保証セット（OP②）    11,000 /       3,300 /      2,200 /      1,100 /          0
+ *   ＝ id=3  本体＋事務手数料＋OP②  199,300 /      80,300 /     64,900 /     56,100 /     27,500
+ * 商品マスタに元から入っている結合レコード（id=3）と全列で一致する。
+ */
+async function resolveRewardBasis(order: Row): Promise<RewardBasis | null> {
+  const productName = s_(order, "product_name");
+  if (!productName) return null;
+
+  const exact = await selectOne<Row>(
+    `products?select=*&name=eq.${encodeURIComponent(productName)}`,
+  );
+  if (exact) {
+    // 報酬対象外の商品は、今までどおり1行も立てない。
+    if (s_(exact, "reward_target") === "対象外") return null;
+    return { unit: unitOf(exact), how: "商品名の完全一致", used: [s_(exact, "name")] };
+  }
+
+  const amount = n_(order, "amount");
+  if (amount <= 0) return null;
+
+  const active = await selectAll<Row>("products?select=*&active=is.true&order=id");
+  const byNameLength = [...active].sort((a, b) => s_(b, "name").length - s_(a, "name").length);
+
+  /*
+   * 拾った場所は、他の名前に当たらない文字で塗り潰してから次を探す。
+   * 消してしまうと前後がくっついて、元の文字列には無かった並びが生まれる。
+   */
+  let rest = productName;
+  const used: Row[] = [];
+  for (const p of byNameLength) {
+    const name = s_(p, "name");
+    if (!name) continue;
+    const at = rest.indexOf(name);
+    if (at < 0) continue;
+    rest = rest.slice(0, at) + " ".repeat(name.length) + rest.slice(at + name.length);
+    used.push(p);
+  }
+
+  /*
+   * 1件しか拾えないときは採らない。
+   * 単品ならその名前で完全一致しているはずなので、ここに来たものは
+   * 短い名前がたまたま部分一致しただけの可能性が高い。
+   */
+  if (used.length < 2) return null;
+
+  const priceSum = used.reduce((s, p) => s + n_(p, "price_incl_tax"), 0);
+  const quantity = n_(order, "quantity") || 1;
+  // amount が1台ぶんか、台数を掛けた合計かは送り元によって変わる。どちらかに合えばよい。
+  if (priceSum !== amount && priceSum * quantity !== amount) return null;
+
+  const unit: Record<string, number> = {};
+  for (const c of AMOUNT_COLUMNS) {
+    unit[c] = used.reduce(
+      (s, p) => s + (s_(p, "reward_target") === "対象外" ? 0 : n_(p, c)),
+      0,
+    );
+  }
+  return { unit, how: "内訳への分解", used: used.map((p) => s_(p, "name")) };
+}
+
 /**
  * 受注1件から発生する報酬を計上する。
  *
@@ -156,10 +268,8 @@ export async function accrueRewards(
   const blocking = opts.redo ? existing.filter(isLive) : existing;
   if (blocking.length > 0) return 0;
 
-  const product = await selectOne<Row>(
-    `products?select=*&name=eq.${encodeURIComponent(s_(order, "product_name"))}`,
-  );
-  if (!product || s_(product, "reward_target") === "対象外") return 0;
+  const basis = await resolveRewardBasis(order);
+  if (!basis) return 0;
 
   const month = monthOf(s_(order, "ordered_on"));
   const quantity = n_(order, "quantity") || 1;
@@ -195,7 +305,7 @@ export async function accrueRewards(
         : s_(a, "rank");
     const col = amountColumn(rank);
     if (!col) continue;
-    const unit = n_(product, col);
+    const unit = basis.unit[col] ?? 0;
     if (unit <= 0) continue;
 
     rows.push({
@@ -214,6 +324,9 @@ export async function accrueRewards(
   await audit("system", opts.redo ? "報酬の計上し直し" : "報酬計上", { type: "order", key: String(orderId) }, {
     件数: rows.length,
     合計: rows.reduce((s, r) => s + Number(r.amount ?? 0), 0),
+    // 単価をどこから取ったかを残す。分解で決めたときは、あとから検算できるようにする。
+    単価の決め方: basis.how,
+    単価の根拠: basis.used,
   });
   return rows.length;
 }

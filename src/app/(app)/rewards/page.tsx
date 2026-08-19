@@ -473,8 +473,8 @@ export default async function RewardsPage({
                 <Th align="right">台数</Th>
                 {showReward ? <Th align="right">報酬額</Th> : null}
                 {/* 配下にいくら払うか。単価は組織図で変更できる（個別 or ランクの既定） */}
-                {showReward ? <Th align="right">支払単価</Th> : null}
-                {showReward ? <Th align="right">お支払額</Th> : null}
+                {showReward ? <Th align="right">支払単価（税抜）</Th> : null}
+                {showReward ? <Th align="right">お支払額（税抜）</Th> : null}
               </tr>
             </thead>
             <tbody>

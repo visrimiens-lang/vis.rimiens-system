@@ -463,7 +463,7 @@ export default async function OrganizationPage({
                       basePath={BASE}
                       params={params}
                     />
-                    <Th>支払額（1台）</Th>
+                    <Th>支払額（1台・税抜）</Th>
                   </tr>
                 </thead>
                 <tbody>

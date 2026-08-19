@@ -589,7 +589,7 @@ function AgencyTable({
           {th("area", "エリア")}
           {th("parent", "上位代理店")}
           {th("slot", "枠", "right")}
-          <Th align="right">支払額（1台）</Th>
+          <Th align="right">支払額（1台・税抜）</Th>
           {th("status", "稼働ステータス")}
           {th("email", "メールアドレス")}
           {th("phone", "電話番号")}
@@ -708,7 +708,7 @@ function PeopleTable({
           {th("rank", "区分")}
           {th("channel", "販路種別")}
           {th("parent", "上位代理店")}
-          <Th align="right">支払額（1台）</Th>
+          <Th align="right">支払額（1台・税抜）</Th>
           {th("status", "稼働ステータス")}
           {th("email", "メールアドレス")}
           {th("phone", "電話番号")}

@@ -80,7 +80,7 @@ export function PayUnitCell({
     <form action={action} className="w-52 space-y-1.5">
       <input type="hidden" name="code" value={code} />
       <label className="block text-xs text-ink-400">
-        {name} に払う額（1台あたり）
+        {name} に払う額（1台あたり・税抜き）
       </label>
       <input
         name="amount"

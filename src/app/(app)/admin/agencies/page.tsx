@@ -17,6 +17,8 @@ import {
   type SortState,
 } from "@/lib/list-params";
 import { channelLabel, rankLabel, rankShort, statusTone } from "@/lib/labels";
+import { PayUnitCell } from "@/components/PayUnitCell";
+import { defaultPayUnit } from "@/lib/pay-defaults";
 import type { Agency } from "@/lib/types";
 import {
   Badge,
@@ -27,6 +29,7 @@ import {
   StatTile,
   Table,
   Td,
+  Th,
   cn,
   jpDate,
 } from "@/components/ui";
@@ -586,6 +589,7 @@ function AgencyTable({
           {th("area", "エリア")}
           {th("parent", "上位代理店")}
           {th("slot", "枠", "right")}
+          <Th align="right">支払額（1台）</Th>
           {th("status", "稼働ステータス")}
           {th("email", "メールアドレス")}
           {th("phone", "電話番号")}
@@ -639,6 +643,21 @@ function AgencyTable({
                   </span>
                 ) : null}
               </Td>
+              {/*
+                この代理店に払う1台あたりの額。本部は誰の額でも変えられる
+                （権限の判定は actions/pay-unit-actions.ts が行う）。
+                空欄なら既定（商品マスタのランク別単価）が使われる。
+              */}
+              <Td numeric align="right">
+                <PayUnitCell
+                  code={a.code}
+                  name={a.name || a.code}
+                  value={a.payUnit}
+                  fallback={defaultPayUnit(a)}
+                  note={a.payUnitNote}
+                  editable
+                />
+              </Td>
               <Td>
                 <Status status={a.status} />
               </Td>
@@ -689,6 +708,7 @@ function PeopleTable({
           {th("rank", "区分")}
           {th("channel", "販路種別")}
           {th("parent", "上位代理店")}
+          <Th align="right">支払額（1台）</Th>
           {th("status", "稼働ステータス")}
           {th("email", "メールアドレス")}
           {th("phone", "電話番号")}
@@ -718,6 +738,16 @@ function PeopleTable({
             <Td>{channelLabel(a.channel)}</Td>
             <Td>
               <Parent agency={a} />
+            </Td>
+            <Td numeric align="right">
+              <PayUnitCell
+                code={a.code}
+                name={a.name || a.code}
+                value={a.payUnit}
+                fallback={defaultPayUnit(a)}
+                note={a.payUnitNote}
+                editable
+              />
             </Td>
             <Td>
               <Status status={a.status} />

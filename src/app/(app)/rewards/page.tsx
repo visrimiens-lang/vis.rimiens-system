@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import { findAgencyByCode, listDescendants } from "@/lib/agencies";
+import { effectivePayUnit } from "@/lib/pay-defaults";
 import {
   attachRewards,
   canComputeReward,
@@ -86,9 +87,24 @@ type OwnerGroup = {
   name: string;
   units: number;
   reward: number | null;
+  /**
+   * この担当（配下）に払う1台あたりの額。
+   * 個別に決めた額（組織図で設定）があればそれ、無ければランクの既定。
+   * 自分の売上の行と、配下として登録されていないコードは null（払う相手ではない）。
+   */
+  payUnit: number | null;
+  /** payUnit × 台数。支払通知にそのまま使える額。 */
+  payout: number | null;
+  /** 個別に決めた額か（既定との見分け用） */
+  payCustom: boolean;
 };
 
-function groupByOwner(rows: OrderWithReward[], names: Map<string, string>): OwnerGroup[] {
+function groupByOwner(
+  rows: OrderWithReward[],
+  names: Map<string, string>,
+  payTo: Map<string, { unit: number | null; custom: boolean }>,
+  selfCode: string,
+): OwnerGroup[] {
   const buckets = new Map<string, OrderWithReward[]>();
   for (const r of rows) {
     const key = r.ownerCode || "（担当コードなし）";
@@ -97,12 +113,21 @@ function groupByOwner(rows: OrderWithReward[], names: Map<string, string>): Owne
     buckets.set(key, list);
   }
   return [...buckets.entries()]
-    .map(([code, list]) => ({
-      code,
-      name: names.get(code) ?? "—",
-      units: sumUnits(list),
-      reward: sumReward(list),
-    }))
+    .map(([code, list]) => {
+      const units = sumUnits(list);
+      // 自分の売上には払わない。配下として登録されているコードにだけ支払額を出す。
+      const pay = code !== selfCode ? payTo.get(code) : undefined;
+      const payUnit = pay?.unit ?? null;
+      return {
+        code,
+        name: names.get(code) ?? "—",
+        units,
+        reward: sumReward(list),
+        payUnit,
+        payout: payUnit === null ? null : payUnit * units,
+        payCustom: pay?.custom ?? false,
+      };
+    })
     .sort((a, b) => b.units - a.units || a.code.localeCompare(b.code));
 }
 
@@ -123,6 +148,7 @@ export default async function RewardsPage({
 
   let rows: OrderWithReward[] = [];
   let names = new Map<string, string>();
+  let payTo = new Map<string, { unit: number | null; custom: boolean }>();
   /** 報酬の単価を引くときのランク（データベースの値）。表示には rankLabel() を通す。 */
   let rewardRank = "";
   let rewardAvailable = true;
@@ -141,6 +167,13 @@ export default async function RewardsPage({
     } else {
       const descendants = await listDescendants(self.code);
       names = new Map([self, ...descendants].map((a) => [a.code, a.name]));
+      // 配下ごとの「1台あたりに払う額」。個別設定（組織図で変更）が最優先。
+      payTo = new Map(
+        descendants.map((d) => [
+          d.code,
+          { unit: effectivePayUnit(d), custom: d.payUnit !== null },
+        ]),
+      );
       rewardRank = effectiveRank(self);
       rewardAvailable = canComputeReward(self);
       rankMissing = rewardRank === "";
@@ -190,7 +223,9 @@ export default async function RewardsPage({
   const rewardTotal = showReward && rewardAvailable ? sumReward(rows) : null;
   const hasMissingUnit =
     showReward && (!rewardAvailable || rows.some((r) => r.unitReward === null));
-  const groups = groupByOwner(rows, names);
+  const groups = groupByOwner(rows, names, payTo, viewer.code);
+  const payoutTotal = groups.reduce((t, g) => t + (g.payout ?? 0), 0);
+  const hasPayout = groups.some((g) => g.payout !== null);
   const rewardRankText = rankLabel(rewardRank);
 
   // 「150台 × 62,700円」の形で見せられるのは、単価が1種類に揃っているときだけ。
@@ -411,6 +446,12 @@ export default async function RewardsPage({
                     {yen(rewardTotal)}
                   </Td>
                 ) : null}
+                {showReward ? <Td>{null}</Td> : null}
+                {showReward ? (
+                  <Td numeric align="right" className="font-semibold text-gold-400">
+                    {hasPayout ? yen(payoutTotal) : "—"}
+                  </Td>
+                ) : null}
                 <Td>{null}</Td>
               </tr>
             </tfoot>
@@ -431,6 +472,9 @@ export default async function RewardsPage({
                 <Th>名前</Th>
                 <Th align="right">台数</Th>
                 {showReward ? <Th align="right">報酬額</Th> : null}
+                {/* 配下にいくら払うか。単価は組織図で変更できる（個別 or ランクの既定） */}
+                {showReward ? <Th align="right">支払単価</Th> : null}
+                {showReward ? <Th align="right">お支払額</Th> : null}
               </tr>
             </thead>
             <tbody>
@@ -444,6 +488,29 @@ export default async function RewardsPage({
                   {showReward ? (
                     <Td numeric align="right" className="text-ink-50">
                       {yen(g.reward)}
+                    </Td>
+                  ) : null}
+                  {showReward ? (
+                    <Td numeric align="right">
+                      {g.payUnit === null ? (
+                        <span className="text-ink-500">—</span>
+                      ) : (
+                        <>
+                          {yen(g.payUnit)}
+                          {g.payCustom ? (
+                            <span className="ml-1 text-xs text-gold-500">個別</span>
+                          ) : null}
+                        </>
+                      )}
+                    </Td>
+                  ) : null}
+                  {showReward ? (
+                    <Td numeric align="right" className="text-ink-50">
+                      {g.payout === null ? (
+                        <span className="text-ink-500">—</span>
+                      ) : (
+                        yen(g.payout)
+                      )}
                     </Td>
                   ) : null}
                 </tr>

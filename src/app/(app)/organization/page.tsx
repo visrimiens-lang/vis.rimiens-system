@@ -51,6 +51,7 @@ import {
 import { channelLabel, codeKindLabel, rankShort, statusTone } from "@/lib/labels";
 import { SlotRequestButton } from "./SlotRequestButton";
 import { PayUnitCell } from "@/components/PayUnitCell";
+import { defaultPayUnit } from "@/lib/pay-defaults";
 
 const BASE = "/organization";
 
@@ -61,24 +62,6 @@ const SORT_COLUMNS = ["code", "name", "rank", "kind", "status", "email", "phone"
 const DEFAULT_SORT: SortState = { column: "", desc: false };
 
 /* ---------- 組織図を「行＋深さ」に平らにする ---------- */
-
-/**
- * 個別の額が決まっていないときに、実際に使われる1台あたりの報酬額。
- *
- * 本当の額は商品によって変わる（商品マスタにランク別で入っている）。
- * ここでは「いちばんよく出る本体1台」の額を目安として出す。
- * 画面は「空欄ならこのくらい」を示すためのものなので、目安で足りる。
- *
- * 2026-07-30 会議で決めた推奨額。ランクの決め方は lib/orders.ts の effectiveRank と同じ。
- */
-function defaultUnitOf(a: Agency): number | null {
-  const rank = a.rank === "取次店" && a.channel === "販売代理店" ? "販売代理店" : a.rank;
-  if (rank === "総販売代理店") return 77000;
-  if (rank === "2次代理店") return 62700;
-  if (rank === "販売代理店") return 55000;
-  if (rank === "取次店") return 27500;
-  return null;
-}
 
 type Row = { agency: Agency; depth: number };
 
@@ -554,7 +537,7 @@ export default async function OrganizationPage({
                           code={a.code}
                           name={a.name || a.code}
                           value={a.payUnit}
-                          fallback={defaultUnitOf(a)}
+                          fallback={defaultPayUnit(a)}
                           note={a.payUnitNote}
                           editable={a.parentCode === me.code}
                         />

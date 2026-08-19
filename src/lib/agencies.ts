@@ -45,6 +45,12 @@ function toAgency(r: Row): Agency {
     createdAt: s_(r, "created_at"),
     qr1Url: s_(r, "qr1_url"),
     qr2Url: s_(r, "qr2_url"),
+    /*
+     * 上位が決めた「この相手に払う額」。
+     * 列がまだ無いうちは undefined で来るので null に倒す（既定の単価を使う扱い）。
+     */
+    payUnit: r["pay_unit"] === null || r["pay_unit"] === undefined ? null : n_(r, "pay_unit"),
+    payUnitNote: s_(r, "pay_unit_note"),
   };
 }
 

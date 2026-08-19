@@ -50,6 +50,7 @@ import {
 } from "@/components/SortableTh";
 import { channelLabel, codeKindLabel, rankShort, statusTone } from "@/lib/labels";
 import { SlotRequestButton } from "./SlotRequestButton";
+import { PayUnitCell } from "@/components/PayUnitCell";
 
 const BASE = "/organization";
 
@@ -60,6 +61,24 @@ const SORT_COLUMNS = ["code", "name", "rank", "kind", "status", "email", "phone"
 const DEFAULT_SORT: SortState = { column: "", desc: false };
 
 /* ---------- 組織図を「行＋深さ」に平らにする ---------- */
+
+/**
+ * 個別の額が決まっていないときに、実際に使われる1台あたりの報酬額。
+ *
+ * 本当の額は商品によって変わる（商品マスタにランク別で入っている）。
+ * ここでは「いちばんよく出る本体1台」の額を目安として出す。
+ * 画面は「空欄ならこのくらい」を示すためのものなので、目安で足りる。
+ *
+ * 2026-07-30 会議で決めた推奨額。ランクの決め方は lib/orders.ts の effectiveRank と同じ。
+ */
+function defaultUnitOf(a: Agency): number | null {
+  const rank = a.rank === "取次店" && a.channel === "販売代理店" ? "販売代理店" : a.rank;
+  if (rank === "総販売代理店") return 77000;
+  if (rank === "2次代理店") return 62700;
+  if (rank === "販売代理店") return 55000;
+  if (rank === "取次店") return 27500;
+  return null;
+}
 
 type Row = { agency: Agency; depth: number };
 
@@ -461,6 +480,7 @@ export default async function OrganizationPage({
                       basePath={BASE}
                       params={params}
                     />
+                    <Th>支払額（1台）</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -523,6 +543,21 @@ export default async function OrganizationPage({
                         ) : (
                           <span className="text-ink-300">{a.parentCode || "—"}</span>
                         )}
+                      </Td>
+                      {/*
+                        自分の直下にだけ、払う額を決められるようにする。
+                        間に人が挟まっている相手の取り分を飛び越えて決められないようにするため。
+                        空欄なら商品マスタのランク別単価がそのまま使われる。
+                      */}
+                      <Td numeric>
+                        <PayUnitCell
+                          code={a.code}
+                          name={a.name || a.code}
+                          value={a.payUnit}
+                          fallback={defaultUnitOf(a)}
+                          note={a.payUnitNote}
+                          editable={a.parentCode === me.code}
+                        />
                       </Td>
                     </tr>
                   ))}

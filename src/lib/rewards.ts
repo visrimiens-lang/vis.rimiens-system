@@ -215,6 +215,24 @@ export async function accrueRewards(
     `agencies?select=code,rank,channel&code=${inList(unique)}`,
   );
 
+  /*
+   * 上位が決めた「この相手に払う額」。入っていればランク別の単価より優先する。
+   * 「推奨は 55,000円だが、この人だけ 30,000円」「インボイス未登録なので減額」に使う。
+   *
+   * 列がまだ無いうちに動いても報酬計算が止まらないよう、失敗したら既定の単価だけで進む。
+   * （マイグレーション supabase/migrations/2026-08-19_agency_pay_unit.sql を流すと効き始める）
+   */
+  const payUnit = new Map<string, number>();
+  try {
+    const rows = await select<Row>(`agencies?select=code,pay_unit&code=${inList(unique)}`);
+    for (const r of rows) {
+      const v = n_(r, "pay_unit");
+      if (v > 0) payUnit.set(s_(r, "code"), v);
+    }
+  } catch {
+    // 列がまだ無い。既定の単価で進む。
+  }
+
   const rows: Record<string, unknown>[] = [];
   for (const a of agencies) {
     /*
@@ -230,7 +248,9 @@ export async function accrueRewards(
         : s_(a, "rank");
     const col = amountColumn(rank);
     if (!col) continue;
-    const unit = basis.unit[col] ?? 0;
+    // 上位が決めた額があればそれを使う。無ければランク別の単価。
+    const override = payUnit.get(s_(a, "code")) ?? 0;
+    const unit = override > 0 ? override : (basis.unit[col] ?? 0);
     if (unit <= 0) continue;
 
     rows.push({
@@ -252,6 +272,10 @@ export async function accrueRewards(
     // 単価をどこから取ったかを残す。分解で決めたときは、あとから検算できるようにする。
     単価の決め方: basis.how,
     単価の根拠: basis.used,
+    // 上位が個別の額を決めていた相手は、それも残す（あとで「なぜこの額か」を追えるように）
+    ...(payUnit.size > 0
+      ? { 個別単価: Object.fromEntries(payUnit) }
+      : {}),
   });
   return rows.length;
 }

@@ -41,6 +41,13 @@ export type Agency = {
   createdAt: string;
   qr1Url: string;
   qr2Url: string;
+  /**
+   * 上位からこの代理店に払う1台あたりの報酬額。
+   * null なら商品マスタのランク別単価を使う（既定）。
+   */
+  payUnit: number | null;
+  /** 既定と変えた理由（インボイス未登録、個別契約など）。 */
+  payUnitNote: string;
 };
 
 export type Order = {

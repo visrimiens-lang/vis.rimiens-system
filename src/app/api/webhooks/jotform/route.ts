@@ -65,9 +65,25 @@ function normalizeKey(k: string): string {
  * JotForm は項目名がフォームごとに違うので、よくある言い方をまとめて探す。
  * 日本語のラベル名でも、JotForm の内部名（inviteCode, input3 など）でも拾える。
  */
+/*
+ * JotForm が申込内容とは別に付けてくる、送信元の情報。
+ *
+ * 照合の対象から外す。名前の一部でも一致とみなす作りなので、
+ * "name" を探すと username（JotForm のアカウント名）に当たってしまう。
+ * 実際 2026-08-19 の代理店システム登録では、会社名を拾えなかった結果
+ * 申込者の名前が「visrimiens」（アカウント名）として登録されかけていた。
+ */
+const JOTFORM_META_KEYS = new Set([
+  "username", "formID", "formTitle", "submitSource", "buildDate", "slug", "path",
+  "type", "event_id", "timeToSubmit", "submitDate", "uploadServerUrl",
+  "eventObserver", "jsExecutionTracker", "validatedNewRequiredFieldIDs",
+  "webhookURL", "ip", "pretty", "rawRequest", "appID", "parent", "action", "event",
+]);
+
 function pick(data: Record<string, unknown>, ...names: string[]): string {
   for (const n of names) {
     for (const [rawKey, v] of Object.entries(data)) {
+      if (JOTFORM_META_KEYS.has(rawKey)) continue;
       const k = normalizeKey(rawKey);
       if (k === n || k.includes(n) || rawKey === n || rawKey.includes(n)) {
         if (v === null || v === undefined) continue;
@@ -97,25 +113,70 @@ function pick(data: Record<string, unknown>, ...names: string[]): string {
   return "";
 }
 
+/**
+ * JotForm が一緒に送ってくる pretty から「日本語ラベル → 値」を取り出す。
+ *
+ * ■ なぜこれが要るか
+ *
+ * JotForm の項目名は、フォームを作った人が名前を付けなければ
+ * 「q43_input43」のような通し番号だけの名前で届く。
+ * 実データ（2026-08-19 の取次パートナー登録）はこうだった:
+ *   q6_input3=氏名 / q7_ka=フリガナ / q32_input32=メール / q43_input43=招待コード
+ * このうち意味が読み取れるのは ka（フリガナ）だけで、招待コードは input43 としか名乗らない。
+ * そのため名前で照合する pick では拾えず、招待コードが「未入力」と判定され、
+ * 上位代理店が決まらないまま受信箱に取り込めない状態で溜まっていた。
+ *
+ * ところが JotForm は同じ内容を pretty にも入れてくれている:
+ *   「名前:東山 和史, フリガナ:ヒガシヤマ カズシ, …, 招待コード:RIM, …」
+ * ラベルは画面に出ている日本語そのものなので、こちらは意味が読み取れる。
+ *
+ * ■ 区切り方
+ *
+ * 値の中にも読点が入りうる（住所など）。「, 」で機械的に切ると壊れるので、
+ * 直後が「ラベル:」の形になっている読点でだけ切る。
+ */
+function prettyPairs(pretty: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (typeof pretty !== "string" || !pretty.trim()) return out;
+  for (const part of pretty.split(/,\s*(?=[^,:]{1,40}:)/)) {
+    const at = part.indexOf(":");
+    if (at <= 0) continue;
+    const label = part.slice(0, at).trim();
+    const value = part.slice(at + 1).trim();
+    if (label && value) out[label] = value;
+  }
+  return out;
+}
+
 /** JotForm の送信内容を取り出す。form-data でも JSON でも受けられるようにする。 */
 async function readPayload(req: NextRequest): Promise<Record<string, unknown>> {
   const type = req.headers.get("content-type") ?? "";
-  if (type.includes("application/json")) {
-    return (await req.json()) as Record<string, unknown>;
-  }
-  const form = await req.formData();
   const out: Record<string, unknown> = {};
-  for (const [k, v] of form.entries()) out[k] = typeof v === "string" ? v : String(v);
+
+  if (type.includes("application/json")) {
+    Object.assign(out, (await req.json()) as Record<string, unknown>);
+  } else {
+    const form = await req.formData();
+    for (const [k, v] of form.entries()) out[k] = typeof v === "string" ? v : String(v);
+  }
 
   // JotForm は中身を rawRequest という1つの項目に JSON で詰めて送ってくる
   const raw = out["rawRequest"];
   if (typeof raw === "string") {
     try {
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      return { ...out, ...parsed };
+      Object.assign(out, JSON.parse(raw) as Record<string, unknown>);
     } catch {
       // JSON でなければそのまま使う
     }
+  }
+
+  /*
+   * pretty の日本語ラベルも照合できるようにする。
+   * すでにある項目は上書きしない。rawRequest 側は氏名 {first,last} や
+   * 生年月日 {year,month,day} のように構造が残っていて、そちらの方が正確に組み立てられるため。
+   */
+  for (const [label, value] of Object.entries(prettyPairs(out["pretty"]))) {
+    if (!(label in out)) out[label] = value;
   }
   return out;
 }

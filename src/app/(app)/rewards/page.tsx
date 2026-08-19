@@ -369,7 +369,11 @@ export default async function RewardsPage({
                 <tr key={r.recordId}>
                   <Td numeric>{jpDate(r.shippedAt)}</Td>
                   <Td>{r.customerName || "—"}</Td>
-                  <Td>{r.productName || "—"}</Td>
+                  <Td className="min-w-[13rem] max-w-[22rem]">
+                      <span className="line-clamp-2 leading-snug" title={r.productName || undefined}>
+                        {r.productName || "—"}
+                      </span>
+                    </Td>
                   <Td numeric align="right">
                     {(r.quantity || 1).toLocaleString("ja-JP")}
                   </Td>

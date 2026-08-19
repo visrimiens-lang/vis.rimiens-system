@@ -920,7 +920,20 @@ export default async function AdminOrdersPage({
                         {o.customerName || "（お名前なし）"}
                       </Link>
                     </Td>
-                    <Td>{o.productName || "—"}</Td>
+                    {/*
+                      商品名は「本体 ／ 事務手数料 ／ OP②延長保証 ／ OP①ジェルパッド1年分」のように
+                      買ったものを並べた長い1本の文字列で届く。そのまま流すと列が縦に潰れて
+                      1件で画面の半分を占め、一覧として読めなくなる。
+                      幅を決めて2行までに収め、全文はマウスを乗せると出るようにする。
+                    */}
+                    <Td className="min-w-[13rem] max-w-[22rem]">
+                      <span
+                        className="line-clamp-2 leading-snug"
+                        title={o.productName || undefined}
+                      >
+                        {o.productName || "—"}
+                      </span>
+                    </Td>
                     <Td numeric align="right">
                       {(o.quantity || 1).toLocaleString("ja-JP")}
                     </Td>

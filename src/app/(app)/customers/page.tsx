@@ -631,7 +631,11 @@ export default async function CustomersPage({
                     <Td numeric>{orderDate(o.date, allPeriod)}</Td>
                     <Td>{o.customerName || "—"}</Td>
                     <Td numeric>{o.phone || "—"}</Td>
-                    <Td>{o.productName || "—"}</Td>
+                    <Td className="min-w-[13rem] max-w-[22rem]">
+                      <span className="line-clamp-2 leading-snug" title={o.productName || undefined}>
+                        {o.productName || "—"}
+                      </span>
+                    </Td>
                     <Td numeric align="right">
                       {o.quantity || 1}
                     </Td>

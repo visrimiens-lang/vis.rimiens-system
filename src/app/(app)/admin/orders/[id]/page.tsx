@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import { select, selectOne } from "@/lib/db";
+import { PRODUCT_COLUMNS, buildProductMatcher } from "@/lib/product-match";
 import { rankLabel, rankShort } from "@/lib/labels";
 import { digitsOf } from "@/lib/list-params";
 import {
@@ -247,9 +248,19 @@ export default async function AdminOrderDetailPage({
     await Promise.allSettled([
       select<Row>(`rewards?select=*&order_id=eq.${id}&order=id.asc`),
       select<Row>("agencies?select=code,name,status,code_kind&order=code.asc"),
+      /*
+       * 商品の引き当ては @/lib/product-match に集約してある。
+       * ここだけ商品名の完全一致で引いていると、OP①付きのように
+       * 複数商品が1本の名前で届いた受注で「商品マスタに無い」と出てしまい、
+       * 実際には報酬が計上されているのに画面では警告になる。
+       */
       productName
-        ? selectOne<Row>(
-            `products?select=name,reward_target,price_incl_tax&name=eq.${encodeURIComponent(productName)}`,
+        ? select<Row>(`products?select=${PRODUCT_COLUMNS}&order=id`).then((all) =>
+            buildProductMatcher(all)(
+              productName,
+              num(order, "amount"),
+              num(order, "quantity") || 1,
+            )?.row ?? null,
           )
         : Promise.resolve(null),
       customerId

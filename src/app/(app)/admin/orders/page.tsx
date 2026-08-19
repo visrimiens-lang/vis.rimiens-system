@@ -5,6 +5,7 @@ import { currentViewer } from "@/lib/auth";
 import { listAllAgencies } from "@/lib/agencies";
 import { select } from "@/lib/db";
 import { rankLabel } from "@/lib/labels";
+import { PRODUCT_COLUMNS, buildProductMatcher } from "@/lib/product-match";
 import { currentMonth, recentMonths, unitRewardFor } from "@/lib/orders";
 import {
   ALL,
@@ -229,13 +230,21 @@ async function fetchAllOrders(
   filters.push(`limit=${LIMIT}`);
   const [rows, products] = await Promise.all([
     select<Row>(`orders?select=*&${filters.join("&")}`),
-    select<Row>("products?select=name,amount_so,amount_niji,amount_hanbai,amount_toritsugi,reward_target"),
+    select<Row>(`products?select=${PRODUCT_COLUMNS}`),
   ]);
-  const priceOf = new Map<string, Row>();
-  for (const p of products) priceOf.set(str(p, "name"), p);
+  /*
+   * 引き当ては @/lib/product-match に集約してある。
+   * 報酬の計上（@/lib/rewards）と同じ関数を通さないと、
+   * 実際に計上された額と、この一覧に出る額がずれる。
+   */
+  const matchProduct = buildProductMatcher(products);
 
   const enriched = rows.map((r) => {
-    const p = priceOf.get(str(r, "product_name"));
+    const p = matchProduct(
+      str(r, "product_name"),
+      num(r, "amount"),
+      num(r, "quantity") || 1,
+    )?.row;
     const off = !p || str(p, "reward_target") === "対象外";
     return {
       ...r,

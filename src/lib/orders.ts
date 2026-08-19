@@ -1,5 +1,6 @@
 import "server-only";
 import { select } from "./db";
+import { PRODUCT_COLUMNS, buildProductMatcher } from "./product-match";
 import type { Agency, Order } from "./types";
 
 type Row = Record<string, unknown>;
@@ -114,15 +115,22 @@ export async function listOrders(
   }
   const [rows, products] = await Promise.all([
     select<Row>(`orders?select=*&${filters.join("&")}`),
-    select<Row>("products?select=name,amount_so,amount_niji,amount_hanbai,amount_toritsugi,reward_target"),
+    select<Row>(`products?select=${PRODUCT_COLUMNS}`),
   ]);
 
-  // 商品名から単価を引けるようにする
-  const priceOf = new Map<string, Row>();
-  for (const p of products) priceOf.set(s_(p, "name"), p);
+  /*
+   * 商品名から単価を引く。引き当ては ./product-match に集約してある。
+   * 報酬の計上（./rewards）と同じ関数を通さないと、
+   * 実際に計上された額と、この画面に出る額がずれる。
+   */
+  const matchProduct = buildProductMatcher(products);
 
   const matched = rows.map((r) => {
-    const p = priceOf.get(s_(r, "product_name"));
+    const p = matchProduct(
+      s_(r, "product_name"),
+      n_(r, "amount"),
+      n_(r, "quantity") || 1,
+    )?.row;
     const off = !p || s_(p, "reward_target") === "対象外";
     return {
       ...r,

@@ -14,6 +14,7 @@ import {
   cn,
 } from "@/components/ui";
 import { AutoRefresh } from "@/components/AutoRefresh";
+import { ReprocessButton } from "./ReprocessButton";
 
 /**
  * 受信箱 ― JotForm と決済から届いたものの控え。
@@ -279,6 +280,15 @@ export default async function AdminInboxPage({
                       ) : (
                         <Badge tone="warn">取り込めていない</Badge>
                       )}
+                      {/*
+                        取り込めなかったものは、ここから取り込み直せる。
+                        届いた内容は丸ごと残っているので、原因を直したあとに
+                        送り主へ再送をお願いしなくても本部の操作だけで済む。
+                        決済など送り元から届き直すものは対象外（アクション側で弾く）。
+                      */}
+                      {!ok && s_(r, "source") === "jotform" ? (
+                        <ReprocessButton id={s_(r, "id")} />
+                      ) : null}
                     </Td>
                     <Td>
                       {s_(r, "error") ? (

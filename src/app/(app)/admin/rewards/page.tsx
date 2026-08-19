@@ -1078,7 +1078,7 @@ export default async function AdminRewardsPage({
           total={monthLines.length}
           shown={shownLines.length}
           clearHref={clearHref}
-          note={`${jpMonthLabel(month)}の報酬のうち。上の合計も、絞り込んだぶんだけを数えています`}
+          note={`${jpMonthLabel(month)}の報酬のうち。上の合計も、絞り込んだ分だけを数えています`}
         />
       ) : null}
 
@@ -1091,7 +1091,7 @@ export default async function AdminRewardsPage({
         <StatTile
           label="確定合計"
           value={yen(totals.confirmed)}
-          hint="支払済のぶんを含む、確定した報酬の合計"
+          hint="支払済の分を含む、確定した報酬の合計"
         />
         <StatTile
           label="支払済合計"
@@ -1109,7 +1109,7 @@ export default async function AdminRewardsPage({
       {truncated ? (
         <Notice tone="warn">
           件数が多いため、{LIMIT.toLocaleString("ja-JP")} 件までを読み込んでいます。
-          上の合計と代理店ごとの金額も、この {LIMIT.toLocaleString("ja-JP")} 件ぶんだけを数えた額です。
+          上の合計と代理店ごとの金額も、この {LIMIT.toLocaleString("ja-JP")} 件分だけを数えた額です。
           振込の金額を確かめるときは、報酬の状態で絞り込んでからご覧ください。
         </Notice>
       ) : null}

@@ -672,6 +672,29 @@ export async function linkCustomer(app: {
  * （これまで Make のシナリオC がやっていた照合）。
  * あわせてお客様を顧客台帳に結びつける（進み具合の表示に使う）。
  */
+/**
+ * 決済方法を、保存先が受け付ける言葉にそろえる。
+ *
+ * 保存先（orders.payment_method）は決まった言葉しか受け付けない。
+ * UTAGE 側の呼び方が少し違うだけで（「銀行振込」「クレジットカード」など）
+ * 受注の登録ごと失敗してしまうのは困るので、ここで読み替える。
+ * どれにも当てはまらない言葉は null にして受注は必ず残し、
+ * 元の言葉は備考で追えるように呼び出し側へ返す。
+ */
+const PAYMENT_METHODS = ["九州信販", "アプラス", "ライフカード", "Stripe", "スクエア", "代引き", "振込"] as const;
+function normalizePaymentMethod(raw: string): { value: string | null; raw: string } {
+  const t = (raw || "").trim();
+  if (!t) return { value: null, raw: "" };
+  const table: Record<string, string> = {
+    "stripe": "Stripe", "クレジットカード": "Stripe", "クレジット": "Stripe", "カード": "Stripe",
+    "square": "スクエア", "スクエア": "スクエア",
+    "銀行振込": "振込", "振り込み": "振込", "お振込": "振込", "振込み": "振込",
+    "代金引換": "代引き", "代引": "代引き",
+  };
+  const hit = (PAYMENT_METHODS as readonly string[]).find((m) => m === t) ?? table[t.toLowerCase()] ?? table[t];
+  return { value: hit ?? null, raw: t };
+}
+
 export async function registerOrder(app: OrderApplication): Promise<IntakeResult> {
   const name = (app.customerName || "").trim();
   if (!name) return { ok: false, message: "注文者名が入っていません。" };
@@ -771,7 +794,8 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
       product_name: app.productName || null,
       quantity: app.quantity ?? 1,
       amount: app.amount ?? 0,
-      payment_method: app.paymentMethod || null,
+      // 保存先が受け付ける言葉に読み替える。読めない言葉でも受注は必ず残す。
+      payment_method: normalizePaymentMethod(app.paymentMethod ?? "").value,
       agency_code: agencyCode || null,
       staff_code: staffCode || null,
       niji_code: nijiCode || null,
@@ -780,6 +804,10 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
       match_status: matchStatus,
       stripe_payment_id: app.stripePaymentId || null,
       ship_status: "出荷待ち",
+      // 決済方法が読み替えられなかったときは、元の言葉を備考に残して本部が直せるようにする
+      ...(app.paymentMethod && !normalizePaymentMethod(app.paymentMethod).value
+        ? { note: `決済方法「${app.paymentMethod}」を読み取れなかったため空欄にしています。本部で確認してください。` }
+        : {}),
     },
   ]);
 

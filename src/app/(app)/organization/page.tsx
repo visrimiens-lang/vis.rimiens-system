@@ -218,7 +218,7 @@ export default async function OrganizationPage({
   // まとめて入る区分なので、「販売代理店」と書くと配下の統括代理店まで
   // 販売代理店として数えているように見えてしまう。
   const kindRows = [
-    { kind: "00", note: "（コード区分00）", slot: "1社ぶん消費" },
+    { kind: "00", note: "（コード区分00）", slot: "1社分消費" },
     { kind: "01", note: "", slot: "消費しない" },
     { kind: "02", note: "", slot: "消費しない" },
     { kind: "", note: "", slot: "—" },

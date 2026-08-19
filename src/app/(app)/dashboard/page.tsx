@@ -252,7 +252,7 @@ export default async function DashboardPage() {
     <div className="space-y-6">
       <PageHeader
         title="ダッシュボード"
-        description={`${self.name}（${self.code}）／ ${jpMonthLabel(month)}の状況です。自分ぶんと配下ぶんを合わせて集計しています。`}
+        description={`${self.name}（${self.code}）／ ${jpMonthLabel(month)}の状況です。自分の分と配下の分を合わせて集計しています。`}
         actions={
           <>
             <Badge tone="gold">{rankText}</Badge>
@@ -276,7 +276,7 @@ export default async function DashboardPage() {
           value={yen(summary.salesTotal)}
           hint={
             stoppedCount > 0
-              ? "ご自身と配下の販売金額の合計（中止ぶんを除く）"
+              ? "ご自身と配下の販売金額の合計（中止分を除く）"
               : "ご自身と配下の販売金額の合計"
           }
         />
@@ -313,7 +313,7 @@ export default async function DashboardPage() {
           <Notice tone="warn">
             {rankMissing
               ? "代理店ランクが登録されていないため、報酬額を計算できません。本部にご確認ください。"
-              : "販売代理店ぶんの単価がマスタ未設定のため金額を表示できません。本部にお問い合わせください。"}
+              : "販売代理店分の単価がマスタ未設定のため金額を表示できません。本部にお問い合わせください。"}
           </Notice>
         ) : null
       ) : (

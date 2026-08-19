@@ -480,7 +480,7 @@ export default async function CustomersPage({
           label="販売金額"
           value={yen(salesTotal)}
           tone="gold"
-          hint="お客様のお支払額の合計（中止ぶんを除く）"
+          hint="お客様のお支払額の合計（中止分を除く）"
         />
         <StatTile
           label="発送まで進んだ受注"
@@ -523,7 +523,7 @@ export default async function CustomersPage({
                   ? ""
                   : `いまは ${selectedCode}${
                       selectedName ? `（${selectedName}）` : ""
-                    } のぶんだけを表示する条件です。`
+                    } の分だけを表示する条件です。`
               }`}
             />
           ) : pinnedOrder ? (

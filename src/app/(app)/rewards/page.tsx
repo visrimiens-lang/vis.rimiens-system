@@ -218,8 +218,8 @@ export default async function RewardsPage({
         title={showReward ? "売上・報酬" : "売上"}
         description={
           showReward
-            ? `出荷が完了した受注だけを集計しています。${jpMonthLabel(month)}に出荷が完了したぶんが対象です。`
-            : `ご自身が売った件数と売上金額です。${jpMonthLabel(month)}に出荷が完了したぶんが対象です。`
+            ? `出荷が完了した受注だけを集計しています。${jpMonthLabel(month)}に出荷が完了した分が対象です。`
+            : `ご自身が売った件数と売上金額です。${jpMonthLabel(month)}に出荷が完了した分が対象です。`
         }
         actions={<MonthSelect months={monthOptions} value={month} />}
       />
@@ -254,9 +254,9 @@ export default async function RewardsPage({
           label="出荷完了台数"
           value={units.toLocaleString("ja-JP")}
           unit="台"
-          hint={`受注 ${rows.length.toLocaleString("ja-JP")} 件ぶん`}
+          hint={`受注 ${rows.length.toLocaleString("ja-JP")} 件分`}
         />
-        <StatTile label="売上合計" value={yen(salesTotal)} hint="出荷完了ぶんの販売金額" />
+        <StatTile label="売上合計" value={yen(salesTotal)} hint="出荷完了分の販売金額" />
         {showReward ? (
           <StatTile
             label="報酬合計"
@@ -284,7 +284,7 @@ export default async function RewardsPage({
         <Notice tone="warn">
           {rankMissing
             ? "代理店ランクが登録されていないため、報酬額を計算できません。本部にご確認ください。"
-            : "販売代理店ぶんの1台あたり単価が商品マスタに未設定のため、金額を表示できません。本部にお問い合わせください。"}
+            : "販売代理店分の1台あたり単価が商品マスタに未設定のため、金額を表示できません。本部にお問い合わせください。"}
         </Notice>
       ) : null}
 

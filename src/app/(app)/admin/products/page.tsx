@@ -97,7 +97,6 @@ const SORT_COLUMNS = [
   "niji",
   "hanbai",
   "toritsugi",
-  "points",
   "order",
 ];
 
@@ -130,7 +129,8 @@ function Head({ sort, params }: { sort: SortState; params: SearchParams }) {
         {/* この列だけはランクではなく販路種別（channel）の報酬額なので channelLabel を使う */}
         {th("hanbai", channelLabel("販売代理店"))}
         {th("toritsugi", rankShort("取次店"))}
-        {th("points", "ポイント")}
+        {/* ポイント列は出さない。ポイント運用は 2026-08-19 の打合せで取りやめが決まった。
+            データ（points 列）は消していないので、再開するときはこの列を戻すだけでよい。 */}
         {th("order", "並び順")}
         <Th align="right">操作</Th>
       </tr>
@@ -190,7 +190,6 @@ export default async function AdminProductsPage({
     niji: (p) => p.amountNiji,
     hanbai: (p) => p.amountHanbai,
     toritsugi: (p) => p.amountToritsugi,
-    points: (p) => p.points,
     order: (p) => p.sortOrder,
   };
   const ordered = sortRows(products, sort.column, sort.desc, accessors);

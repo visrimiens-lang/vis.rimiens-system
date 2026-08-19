@@ -33,3 +33,18 @@ alter table public.agencies
 
 comment on column public.agencies.pay_unit_note is
   '支払単価を既定と変えた理由（インボイス未登録、個別契約など）。';
+
+-- 決済方法に「振込」を追加
+--
+-- 2026-08-19 の打合せで、QR2 の決済にアプラスと振込を足すことが決まった。
+-- アプラスは最初から受け付けているが、振込は無かったため、
+-- UTAGE が「振込」を送ってくると受注の登録が制約違反で失敗してしまう。
+-- 受け付ける言葉に「振込」を足す。
+
+alter table public.orders
+  drop constraint if exists orders_payment_method_check;
+
+alter table public.orders
+  add constraint orders_payment_method_check
+  check (payment_method is null or payment_method in
+    ('九州信販','アプラス','ライフカード','Stripe','スクエア','代引き','振込'));

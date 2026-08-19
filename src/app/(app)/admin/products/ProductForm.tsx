@@ -195,15 +195,12 @@ function Fields({ product, disabled }: { product?: Product; disabled?: boolean }
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <MoneyField
-          name="points"
-          label="ポイント"
-          unit="ポイント"
-          defaultValue={product?.points}
-          disabled={disabled}
-          max={100_000}
-          hint="お客様に付くポイント数です。無ければ空欄で構いません。"
-        />
+        {/*
+          ポイントの入力欄は出さない。ポイント運用は 2026-08-19 の打合せで取りやめが決まった。
+          欄ごと消すと、保存のたびに既存の値が 0 に潰れる（送られなかった項目は空として扱われるため）。
+          いまの値をそのまま送り返して、データは温存する。再開するときは MoneyField に戻すだけでよい。
+        */}
+        <input type="hidden" name="points" value={product?.points ?? ""} />
         <MoneyField
           name="sortOrder"
           label="並び順"
@@ -339,9 +336,6 @@ export function ProductRow({ product }: { product: Product }) {
             )}
           </Td>
         ))}
-        <Td numeric align="right">
-          {product.points ? product.points.toLocaleString("ja-JP") : "—"}
-        </Td>
         <Td numeric align="right">
           {product.sortOrder}
         </Td>

@@ -1,7 +1,13 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { audit, selectOne } from "@/lib/db";
-import { KIND_STAFF, markProcessed, receive, registerOrder } from "@/lib/intake";
+import { audit, select, selectOne, update } from "@/lib/db";
+import {
+  KIND_STAFF,
+  markProcessed,
+  normalizePhone,
+  receive,
+  registerOrder,
+} from "@/lib/intake";
 
 /**
  * UTAGE の決済完了・Stripe からの通知を受け取って、受注として登録する。
@@ -81,6 +87,49 @@ function pickExact(data: Record<string, unknown>, ...names: string[]): string {
 
 /** 担当者コードを確かめた結果。note があれば本部に確認してもらう。 */
 type StaffCheck = { code: string; note: string };
+
+/**
+ * 決済ページのカスタムJSが残した控えから、紹介コードを拾う。
+ *
+ * UTAGE は QRの ?ref= を決済の通知に載せないので、
+ * 通知だけでは「誰の売上か」が決まらない。
+ * お客様が決済ページで連絡先を入れたときに /api/ref-claim へ控えているので、
+ * メールアドレス（無ければ電話番号）で突き合わせる。
+ *
+ * 拾うのは直近のものだけ。古い控えまで見ると、同じ方が
+ * 別の代理店から買い直したときに前の付け先を引き継いでしまう。
+ */
+const CLAIM_WINDOW_HOURS = 72;
+
+async function refFromClaim(email: string, phone: string): Promise<string> {
+  const mail = (email || "").trim().toLowerCase();
+  const tel = normalizePhone(phone || "");
+  if (!mail && !tel) return "";
+
+  const since = new Date(Date.now() - CLAIM_WINDOW_HOURS * 3600 * 1000).toISOString();
+  const filter = mail
+    ? `email=eq.${encodeURIComponent(mail)}`
+    : `phone=eq.${encodeURIComponent(tel)}`;
+
+  try {
+    const rows = await select<Record<string, unknown>>(
+      `ref_claims?select=id,ref&${filter}&used_by=is.null` +
+        `&created_at=gte.${encodeURIComponent(since)}&order=created_at.desc&limit=1`,
+    );
+    if (rows.length === 0) return "";
+    const ref = String(rows[0]["ref"] ?? "");
+    // 使った控えには印を付けて、次の受注で使い回さないようにする
+    try {
+      await update(`ref_claims?id=eq.${rows[0]["id"]}`, { used_by: -1 });
+    } catch {
+      // 印が付かなくても付け先は決まっているので進める
+    }
+    return ref;
+  } catch {
+    // 控えの表がまだ無いときも、決済の取り込みは止めない
+    return "";
+  }
+}
 
 /**
  * 担当者コードを代理店マスタと照合する。
@@ -205,11 +254,26 @@ export async function POST(req: NextRequest) {
   const staffRaw = pickExact(data, "staff_code", "staffcode", "スタッフコード", "担当者コード");
   const staff = await verifyStaffCode(staffRaw);
 
+  const email = pick(data, "email", "メール");
+  const phone = pick(data, "phone", "tel", "電話");
+
+  /*
+   * 誰の紹介かを表すコード。
+   *
+   * 本来は決済の通知に載って届くが、UTAGE は QRの ?ref= を通知に載せない。
+   * そのため実受注7件は付け先が空のまま入り、報酬が1件も立たなかった。
+   * 通知に入っていないときは、決済ページのカスタムJSが残した控え
+   * （ref_claims・/api/ref-claim）を連絡先で突き合わせて補う。
+   */
+  const agencyFromWebhook =
+    pickExact(data, "ref", "ref_code", "partner", "代理店コード", "agency_code") || "";
+  const agencyCode = agencyFromWebhook || (await refFromClaim(email, phone));
+
   try {
     const r = await registerOrder({
       customerName: pick(data, "customer_name", "注文者名", "お名前", "氏名", "name"),
-      email: pick(data, "email", "メール"),
-      phone: pick(data, "phone", "tel", "電話"),
+      email,
+      phone,
       zip: pick(data, "zipcode", "zip", "郵便"),
       address: pick(data, "address", "住所"),
       building: pick(data, "building", "建物"),
@@ -217,18 +281,7 @@ export async function POST(req: NextRequest) {
       amount: toAmount(pick(data, "amount", "price", "金額", "total")),
       quantity: Number(pick(data, "quantity", "数量")) || 1,
       paymentMethod: pick(data, "payment_method", "決済方法") || "Stripe",
-      /*
-       * 誰の紹介かを表すコード。名前がぴったり一致するものだけを拾う。
-       *
-       * 一部一致で拾う pick を使うと "prefecture"（都道府県）が "ref" を
-       * 含むため先に当たり、代理店コードの欄に「東京都」が入ってしまう。
-       * UTAGE は都道府県を prefecture という名前で送るので、
-       * ref を送り始めた瞬間に、キーの並び次第で毎回この取り違えが起きる。
-       * 報酬の付け先を決める値なので、担当者コードと同じく完全一致で拾う。
-       */
-      agencyCode:
-        pickExact(data, "ref", "ref_code", "partner", "代理店コード", "agency_code") ||
-        undefined,
+      agencyCode: agencyCode || undefined,
       staffCode: staff.code || undefined,
       stripePaymentId: paymentId ?? undefined,
     });

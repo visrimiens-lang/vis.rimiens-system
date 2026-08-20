@@ -411,7 +411,7 @@ function ReviewSection({
                 setStaff(e.target.value);
                 setClearStaff(false);
               }}
-              placeholder="例：RIM0201"
+              placeholder="例：MENO0001"
               disabled={pending}
               className={`${inputCls} tabnum`}
             />

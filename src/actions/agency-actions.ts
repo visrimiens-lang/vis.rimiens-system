@@ -5,7 +5,13 @@ import { z } from "zod";
 import { listAllAgencies, listDescendants, slotLimitsOf } from "@/lib/agencies";
 import { currentViewer } from "@/lib/auth";
 import { audit, insert, select, selectOne, update } from "@/lib/db";
-import { canRegisterUnder, nextAgencyCode, orgPrefixOf } from "@/lib/intake";
+import {
+  ZEROTH_CODE,
+  canRegisterUnder,
+  hasOrgCodeColumn,
+  nextAgencyCode,
+  orgOf,
+} from "@/lib/intake";
 import { PORTAL_URL, approvalMail, sendMail } from "@/lib/mail";
 import { OFFICIAL_LINE_URL, tossUpUrl } from "@/lib/qr";
 import { areaUsage, breakdownSlots, slotModelOf } from "@/lib/slots";
@@ -460,9 +466,12 @@ export async function updateAgencyAction(
     }
     parentName = s(parent, "name");
     if (parentChanged) {
-      // 上位にゼロ次が無いときは組織の英字を使う（上位のコードを入れると
-      // 本来の総販売代理店に報酬が立たなくなる。src/lib/intake.ts と同じ扱い）
-      zeroth = s(parent, "zeroth_code") || orgPrefixOf(s(parent, "code"));
+      // 上位にゼロ次が無いときは、実在が確かな総販売代理店を入れる
+      // （英字をそのまま入れると、実在しない代理店を指して報酬が立たなくなる。
+      //   src/lib/intake.ts と同じ扱い）
+      zeroth =
+        s(parent, "zeroth_code") ||
+        (s(parent, "rank") === "総販売代理店" ? s(parent, "code") : ZEROTH_CODE);
     }
   } else if (parentChanged) {
     parentName = "";
@@ -1172,7 +1181,7 @@ const createSchema = z.object({
 /**
  * 電話やFAXで届いた申込を、本部が手で登録する。
  *
- * 代理店コードは組織の英字＋コード区分＋枝番で自動採番する（申込フォーム経由と同じ決まり）。
+ * 代理店コードは「組織の英字＋4桁の通し番号」で自動採番する（申込フォーム経由と同じ決まり）。
  * 登録した時点では「未稼働」。内容を確かめてから稼働中に切り替える運用は変えない。
  */
 export async function createAgencyAction(
@@ -1275,15 +1284,20 @@ export async function createAgencyAction(
   });
   if (!room.ok) return { error: room.error };
 
+  /*
+   * 手動登録は上位の組織をそのまま引き継ぐ（英字＋4桁で採番）。
+   * 新しい組織を作るときは、代理店の詳細画面から自社コードを設定する。
+   */
+  const orgCode = orgOf(parent);
   let code: string | null = null;
   try {
-    code = await nextAgencyCode(parentCode, kind);
+    code = await nextAgencyCode(orgCode);
   } catch (e) {
     return failed("代理店コードを採番できませんでした。", e);
   }
   if (!code) {
     return {
-      error: `${orgPrefixOf(parentCode)}${kind} で始まる代理店コードが99番まで埋まっています。採番の決まりを見直す必要があるため、開発担当にご連絡ください。`,
+      error: `${orgCode} で始まる代理店コードが9999番まで埋まっています。採番の決まりを見直す必要があるため、開発担当にご連絡ください。`,
     };
   }
 
@@ -1296,11 +1310,15 @@ export async function createAgencyAction(
         rank,
         channel,
         code_kind: kind,
-        branch_no: Number(code.slice(-2)) || null,
+        // 列を足す SQL を流す前でも登録できるようにする（lib/intake.ts の説明を参照）
+        ...((await hasOrgCodeColumn()) ? { org_code: orgCode } : {}),
+        branch_no: Number(code.slice(orgCode.length)) || null,
         parent_code: parentCode,
         parent_name: s(parent, "name"),
-        // 上位にゼロ次が無いときは組織の英字を使う（理由は上と同じ）
-        zeroth_code: s(parent, "zeroth_code") || orgPrefixOf(s(parent, "code")),
+        // 上位にゼロ次が無いときは、実在が確かな総販売代理店を入れる（理由は intake.ts と同じ）
+        zeroth_code:
+          s(parent, "zeroth_code") ||
+          (s(parent, "rank") === "総販売代理店" ? s(parent, "code") : ZEROTH_CODE),
         area_class: orNull(areaClass),
         status: "未稼働",
         email: orNull(t.email),

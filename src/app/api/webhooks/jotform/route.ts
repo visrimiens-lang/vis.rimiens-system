@@ -187,7 +187,19 @@ export async function POST(req: NextRequest) {
       address: pick(data, "住所", "address"),
       shopName: pick(data, "input60", "店舗名", "屋号", "shop"),
       birthday: pick(data, "input19", "生年月日", "birthday"),
-      inviteCode: pick(data, "input48", "inviteCode", "招待コード", "紹介コード", "上位代理店コード"),
+      inviteCode: pick(data, "input48", "招待コード", "紹介コード", "上位代理店コード"),
+      /*
+       * 自社コード（半角大文字アルファベット4文字）。2026-08-20 に4フォームとも
+       * 4文字マスクで統一された。フォームごとに項目名が違うので順に拾う。
+       *   代理店システム登録 … input53「自社代理店コード発行」＝自分の組織になる英字
+       *   取次パートナー登録 … input43「代理店招待コード」    ＝所属する会社の英字
+       *   ライセンス認定登録 … inviteCode「自社コード」       ＝所属する会社の英字
+       * ライセンス認定登録だけ項目名が inviteCode のままだが、
+       * 中身は招待コードではなく所属先の自社コードなので、こちらで拾う。
+       */
+      orgCode:
+        pick(data, "input53", "自社代理店コード", "自社コード", "input43", "代理店招待コード", "inviteCode") ||
+        undefined,
       /*
        * 代理店種別（エリア統括代理店 / 販売代理店 / サロン代理店 / 個人販売代理店）。
        * この1項目でランク・販路種別・上位の決まり方が変わる（intake.ts の kindOf）。

@@ -633,7 +633,7 @@ export async function updateOrderAction(
   const clearStaff = text(formData, "clearStaffCode") === "true";
   if (staff && !/^[A-Za-z0-9-]{1,20}$/.test(staff)) {
     return {
-      error: "担当スタッフのコードは半角の英数字で入力してください（例：RIM0201）。",
+      error: "担当スタッフのコードは半角の英数字で入力してください（例：MENO0001）。",
     };
   }
 

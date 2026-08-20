@@ -28,6 +28,8 @@ export type AgencyDetail = {
   rank: string;
   channel: string;
   codeKind: string;
+  /** 組織の英字（自社代理店コード）。配下の採番に使う。 */
+  orgCode: string;
   parentCode: string;
   parentName: string;
   email: string;
@@ -756,7 +758,7 @@ export function NewChildForm({
             label="コード区分"
             defaultValue="00"
             disabled={pending}
-            hint="採番されるコードの真ん中2桁になります。"
+            hint="コードには出ません。会社・取次パートナー・スタッフの区別に使います。"
           >
             {CODE_KINDS.map((k) => (
               <option key={k.value} value={k.value}>

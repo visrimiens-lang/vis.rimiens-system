@@ -49,44 +49,126 @@ export type IntakeResult =
 /* ═══════════════════════ 代理店コードの採番 ═══════════════════════ */
 
 /**
- * 代理店コードの頭につく、組織を表す英字（RIM / MET など）を取り出す。
- * 上位が RIM0003 でも、配下のコードは RIM01xx のように組織の頭文字から始まる。
+ * 申込フォームに入力されたコードを、照合できる形にそろえる。
+ *
+ * 全角で打たれた「ＭＥＮＯ」や小文字の「meno」がそのまま届くことがある。
+ * 代理店コードの照合は大文字と小文字を区別するので、そのまま使うと
+ * 正しいコードを打ったのに「上位代理店が見つかりません」になってしまう。
+ *
+ * ※ 大文字小文字を無視する検索（ilike）に変えてはいけない。
+ *   ilike は `_` や `%` がワイルドカードとして効くため、
+ *   招待コードに `R_M` と打つだけで別の会社の配下として登録が通ってしまう。
+ *   入口でそろえて、照合は完全一致のままにする。
+ */
+export function normalizeCode(input: string): string {
+  return (input || "")
+    .normalize("NFKC")   // 全角英数字を半角に
+    .replace(/\s+/g, "") // 途中の空白も落とす
+    .toUpperCase();
+}
+
+/**
+ * 組織を表す英字（自社コード）として使える形か確かめる。
+ *
+ * 申込フォーム側は4文字のマスク（例 目のトレーニング株式会社 → MENO）だが、
+ * 先に作った RIM・MET は3文字のまま動いている。
+ * どちらも通るように、英字2〜6文字を受け付ける。
+ */
+export function isOrgCode(code: string): boolean {
+  return /^[A-Z]{2,6}$/.test(code);
+}
+
+/**
+ * 代理店コードの頭につく、組織を表す英字（MENO / RIM など）を取り出す。
+ *
+ * 上位が RIM0003 でも、配下のコードは組織の英字から始まる。
+ * 新しく登録するものは org_code 列を見るので、ここを使うのは
+ * org_code がまだ入っていない古い行を読むときだけ。
  */
 export function orgPrefixOf(code: string): string {
   const m = /^[A-Za-z]+/.exec(code.trim());
-  return m ? m[0].toUpperCase() : code.trim().toUpperCase();
+  return m ? m[0].toUpperCase() : normalizeCode(code);
+}
+
+/**
+ * org_code 列がもう入っているか。
+ *
+ * 列を足す SQL（supabase/migrations/2026-08-20_org_code.sql）を流す前に
+ * この画面が動くことがある。知らない列を指定した書き込みは弾かれるので、
+ * 先に一度だけ確かめて、無ければその列を外して書き込む。
+ * 一度調べたら覚えておく（毎回問い合わせない）。
+ */
+let orgCodeColumn: Promise<boolean> | null = null;
+export function hasOrgCodeColumn(): Promise<boolean> {
+  if (!orgCodeColumn) {
+    orgCodeColumn = select<Row>("agencies?select=org_code&limit=1")
+      .then(() => true)
+      .catch(() => false);
+  }
+  return orgCodeColumn;
+}
+
+/**
+ * その代理店が属する組織の英字を返す。
+ *
+ * org_code 列を先に見て、まだ入っていない古い行だけコードの頭の英字で補う。
+ * 自社コードを決める前から動いている会社（RIM0004 の comvace など）は、
+ * 本部が自社コードを設定するまで RIM のままになる。
+ */
+export function orgOf(agency: Row | null): string {
+  const stored = normalizeCode(s_(agency, "org_code"));
+  if (stored) return stored;
+  return orgPrefixOf(s_(agency, "code"));
 }
 
 /**
  * 次の代理店コードを決める。
  *
- * 形は「組織の英字 + 区分2桁 + 枝番2桁」。実データの並びに合わせている。
- *   RIM + 00 + 06 → RIM0006（Rimiens 組織の会社6社目）
- *   RIM + 01 + 03 → RIM0103（Rimiens 組織の取次パートナー3人目）
- *   MET + 01 + 01 → MET0101
+ * 形は「組織の英字 ＋ 4桁の通し番号」。
+ *   MENO + 0001 → MENO0001（目のトレーニング組織の1人目）
+ *   ASUE + 0002 → ASUE0002
  *
- * 同じ組織・同じ区分の中で、いま使われている最大の枝番の次を返す。
- * 枝番が99を超えたら採番できない（そのときは本部で手当てする）。
+ * 2026-08-20 の打合せで決まった形に合わせている。それまでは
+ * 「組織の英字 ＋ 区分2桁 ＋ 枝番2桁」で、区分ごとに99人までしか採番できなかった。
+ * 統括60社ぶんのスタッフが入ると足りなくなるため、区分をコードから外して
+ * 通し番号を4桁にした。区分（会社・取次パートナー・スタッフ）はコードの
+ * 文字ではなく code_kind 列だけで持つ。
+ *
+ * 数える相手は org_code 列でそろえる。コードの前方一致で数えると、
+ * MET と METO のように英字の長さが違う組織どうしが混ざってしまう。
  *
  * ※ コード自体はどの統括代理店の配下かを表さない。所属は上位代理店コードで持つ。
  */
-export async function nextAgencyCode(
-  parentCode: string,
-  kind: string,
-): Promise<string | null> {
-  const prefix = `${orgPrefixOf(parentCode)}${kind}`;
-  const rows = await select<Row>(
-    `agencies?select=code&code=like.${encodeURIComponent(prefix + "%")}`,
-  );
+export async function nextAgencyCode(orgCode: string): Promise<string | null> {
+  const org = normalizeCode(orgCode);
+  if (!org) return null;
+
+  /*
+   * org_code 列がまだ無いうちに動いても登録が止まらないよう、
+   * 数えられなかったときはコードの前方一致で数え直す
+   * （supabase/migrations/2026-08-20_org_code.sql を流すと上の経路になる）。
+   */
+  let rows: Row[];
+  try {
+    rows = await select<Row>(
+      `agencies?select=code&org_code=eq.${encodeURIComponent(org)}`,
+    );
+  } catch {
+    rows = await select<Row>(
+      `agencies?select=code&code=like.${encodeURIComponent(org + "%")}`,
+    );
+  }
+
   let max = 0;
   for (const r of rows) {
-    const tail = s_(r, "code").slice(prefix.length);
-    const n = Number(tail);
+    const code = s_(r, "code");
+    if (!code.startsWith(org)) continue;
+    const n = Number(code.slice(org.length));
     if (Number.isInteger(n) && n > max) max = n;
   }
   const next = max + 1;
-  if (next > 99) return null;
-  return `${prefix}${String(next).padStart(2, "0")}`;
+  if (next > 9999) return null;
+  return `${org}${String(next).padStart(4, "0")}`;
 }
 
 /* ═══════════════════════ 上位代理店を探す ═══════════════════════ */
@@ -98,16 +180,26 @@ export async function nextAgencyCode(
  * 見つからなければ null（本部で手当てが必要）。
  */
 export async function resolveParent(inviteCode: string): Promise<Row | null> {
-  const c = inviteCode.trim();
+  // 全角・小文字で届いても引けるようにそろえる（normalizeCode の説明を参照）
+  const c = normalizeCode(inviteCode);
   if (!c) return null;
 
-  // まず代理店コードとして探す
+  /*
+   * まず代理店コードとして探す。
+   * 2026-08-20 からは会社の代理店コードが自社コードそのもの（MENO など）に
+   * なるため、ふつうはここで見つかる。
+   */
   const byCode = await selectOne<Row>(
     `agencies?select=*&code=eq.${encodeURIComponent(c)}`,
   );
   if (byCode) return byCode;
 
-  // 次に招待コードとして探す
+  /*
+   * 次に招待コードとして探す。
+   * 自社コードを決める前から動いている会社（RIM0004 の comvace など）は
+   * 代理店コードが数字混じりのままなので、本部が設定した自社コードを
+   * この欄にも入れて引けるようにしている（setOrgCodeAction）。
+   */
   return selectOne<Row>(
     `agencies?select=*&invite_code=eq.${encodeURIComponent(c)}`,
   );
@@ -131,12 +223,24 @@ export async function canRegisterUnder(
       reason: `${s_(parent, "name")} は取次パートナーまたはスタッフのため、配下を登録できません。`,
     };
   }
+
+  /*
+   * 自社のスタッフは、どのランクの会社でも登録できる。枠も使わない。
+   *
+   * ここは下の「取次店の下に代理店は登録できません」より前に置くこと。
+   * 3次代理店（販売代理店・サロン代理店）はランクが「取次店」なので、
+   * 順番が逆だとスタッフの登録が全部はじかれてしまう。
+   * 2026-08-20 の打合せで決まった「3次代理店も自社コードでスタッフを登録する」
+   * （アスペクト → ASUE0001）が、それだと1件も通らない。
+   *
+   * スタッフが売った売上は所属先の会社に付く（resolveAttribution）ので、
+   * 支払いの段が増えるわけではなく、4次以降の禁止にはあたらない。
+   */
+  if (kind === KIND_STAFF) return { ok: true };
+
   if (parentRank === "取次店") {
     return { ok: false, reason: `${s_(parent, "name")} の下に代理店は登録できません。` };
   }
-
-  // スタッフと取次パートナーは枠を使わない
-  if (kind === KIND_STAFF) return { ok: true };
 
   // 特別枠は上限の対象外
   if (parent["special_slot"] === true) return { ok: true };
@@ -240,6 +344,17 @@ export type AgencyApplication = {
   birthday?: string;
   /** 上位代理店を指す文字列（招待コードまたは代理店コード） */
   inviteCode: string;
+  /**
+   * 申込者が自分で決めた組織の英字（自社代理店コード）。半角大文字4文字。
+   *
+   * 2026-08-20 の打合せで決まった項目。申込フォームでは
+   *   ・代理店システム登録 … 「自社代理店コード発行」（input53・必須）
+   *   ・取次パートナー登録 … 「代理店招待コード」（input43・必須）＝所属する会社の自社コード
+   *   ・ライセンス認定登録 … 「自社コード」（inviteCode・必須）＝所属する会社の自社コード
+   * にあたる。会社はこの英字がそのまま代理店コードになり、
+   * スタッフ・取次パートナー・個人販売代理店は「英字＋4桁」で採番される。
+   */
+  orgCode?: string;
   /** 販路種別。会社登録のときに使う */
   channel?: string;
   /**
@@ -335,15 +450,28 @@ export async function registerAgency(app: AgencyApplication): Promise<IntakeResu
   const channel = app.channel || decided.channel;
 
   /*
+   * 「会社そのものの申込」か「会社に属する人の申込」かで、
+   * 上位の探し方もコードの決め方も変わる。
+   *   スタッフ（ライセンス認定登録）と取次パートナー … 会社に属する人
+   *   それ以外                                   … 会社そのもの
+   */
+  const isMember = kind === KIND_STAFF || kind === KIND_REFERRER;
+
+  /*
    * 上位代理店を決める。
    *
    * エリア統括代理店は上位が Rimiens で固定なので、申込フォームに招待コードの欄が無い
    * （JotForm③の仕様どおり）。招待コードを必須にしていたため、
    * これから募集する統括代理店の申込が1件も登録できない状態だった。
+   *
+   * スタッフ登録（ライセンス認定登録）と取次パートナー登録は、2026-08-20 の
+   * 打合せで招待コードの欄をなくし、代わりに所属する会社の自社コードだけを
+   * 入力する形になった。どちらも「その会社を指す文字」なので同じ探し方でよい。
    */
+  const belongsTo = isMember ? app.orgCode || app.inviteCode : app.inviteCode;
   const parent = decided.parentFixed
     ? await agencyByCode(decided.parentFixed)
-    : await resolveParent(app.inviteCode);
+    : await resolveParent(belongsTo);
 
   if (!parent) {
     return {
@@ -351,20 +479,68 @@ export async function registerAgency(app: AgencyApplication): Promise<IntakeResu
       needsReview: true,
       message: decided.parentFixed
         ? `上位となる代理店（${decided.parentFixed}）が見つかりませんでした。本部での確認が必要です。`
-        : `招待コード「${app.inviteCode || "（未入力）"}」に合う上位代理店が見つかりませんでした。本部での確認が必要です。`,
+        : isMember
+          ? `自社コード「${belongsTo || "（未入力）"}」に合う代理店が見つかりませんでした。本部での確認が必要です。`
+          : `招待コード「${app.inviteCode || "（未入力）"}」に合う上位代理店が見つかりませんでした。本部での確認が必要です。`,
     };
   }
 
   const allowed = await canRegisterUnder(parent, kind, channel);
   if (!allowed.ok) return { ok: false, needsReview: true, message: allowed.reason };
 
-  const code = await nextAgencyCode(s_(parent, "code"), kind);
-  if (!code) {
+  /*
+   * 組織の英字（自社コード）を決める。
+   *
+   *   会社の申込          … 申込者が入力した自社代理店コードが、その会社の組織になる
+   *   スタッフ・取次パートナー … 所属する会社の組織を引き継ぐ
+   *
+   * 会社が自社コードを入れずに申し込んだとき（欄を必須にする前の申込や、
+   * 本部の代理入力）は、上位の組織をそのまま引き継いで従来どおり採番する。
+   */
+  const orgCode = isMember
+    ? orgOf(parent)
+    : normalizeCode(app.orgCode || "") || orgOf(parent);
+
+  if (!isOrgCode(orgCode)) {
     return {
       ok: false,
       needsReview: true,
-      message: `${s_(parent, "name")} 配下のコードが上限に達しました。本部で採番してください。`,
+      message:
+        `自社代理店コード「${app.orgCode || "（未入力）"}」は使えません。` +
+        "半角大文字のアルファベット4文字（例 MENO）でご入力ください。",
     };
+  }
+
+  /*
+   * 代理店コードを決める。
+   *
+   *   会社              … 自社コードそのもの（MENO・ASUE）。RIM・MET と同じ形。
+   *   個人販売代理店      … 自社コードを皆で共有するため「英字＋4桁」
+   *   スタッフ・取次パートナー … 所属する会社の「英字＋4桁」
+   */
+  const wantsBareCode = kind === KIND_COMPANY && channel !== "個人販売パートナー";
+  let code: string | null = orgCode;
+
+  if (wantsBareCode) {
+    const taken = await agencyByCode(orgCode);
+    if (taken) {
+      return {
+        ok: false,
+        needsReview: true,
+        message:
+          `自社代理店コード「${orgCode}」は ${s_(taken, "name")} がすでに使っています。` +
+          "別の4文字を決めていただくよう、本部からご連絡してください。",
+      };
+    }
+  } else {
+    code = await nextAgencyCode(orgCode);
+    if (!code) {
+      return {
+        ok: false,
+        needsReview: true,
+        message: `${orgCode} の連番が上限（9999）に達しました。本部で採番してください。`,
+      };
+    }
   }
 
   await insert("agencies", [
@@ -375,19 +551,30 @@ export async function registerAgency(app: AgencyApplication): Promise<IntakeResu
       rank,
       channel,
       code_kind: kind,
-      branch_no: Number(code.slice(-2)),
+      // その代理店が属する組織の英字。採番はこの列で数える。
+      ...((await hasOrgCodeColumn()) ? { org_code: orgCode } : {}),
+      branch_no: Number(code.slice(orgCode.length)) || null,
       parent_code: s_(parent, "code"),
       parent_name: s_(parent, "name"),
       /*
        * ゼロ次（総販売代理店）は、上位に入っていればそれを引き継ぐ。
-       * 入っていないときは上位のコードではなく、組織を表す英字を使う。
-       * 上位のコードをそのまま入れると、たとえば RIM0003 の配下が
-       * ゼロ次＝RIM0003 になり、本来の総販売代理店 RIM に報酬が立たなくなる
-       * （3次が1台売るたびに 77,000 円が計上されない）。
-       * 受注時の判定（resolveAttribution）も組織の英字を使っているので、そこに揃える。
+       *
+       * 入っていないときは、実在することが確かな総販売代理店（RIM）を入れる。
+       * 以前はここでコードの頭の英字を使っていたが、
+       * 2026-08-20 から会社ごとに英字が変わる（comvace なら COMV）ため、
+       * その英字を0次コードにすると実在しない代理店を指してしまい、
+       * 総販売代理店への 77,000 円が計上されないまま処理が正常終了してしまう。
+       * エラーも警告も出ないので、月次の支払いを突き合わせるまで気づけない。
        */
-      zeroth_code: s_(parent, "zeroth_code") || orgPrefixOf(s_(parent, "code")),
-      invite_code: app.inviteCode || null,
+      zeroth_code:
+        s_(parent, "zeroth_code") ||
+        (s_(parent, "rank") === "総販売代理店" ? s_(parent, "code") : ZEROTH_CODE),
+      /*
+       * 会社は自分の自社コードを招待コード欄にも入れておく。
+       * 配下の3次代理店・取次パートナー・スタッフが自社コードで申し込んだとき、
+       * 代理店コードが数字混じりの会社でもここから引けるようにするため。
+       */
+      invite_code: wantsBareCode ? orgCode : normalizeCode(app.inviteCode) || null,
       area_class: app.areaClass || null,
       status: "未稼働",
       email: app.email || null,
@@ -572,8 +759,15 @@ export async function resolveAttribution(
     const seller =
       ref && s_(ref, "code") === out.agencyCode ? ref : await agencyByCode(out.agencyCode);
     if (seller) {
-      // ゼロ次が空なら、コードの頭の英字（組織）で補う
-      out.zerothCode = s_(seller, "zeroth_code") || orgPrefixOf(s_(seller, "code"));
+      /*
+       * ゼロ次が空なら、実在することが確かな総販売代理店（RIM）で補う。
+       * ここでコードの頭の英字を使うと、会社ごとに英字が変わる新しい体系では
+       * 実在しない代理店（COMV など）を指してしまい、
+       * 総販売代理店の 77,000 円が黙って計上されなくなる。
+       */
+      out.zerothCode =
+        s_(seller, "zeroth_code") ||
+        (s_(seller, "rank") === "総販売代理店" ? s_(seller, "code") : ZEROTH_CODE);
       // 自分が2次代理店ならそのまま、下位なら上位をたどる
       out.nijiCode =
         s_(seller, "rank") === "2次代理店" ? s_(seller, "code") : s_(seller, "parent_code");

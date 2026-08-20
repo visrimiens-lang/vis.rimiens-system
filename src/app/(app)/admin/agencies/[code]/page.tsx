@@ -28,6 +28,7 @@ import {
   type AgencyDetail,
   type ParentOption,
 } from "./EditForm";
+import { OrgCodeForm } from "./OrgCodeForm";
 import { QrPanel } from "./QrPanel";
 
 /**
@@ -321,6 +322,7 @@ export default async function AgencyDetailPage({
     rank: s(row, "rank"),
     channel: s(row, "channel"),
     codeKind: s(row, "code_kind"),
+    orgCode: s(row, "org_code"),
     parentCode: s(row, "parent_code"),
     parentName: s(row, "parent_name"),
     email: s(row, "email"),
@@ -784,6 +786,12 @@ export default async function AgencyDetailPage({
           </Table>
         )}
       </Card>
+
+      {agency.codeKind === "00" ? (
+        <Card title="自社代理店コード（配下の採番に使う英字）">
+          <OrgCodeForm code={agency.code} name={agency.name} current={agency.orgCode} />
+        </Card>
+      ) : null}
 
       <Card title="内容を直す">
         <EditForm agency={agency} parents={parents} />

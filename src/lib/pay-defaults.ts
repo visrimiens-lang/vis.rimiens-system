@@ -22,8 +22,18 @@ import type { Agency } from "./types";
  * 数字はここにだけ置く。ばらばらに持つと画面ごとに額が食い違う。
  */
 export function defaultPayUnit(
-  a: Pick<Agency, "rank" | "channel">,
+  a: Pick<Agency, "rank" | "channel" | "codeKind">,
 ): number | null {
+  /*
+   * スタッフ（区分02）には支払額が無い。
+   *
+   * スタッフが売った売上は所属先の会社に付くので（src/lib/intake.ts の
+   * resolveAttribution）、本人あてに報酬が立つことはない。
+   * ここで額を返すと、組織図と代理店管理の支払額の欄に
+   * 「1台あたり5万円」と出てしまい、払う約束をしたように見えてしまう。
+   */
+  if (a.codeKind === "02") return null;
+
   // 3次（販売代理店）は「ランク＝取次店 ＋ 販路種別＝販売代理店」で表す（lib/orders.ts と同じ）
   const rank = a.rank === "取次店" && a.channel === "販売代理店" ? "販売代理店" : a.rank;
   if (rank === "販売代理店") return 50000;
@@ -33,7 +43,7 @@ export function defaultPayUnit(
 
 /** 実際に使われる1台あたりの支払額（税抜き）。個別の額が最優先。 */
 export function effectivePayUnit(
-  a: Pick<Agency, "rank" | "channel" | "payUnit">,
+  a: Pick<Agency, "rank" | "channel" | "codeKind" | "payUnit">,
 ): number | null {
   return a.payUnit ?? defaultPayUnit(a);
 }

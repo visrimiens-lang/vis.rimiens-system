@@ -25,6 +25,7 @@ function toAgency(r: Row): Agency {
     rank: (s_(r, "rank") || "") as AgencyRank | "",
     channel: (s_(r, "channel") || "") as SalesChannel | "",
     codeKind: (s_(r, "code_kind") || "") as CodeKind,
+    orgCode: s_(r, "org_code"),
     parentCode: s_(r, "parent_code"),
     parentName: s_(r, "parent_name"),
     area: s_(r, "area_class") || s_(r, "area"),

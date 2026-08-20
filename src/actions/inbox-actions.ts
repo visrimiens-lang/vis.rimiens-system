@@ -146,7 +146,11 @@ export async function reprocessInboxAction(
         address: pick("住所", "address"),
         shopName: pick("input60", "店舗名", "屋号", "shop"),
         birthday: pick("input19", "生年月日", "birthday"),
-        inviteCode: pick("input48", "inviteCode", "招待コード", "紹介コード", "上位代理店コード"),
+        inviteCode: pick("input48", "招待コード", "紹介コード", "上位代理店コード"),
+        // 自社コード。項目名はフォームごとに違う（webhooks/jotform/route.ts の説明を参照）
+        orgCode:
+          pick("input53", "自社代理店コード", "自社コード", "input43", "代理店招待コード", "inviteCode") ||
+          undefined,
         agencyType: pick("代理店種別", "agencyType", "q4_radio2", "radio2") || undefined,
         channel: pick("販路種別", "channel") || undefined,
         areaClass: pick("エリア", "area") || undefined,

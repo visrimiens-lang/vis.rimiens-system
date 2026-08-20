@@ -20,6 +20,12 @@ export type Agency = {
   rank: AgencyRank | "";
   channel: SalesChannel | "";
   codeKind: CodeKind;
+  /**
+   * この代理店が属する組織の英字（自社代理店コード）。半角大文字4文字。
+   * 会社は自分自身、配下の取次パートナー・スタッフはその会社の英字が入る。
+   * 配下のコードはこの英字＋4桁で採番される。
+   */
+  orgCode: string;
   parentCode: string;
   parentName: string;
   area: string;

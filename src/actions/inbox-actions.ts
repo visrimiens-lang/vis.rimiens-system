@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { currentViewer } from "@/lib/auth";
-import { selectOne } from "@/lib/db";
+import { audit, selectOne, update } from "@/lib/db";
 import {
   markProcessed,
   notifyLicenseTest,
@@ -54,6 +54,55 @@ function kindOfForm(payload: Record<string, unknown>): string {
   if (/事前登録|体験/.test(title)) return "pre-register";
   if (/代理店/.test(title)) return "agency";
   return "";
+}
+
+/**
+ * 受信箱の1件を「対応済み」にする。
+ *
+ * 決済（UTAGE）から届いたものは、送り元から届き直すことがないので
+ * 取り込み直せない。実際、過去の受注を手で復元した7件が
+ * 「報酬が1件も計上されませんでした」のまま消せずに残っていた。
+ * 本部が中身を確認して手当てを終えたら、ここで片付けられるようにする。
+ *
+ * 消すのではなく「対応済み」にするだけなので、届いた内容は残る。
+ */
+export async function dismissInboxAction(
+  _prev: InboxActionState,
+  formData: FormData,
+): Promise<InboxActionState> {
+  const viewer = await currentViewer();
+  if (!viewer || viewer.kind !== "hq") {
+    return { error: "権限がありません。本部のアカウントでログインし直してからお試しください。" };
+  }
+
+  const id = String(formData.get("id") ?? "").trim();
+  if (!/^\d+$/.test(id)) return { error: "対象が指定されていません。" };
+
+  const note = String(formData.get("note") ?? "").trim().slice(0, 200);
+  if (!note) {
+    return { error: "どう手当てしたかを書いてください。あとから経緯を追えるようにするためです。" };
+  }
+
+  const row = await selectOne<Row>(`inbox?select=id,source,error&id=eq.${encodeURIComponent(id)}`);
+  if (!row) return { error: "対象が見つかりませんでした。画面を読み込み直してください。" };
+
+  try {
+    await update(`inbox?id=eq.${encodeURIComponent(id)}`, {
+      processed: true,
+      error: `【対応済み】${note}`,
+    });
+    await audit(viewer.label || "本部", "受信箱を対応済みにする", { type: "inbox", key: id }, {
+      送り元: s_(row, "source"),
+      もとの内容: s_(row, "error") || "（なし）",
+      手当ての内容: note,
+    });
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "保存できませんでした。" };
+  }
+
+  revalidatePath("/admin/inbox");
+  revalidatePath("/dashboard");
+  return { ok: "対応済みにしました。" };
 }
 
 export async function reprocessInboxAction(

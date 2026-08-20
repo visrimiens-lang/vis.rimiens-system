@@ -21,6 +21,7 @@ import {
   jpMonthLabel,
   yen,
 } from "@/components/ui";
+import { AttributionForm } from "./AttributionForm";
 import { ShipForm, type ReferrerOption } from "./ShipForm";
 
 export const metadata = { title: "受注の詳細（本部）｜VIS 代理店ポータル" };
@@ -552,6 +553,12 @@ export default async function AdminOrderDetailPage({
             <StatusBadge status={matchStatus} />
           </Field>
         </Fields>
+
+        {/*
+          決済のときに ?ref= が届かなかった受注は、売上の付け先が空のまま入る。
+          あとから本部が入れ直して報酬を立て直せるようにする。
+        */}
+        <AttributionForm id={String(order["id"])} current={str(order, "agency_code")} />
         <p className="border-t border-ink-800 px-5 py-3.5 text-xs leading-relaxed text-ink-400">
           照合の状態は、お客様の電話番号とトスアップ（事前のご紹介）を突き合わせた結果です。
           「照合済」は紹介元が1件に決まったもの、「要確認」は候補が複数あったもの、

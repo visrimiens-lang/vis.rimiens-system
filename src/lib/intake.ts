@@ -743,9 +743,17 @@ export type OrderApplication = {
   stripePaymentId?: string;
 };
 
-/** 代理店マスタを1件引く。 */
+/**
+ * 代理店マスタを1件引く。
+ *
+ * 受注の ?ref= は、QRを読んだ端末やお客様の手入力を経由して届くので、
+ * 小文字や全角が混じることがある（asue0001・ＡＳＵＥ０００１）。
+ * 招待コードと同じようにそろえてから引く。
+ * ここでそろえないと、コードは正しいのに代理店が見つからず、
+ * 売上の付け先が空のまま受注だけが積み上がる。
+ */
 async function agencyByCode(code: string): Promise<Row | null> {
-  const c = (code || "").trim();
+  const c = normalizeCode(code);
   if (!c) return null;
   return selectOne<Row>(`agencies?select=*&code=eq.${encodeURIComponent(c)}`);
 }
@@ -785,9 +793,10 @@ export async function resolveAttribution(
   rawAgencyCode: string,
   rawStaffCode = "",
 ): Promise<SalesAttribution> {
+  // 届いたコードを、代理店マスタと同じ表記にそろえる（agencyByCode の説明を参照）
   const out: SalesAttribution = {
-    agencyCode: (rawAgencyCode || "").trim(),
-    staffCode: (rawStaffCode || "").trim(),
+    agencyCode: normalizeCode(rawAgencyCode),
+    staffCode: normalizeCode(rawStaffCode),
     referrerCode: "",
     nijiCode: "",
     zerothCode: "",

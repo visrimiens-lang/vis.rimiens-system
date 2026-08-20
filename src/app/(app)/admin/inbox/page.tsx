@@ -14,6 +14,7 @@ import {
   cn,
 } from "@/components/ui";
 import { AutoRefresh } from "@/components/AutoRefresh";
+import { DismissButton } from "./DismissButton";
 import { ReprocessButton } from "./ReprocessButton";
 
 /**
@@ -288,6 +289,15 @@ export default async function AdminInboxPage({
                       */}
                       {!ok && s_(r, "source") === "jotform" ? (
                         <ReprocessButton id={s_(r, "id")} />
+                      ) : null}
+                      {/*
+                        決済から届いたものは送り元から届き直さないので取り込み直せない。
+                        本部が中身を見て手当てを終えたら、ここで片付ける。
+                      */}
+                      {!ok ? (
+                        <div className="mt-2">
+                          <DismissButton id={s_(r, "id")} />
+                        </div>
                       ) : null}
                     </Td>
                     <Td>

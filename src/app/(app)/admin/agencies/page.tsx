@@ -164,10 +164,20 @@ export default async function AdminAgenciesPage({
   let loadError: string | null = null;
   // 代理店マスタが読めても、発行状況の問い合わせだけが失敗することがある。
   // 片方の失敗でもう片方を巻き添えにしないよう、それぞれの結果を別々に見る。
-  const [agencyResult, passwordResult] = await Promise.allSettled([
+  const [agencyResult, passwordResult, inboxResult] = await Promise.allSettled([
     listAllAgencies(),
     loadCodesWithPassword(),
+    /*
+     * 受信箱に取り込めずに残っている件数。
+     * 本部が最初に開くのはこの画面なので、ここに出さないと
+     * 申込や受注の取りこぼしが誰の目にも触れないまま溜まる。
+     * 実際、決済7件が「報酬が1件も計上されませんでした」のまま
+     * 3週間気づかれずに残っていた。
+     */
+    select<Record<string, unknown>>("inbox?select=id&processed=eq.false"),
   ]);
+  const stuckInbox =
+    inboxResult.status === "fulfilled" ? inboxResult.value.length : 0;
   if (agencyResult.status === "fulfilled") {
     all = agencyResult.value;
   } else {
@@ -188,6 +198,21 @@ export default async function AdminAgenciesPage({
       description="代理店マスタに登録されている取引先の一覧です。コード区分ごとにタブが分かれています。見出しを押すと、その列で並び替えられます。"
     />
   );
+
+  /* 取り込めずに残っている申込・受注があれば、まっさきに知らせる。 */
+  const inboxNotice =
+    stuckInbox > 0 ? (
+      <Notice tone="warn">
+        受信箱に取り込めていないものが <strong className="text-ink-100">{stuckInbox} 件</strong>{" "}
+        あります。申込や受注が登録されないまま残っている可能性があります。
+        <Link
+          href="/admin/inbox"
+          className="ml-2 underline underline-offset-4 hover:text-ink-50"
+        >
+          受信箱を開く
+        </Link>
+      </Notice>
+    ) : null;
 
   if (loadError) {
     return (
@@ -332,6 +357,7 @@ export default async function AdminAgenciesPage({
   return (
     <div className="space-y-6">
       {header}
+      {inboxNotice}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile

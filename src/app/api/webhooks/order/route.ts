@@ -217,7 +217,18 @@ export async function POST(req: NextRequest) {
       amount: toAmount(pick(data, "amount", "price", "金額", "total")),
       quantity: Number(pick(data, "quantity", "数量")) || 1,
       paymentMethod: pick(data, "payment_method", "決済方法") || "Stripe",
-      agencyCode: pick(data, "ref", "partner", "代理店コード", "agency_code") || undefined,
+      /*
+       * 誰の紹介かを表すコード。名前がぴったり一致するものだけを拾う。
+       *
+       * 一部一致で拾う pick を使うと "prefecture"（都道府県）が "ref" を
+       * 含むため先に当たり、代理店コードの欄に「東京都」が入ってしまう。
+       * UTAGE は都道府県を prefecture という名前で送るので、
+       * ref を送り始めた瞬間に、キーの並び次第で毎回この取り違えが起きる。
+       * 報酬の付け先を決める値なので、担当者コードと同じく完全一致で拾う。
+       */
+      agencyCode:
+        pickExact(data, "ref", "ref_code", "partner", "代理店コード", "agency_code") ||
+        undefined,
       staffCode: staff.code || undefined,
       stripePaymentId: paymentId ?? undefined,
     });

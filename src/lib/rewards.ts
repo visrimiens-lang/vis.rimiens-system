@@ -233,8 +233,31 @@ export async function accrueRewards(
     // 列がまだ無い。既定の単価で進む。
   }
 
+  /*
+   * 同じ段の報酬を二度立てない。
+   *
+   * 報酬は「売った代理店・その2次・ゼロ次・紹介した取次」の4つの置き場から
+   * 拾うが、これはコードが違えば別々の相手だという前提で組んである。
+   * ところが総販売代理店の下に総販売代理店がいると（RIM の下の RIM0001）、
+   * 売った本人と ゼロ次 が別のコードのまま同じランクになり、
+   * 1台で 77,000 円が2行立って合計 154,000 円（売価の82%）になる。
+   *
+   * 紹介報酬は販売報酬とは別の段なので、ここでは同じ扱いにしない。
+   */
+  const seenRank = new Set<string>();
+
+  /*
+   * 「売った本人 → その2次 → ゼロ次 → 紹介した取次」の順に見る。
+   * 上の重複よけで片方を落とすとき、どちらが残るかを決めておくため。
+   * データベースから返る順番は決まっていないので、ここで並べ直す。
+   */
+  const order4 = unique;
+  const ordered = [...agencies].sort(
+    (x, y) => order4.indexOf(s_(x, "code")) - order4.indexOf(s_(y, "code")),
+  );
+
   const rows: Record<string, unknown>[] = [];
-  for (const a of agencies) {
+  for (const a of ordered) {
     /*
      * 3次（販売代理店）は「ランク＝取次店 ＋ 販路種別＝販売代理店」で表す。
      * 販路種別だけを見て上書きすると、
@@ -253,13 +276,20 @@ export async function accrueRewards(
     const unit = override > 0 ? override : (basis.unit[col] ?? 0);
     if (unit <= 0) continue;
 
+    const kind = s_(a, "code") === s_(order, "referrer_code") ? "紹介報酬" : "販売報酬";
+    // 同じ段（ランク）の販売報酬がもう立っていれば飛ばす（上の説明を参照）
+    if (kind === "販売報酬") {
+      if (seenRank.has(rank)) continue;
+      seenRank.add(rank);
+    }
+
     rows.push({
       order_id: order["id"],
       agency_code: s_(a, "code"),
       agency_rank: rank,
       month,
       amount: unit * quantity,
-      kind: s_(a, "code") === s_(order, "referrer_code") ? "紹介報酬" : "販売報酬",
+      kind,
       status: "未確定",
     });
   }

@@ -35,20 +35,54 @@ export function StopButton({
   const state = frozen ? unfreezeState : freezeState;
 
   if (frozen) {
+    // 再開にも理由が必須（unfreezeQrAction が空の理由を弾く）。止めるときと同じく入力欄を出す。
+    if (!open) {
+      return (
+        <div>
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-200 transition hover:border-ink-600 hover:bg-ink-900"
+          >
+            利用を再開する
+          </button>
+          {state.ok ? <p className="mt-1 text-xs text-good-100">{state.ok}</p> : null}
+        </div>
+      );
+    }
     return (
-      <form action={unfreeze}>
+      <form action={unfreeze} className="w-56 space-y-1.5">
         <input type="hidden" name="code" value={code} />
-        <button
-          type="submit"
-          disabled={unfreezing}
-          className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-200 transition hover:border-ink-600 hover:bg-ink-900 disabled:opacity-50"
-        >
-          {unfreezing ? "戻しています…" : "利用を再開する"}
-        </button>
+        <label className="block text-xs text-ink-400">
+          再開する理由（記録に残ります）
+        </label>
+        <input
+          name="reason"
+          required
+          maxLength={200}
+          placeholder={`例）${name} さんの状況を確認できたため`}
+          className="w-full rounded-lg border border-ink-700 bg-ink-950 px-2 py-1.5 text-xs text-ink-100 placeholder:text-ink-500 focus:border-ink-600"
+        />
+        <div className="flex gap-1.5">
+          <button
+            type="submit"
+            disabled={unfreezing}
+            className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-200 transition hover:border-ink-600 hover:bg-ink-900 disabled:opacity-50"
+          >
+            {unfreezing ? "戻しています…" : "再開する"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-900"
+          >
+            やめる
+          </button>
+        </div>
         {state.error ? (
-          <p className="mt-1 break-words text-xs text-bad-100">{state.error}</p>
+          <p className="break-words text-xs text-bad-100">{state.error}</p>
         ) : null}
-        {state.ok ? <p className="mt-1 text-xs text-good-100">{state.ok}</p> : null}
+        {state.ok ? <p className="text-xs text-good-100">{state.ok}</p> : null}
       </form>
     );
   }

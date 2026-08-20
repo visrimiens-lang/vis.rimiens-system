@@ -208,6 +208,8 @@ export async function POST(req: NextRequest) {
        * pick は頭の「q番号_」を1つ落とすので、正規化後は q4_radio2 になる。
        */
       agencyType: pick(data, "代理店種別", "agencyType", "q4_radio2", "radio2") || undefined,
+      // 登録区分（法人 / 個人）。実フォームでは q3_q3_radio1 → 正規化して q3_radio1
+      entityType: pick(data, "登録区分", "q3_radio1", "radio1") || undefined,
       channel: pick(data, "販路種別", "channel") || undefined,
       areaClass: pick(data, "エリア", "area") || undefined,
       bank: {

@@ -152,6 +152,7 @@ export async function reprocessInboxAction(
           pick("input53", "自社代理店コード", "自社コード", "input43", "代理店招待コード", "inviteCode") ||
           undefined,
         agencyType: pick("代理店種別", "agencyType", "q4_radio2", "radio2") || undefined,
+        entityType: pick("登録区分", "q3_radio1", "radio1") || undefined,
         channel: pick("販路種別", "channel") || undefined,
         areaClass: pick("エリア", "area") || undefined,
         bank: {

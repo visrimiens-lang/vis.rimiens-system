@@ -355,6 +355,16 @@ export type AgencyApplication = {
    * スタッフ・取次パートナー・個人販売代理店は「英字＋4桁」で採番される。
    */
   orgCode?: string;
+  /**
+   * 申込フォームの「登録区分」（法人 / 個人）。
+   *
+   * 個人の方は自社コードを一人ずつ決められないので、全員が同じ英字（KVIS）を
+   * 入力する決まりになっている。同じ英字を皆で使うため、
+   * 会社のように英字だけのコードにはせず「KVIS＋4桁」で採番する。
+   * 代理店種別の選び間違いで英字だけのコードを取ってしまわないよう、
+   * ここでも個人かどうかを見る。
+   */
+  entityType?: string;
   /** 販路種別。会社登録のときに使う */
   channel?: string;
   /**
@@ -515,10 +525,16 @@ export async function registerAgency(app: AgencyApplication): Promise<IntakeResu
    * 代理店コードを決める。
    *
    *   会社              … 自社コードそのもの（MENO・ASUE）。RIM・MET と同じ形。
-   *   個人販売代理店      … 自社コードを皆で共有するため「英字＋4桁」
+   *   個人販売代理店      … 自社コードを皆で共有するため「英字＋4桁」（KVIS0001）
    *   スタッフ・取次パートナー … 所属する会社の「英字＋4桁」
+   *
+   * 個人かどうかは、販路種別と登録区分の両方で見る。
+   * 個人の方が代理店種別を選び間違えても、皆で使う英字（KVIS）を
+   * 1人目が英字だけのコードとして取ってしまわないようにするため。
    */
-  const wantsBareCode = kind === KIND_COMPANY && channel !== "個人販売パートナー";
+  const isIndividual =
+    channel === "個人販売パートナー" || (app.entityType || "").includes("個人");
+  const wantsBareCode = kind === KIND_COMPANY && !isIndividual;
   let code: string | null = orgCode;
 
   if (wantsBareCode) {

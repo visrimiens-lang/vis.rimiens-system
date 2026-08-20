@@ -68,6 +68,36 @@ export function normalizeCode(input: string): string {
 }
 
 /**
+ * 統括エリア区分を、代理店マスタが受け付ける言葉にそろえる。
+ *
+ * 申込フォームの選択肢は末尾に「エリア」が付いている（関東エリア）が、
+ * 代理店マスタが受け付けるのは付かない形（関東）だけ。
+ * そのまま保存すると入力チェックに弾かれ、登録そのものが失敗する。
+ * エリア統括代理店の申込でしか出ない欄なので、
+ * 直さないと 60 社の統括が1社も登録できない。
+ *
+ * 知らない言葉が来たときは空にする。エリアが空でも登録は通り、
+ * 本部があとから選び直せる。ここで登録ごと止めるほうが困る。
+ */
+const AREA_CLASSES = [
+  "本部",
+  "北海道+東北",
+  "関東",
+  "中部",
+  "関西+近畿",
+  "中国+四国",
+  "九州+沖縄",
+];
+
+export function normalizeArea(input: string): string {
+  const raw = (input || "").normalize("NFKC").trim();
+  if (!raw) return "";
+  // 「関東エリア」→「関東」。全角の＋も半角にそろえる
+  const body = raw.replace(/エリア$/, "").replace(/＋/g, "+").trim();
+  return AREA_CLASSES.includes(body) ? body : "";
+}
+
+/**
  * 組織を表す英字（自社コード）として使える形か確かめる。
  *
  * 申込フォーム側は4文字のマスク（例 目のトレーニング株式会社 → MENO）だが、
@@ -144,20 +174,17 @@ export async function nextAgencyCode(orgCode: string): Promise<string | null> {
   if (!org) return null;
 
   /*
-   * org_code 列がまだ無いうちに動いても登録が止まらないよう、
-   * 数えられなかったときはコードの前方一致で数え直す
-   * （supabase/migrations/2026-08-20_org_code.sql を流すと上の経路になる）。
+   * 数え方は、書き込み側（org_code を入れるかどうか）と必ずそろえる。
+   *
+   * 別々に判定すると、列を足した直後に
+   * 「書き込みでは org_code を省くのに、数えるときは org_code で数える」
+   * というずれが起きる。数えた側からは前の行が見えないので同じコードを
+   * もう一度出してしまい、コードの重複で登録が落ちる。
+   * 列がまだ無いときは、コードの前方一致で数える。
    */
-  let rows: Row[];
-  try {
-    rows = await select<Row>(
-      `agencies?select=code&org_code=eq.${encodeURIComponent(org)}`,
-    );
-  } catch {
-    rows = await select<Row>(
-      `agencies?select=code&code=like.${encodeURIComponent(org + "%")}`,
-    );
-  }
+  const rows = (await hasOrgCodeColumn())
+    ? await select<Row>(`agencies?select=code&org_code=eq.${encodeURIComponent(org)}`)
+    : await select<Row>(`agencies?select=code&code=like.${encodeURIComponent(org + "%")}`);
 
   let max = 0;
   for (const r of rows) {
@@ -200,8 +227,17 @@ export async function resolveParent(inviteCode: string): Promise<Row | null> {
    * 代理店コードが数字混じりのままなので、本部が設定した自社コードを
    * この欄にも入れて引けるようにしている（setOrgCodeAction）。
    */
+  /*
+   * 会社に限って、古い順に1件だけ引く。
+   *
+   * 絞り込みと並び順を付けないと、同じ招待コードを持つ行が複数あったとき
+   * どれが返るか決まらない。実際 invite_code=RIM の行は7件あり、
+   * 何も指定しないと会社の RIM ではなく取次パートナーの RIM0102 が返っていた。
+   * 上位を取り違えると、その配下の売上と報酬がまるごと別の相手に付く。
+   */
   return selectOne<Row>(
-    `agencies?select=*&invite_code=eq.${encodeURIComponent(c)}`,
+    `agencies?select=*&invite_code=eq.${encodeURIComponent(c)}` +
+      `&code_kind=eq.${KIND_COMPANY}&order=id.asc`,
   );
 }
 
@@ -590,8 +626,17 @@ export async function registerAgency(app: AgencyApplication): Promise<IntakeResu
        * 配下の3次代理店・取次パートナー・スタッフが自社コードで申し込んだとき、
        * 代理店コードが数字混じりの会社でもここから引けるようにするため。
        */
-      invite_code: wantsBareCode ? orgCode : normalizeCode(app.inviteCode) || null,
-      area_class: app.areaClass || null,
+      /*
+       * 招待コード欄は「この代理店が配る文字」として使う。
+       *
+       * ここに「自分が入る時に使った上位の文字」を入れてはいけない。
+       * 上位を探すとき（resolveParent）はこの列を完全一致で引くので、
+       * 同じ文字を持つ行が複数できると、会社ではなく配下の個人や
+       * 取次パートナーが上位として選ばれてしまう。
+       * 誰の配下かは parent_code 列で持っているので、ここには残さない。
+       */
+      invite_code: wantsBareCode ? orgCode : null,
+      area_class: normalizeArea(app.areaClass || "") || null,
       status: "未稼働",
       email: app.email || null,
       phone: app.phone || null,

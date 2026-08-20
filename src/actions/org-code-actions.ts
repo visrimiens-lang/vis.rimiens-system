@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { currentViewer } from "@/lib/auth";
 import { audit, select, selectOne, update } from "@/lib/db";
-import { isOrgCode, normalizeCode } from "@/lib/intake";
+import { hasOrgCodeColumn, isOrgCode, normalizeCode } from "@/lib/intake";
 
 /**
  * 会社に「自社代理店コード」（組織の英字）を設定する。
@@ -57,6 +57,18 @@ export async function setOrgCodeAction(
     return {
       error:
         `「${orgCode}」は使えません。半角大文字のアルファベット4文字（例 MENO）でご入力ください。`,
+    };
+  }
+
+  /*
+   * 列を足す SQL（supabase/migrations/2026-08-20_org_code.sql）を流す前だと、
+   * 保存が英語のデータベースエラーで落ちる。何をすればよいか分かるように先に止める。
+   */
+  if (!(await hasOrgCodeColumn())) {
+    return {
+      error:
+        "自社代理店コードを保存する準備がまだ済んでいません。" +
+        "supabase/migrations/2026-08-20_org_code.sql を Supabase の SQL Editor で実行してから、もう一度お試しください。",
     };
   }
 

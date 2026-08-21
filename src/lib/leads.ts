@@ -102,16 +102,24 @@ export function summarizeLeads(leads: Lead[]): LeadSummary {
  */
 export async function listLeads(
   codes: string[],
-  opts: { month?: string } = {},
+  opts: { month?: string; all?: boolean } = {},
 ): Promise<Lead[]> {
   const targets = [...new Set(codes.map((c) => c.trim()).filter(Boolean))];
-  if (targets.length === 0) return [];
+  /*
+   * all を付けると紹介元で絞らず全件返す。本部の一覧に使う。
+   * kintone のトスアップ台帳（App14）を止めると、本部が
+   * 「誰がどのお客様を紹介したか」を見る手段が無くなるため。
+   * 代理店側からは絶対に呼ばない（画面側で本部かどうかを見てから渡す）。
+   */
+  if (!opts.all && targets.length === 0) return [];
 
   const rows = await select<Row>(
-    `leads?select=*&referrer_code=in.${inList(targets)}&order=tossed_at.desc&limit=${LEAD_LIMIT}`,
+    opts.all
+      ? `leads?select=*&order=tossed_at.desc&limit=${LEAD_LIMIT}`
+      : `leads?select=*&referrer_code=in.${inList(targets)}&order=tossed_at.desc&limit=${LEAD_LIMIT}`,
   );
 
-  const allowed = new Set(targets);
+  const allowed = new Set(opts.all ? rows.map((r) => String(r["referrer_code"] ?? "")) : targets);
   const leads = rows
     .map(toLead)
     .filter((l) => allowed.has(l.referrerCode))

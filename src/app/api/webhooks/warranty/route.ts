@@ -66,7 +66,17 @@ function pick(data: Record<string, unknown>, ...names: string[]): string {
 }
 
 export async function POST(req: NextRequest) {
-  const secret = process.env.WEBHOOK_TOKEN ?? "";
+  /*
+   * 保証登録は、お客様のスマホで動く LINE のページ（LIFF）から呼ばれる。
+   * そのページに埋めた合言葉は、開いた人なら誰でも読める。
+   *
+   * 受注を作る口（/api/webhooks/order）と同じ合言葉を配ると、
+   * それを読み取った第三者が受注をいくらでも作れてしまい、
+   * 報酬の水増しや顧客台帳の汚染につながる。
+   * そこで保証登録には専用の合言葉（WARRANTY_TOKEN）を用意し、
+   * 設定が無いうちは従来どおり WEBHOOK_TOKEN でも通す。
+   */
+  const secret = process.env.WARRANTY_TOKEN || process.env.WEBHOOK_TOKEN || "";
   const given = req.nextUrl.searchParams.get("token") ?? "";
   if (!secret || !sameSecret(given, secret)) {
     return NextResponse.json({ ok: false, error: "認証に失敗しました。" }, { status: 401 });

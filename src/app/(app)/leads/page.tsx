@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
-import { findAgencyByCode, listDescendants } from "@/lib/agencies";
+import { findAgencyByCode, listAllAgencies, listDescendants } from "@/lib/agencies";
 import { currentMonth, listOrders, recentMonths, scopeCodes } from "@/lib/orders";
 import {
   LEAD_LIMIT,
@@ -91,7 +91,14 @@ export default async function LeadsPage({
 }) {
   const viewer = await currentViewer();
   if (!viewer) redirect("/login");
-  if (viewer.kind !== "agency") redirect("/admin/agencies");
+  /*
+   * 本部もこの画面を開ける。
+   *
+   * kintone のトスアップ台帳（App14）を止めると、本部が
+   * 「誰がどのお客様を紹介したか」を見る手段が無くなるため。
+   * 本部のときは紹介元で絞らず全件を出す（下の listLeads の all）。
+   */
+  const isHq = viewer.kind === "hq";
 
   const params: SearchParams = await searchParams;
   const thisMonth = currentMonth();
@@ -112,23 +119,29 @@ export default async function LeadsPage({
   let error: string | null = null;
 
   try {
-    self = await findAgencyByCode(viewer.code);
-    if (!self) {
-      error = `代理店一覧にあなたのコード（${viewer.code}）が見つかりませんでした。本部にお問い合わせください。`;
+    if (isHq) {
+      // 本部は全件。紹介元の名前を出せるよう、代理店マスタも読み込む
+      members = await listAllAgencies();
+      allLeads = await listLeads([], { all: true });
     } else {
-      const descendants = await listDescendants(self.code);
-      members = [self, ...descendants];
-      const codes = scopeCodes(self, descendants);
-      allLeads = await listLeads(codes);
+      self = await findAgencyByCode(viewer.code);
+      if (!self) {
+        error = `代理店一覧にあなたのコード（${viewer.code}）が見つかりませんでした。本部にお問い合わせください。`;
+      } else {
+        const descendants = await listDescendants(self.code);
+        members = [self, ...descendants];
+        const codes = scopeCodes(self, descendants);
+        allLeads = await listLeads(codes);
 
-      // 成約したトスアップに受注番号が入っていても、その受注が自分の担当から
-      // 外れていれば顧客一覧では開けない。開けるものだけリンクにする。
-      if (allLeads.some((l) => l.orderNo)) {
-        try {
-          const { orders } = await listOrders(codes);
-          openableOrders = new Set(orders.map((o) => o.recordId));
-        } catch {
-          // 受注が読めなくてもトスアップの一覧は出す（リンクだけ出さない）
+        // 成約したトスアップに受注番号が入っていても、その受注が自分の担当から
+        // 外れていれば顧客一覧では開けない。開けるものだけリンクにする。
+        if (allLeads.some((l) => l.orderNo)) {
+          try {
+            const { orders } = await listOrders(codes);
+            openableOrders = new Set(orders.map((o) => o.recordId));
+          } catch {
+            // 受注が読めなくてもトスアップの一覧は出す（リンクだけ出さない）
+          }
         }
       }
     }

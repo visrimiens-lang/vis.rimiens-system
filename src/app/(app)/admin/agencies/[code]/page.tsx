@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import { select, selectOne, val } from "@/lib/db";
 import { listAllAgencies, slotLimitsOf } from "@/lib/agencies";
-import { agencyTypeOf, codeTermOf, isOrgStyleCode } from "@/lib/labels";
+import { agencyTypeOf, belongsToOrg, codeTermOf, isOrgStyleCode } from "@/lib/labels";
 import { areaUsage, breakdownSlots, slotModelOf } from "@/lib/slots";
 import type { Agency } from "@/lib/types";
 import type { QrSource } from "@/lib/qr";
@@ -404,11 +404,14 @@ export default async function AgencyDetailPage({
   );
 
   /*
-   * この人が属している会社の代理店コード（英字4文字）。
-   * 会社そのもの（SASA・METO）には出さない。自分がその会社だから。
+   * スタッフ・取次パートナーが属している会社の代理店コード。
+   * 個人販売代理店は自分自身が代理店なので出さない（KVIS0002 が代理店コード）。
    */
-  const orgCodeOf = (a: { code: string; orgCode: string; parentCode: string }): string =>
-    isOrgStyleCode(a.code) ? "" : a.orgCode || (isOrgStyleCode(a.parentCode) ? a.parentCode : "");
+  const orgCodeOf = (a: {
+    codeKind: string;
+    orgCode: string;
+    parentCode: string;
+  }): string => (belongsToOrg(a.codeKind) ? a.orgCode || a.parentCode : "");
 
   const canHaveChildren =
     !["01", "02"].includes(agency.codeKind) && agency.rank !== "取次店";
@@ -417,7 +420,7 @@ export default async function AgencyDetailPage({
     <div className="space-y-6">
       <PageHeader
         title={title}
-        description={`${codeTermOf(agency.code)} ${agency.code}${
+        description={`${codeTermOf(agency.codeKind)} ${agency.code}${
           orgCodeOf(agency) ? `・代理店コード ${orgCodeOf(agency)}` : ""
         }・${agencyTypeOf(agency.rank, agency.channel, agency.codeKind)}`}
         actions={backLink}
@@ -498,10 +501,10 @@ export default async function AgencyDetailPage({
 
       <Card title="基本情報">
         <InfoGrid>
-          <Info label={codeTermOf(agency.code)}>
+          <Info label={codeTermOf(agency.codeKind)}>
             <span className="tabnum">{agency.code}</span>
           </Info>
-          {/* 会社そのものでないコードは、どの会社の下の番号かを併せて出す */}
+          {/* スタッフ・取次パートナーは、どの会社の下の番号かを併せて出す */}
           {orgCodeOf(agency) ? (
             <Info label="代理店コード">
               <span className="tabnum">{orgCodeOf(agency)}</span>

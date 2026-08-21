@@ -48,12 +48,7 @@ import {
   FilterText,
   SortableTh,
 } from "@/components/SortableTh";
-import {
-  agencyTypeOf,
-  codeKindLabel,
-  isOrgStyleCode,
-  statusTone,
-} from "@/lib/labels";
+import { agencyTypeOf, belongsToOrg, codeKindLabel, statusTone } from "@/lib/labels";
 import { SlotRequestButton } from "./SlotRequestButton";
 import { PayUnitCell } from "@/components/PayUnitCell";
 import { defaultPayUnit } from "@/lib/pay-defaults";
@@ -476,16 +471,17 @@ export default async function OrganizationPage({
                   {contactRows.map((a) => (
                     <tr key={a.code || a.recordId}>
                       {/*
-                        コードの呼び方は形で決まる。英字だけ（SASA）は会社そのもの、
-                        数字が付く（SASA0001・KVIS0002）は会社の下に採番した番号。
-                        1つの欄にまとめると、SASA0001 が代理店のコードに見えてしまう。
+                        スタッフ・取次パートナーは、会社の下に採番された人。
+                        「スタッフコード SASA0001 ／ 代理店コード SASA」と分けて出す。
+                        個人販売代理店は自分自身が代理店なので、分けない
+                        （KVIS0002 が、その方の代理店コードそのもの）。
                       */}
                       <Td numeric>
-                        {isOrgStyleCode(a.code)
-                          ? a.code
-                          : a.orgCode || a.parentCode || "—"}
+                        {belongsToOrg(a.codeKind)
+                          ? a.orgCode || a.parentCode || "—"
+                          : a.code || "—"}
                       </Td>
-                      <Td numeric>{isOrgStyleCode(a.code) ? "—" : a.code || "—"}</Td>
+                      <Td numeric>{belongsToOrg(a.codeKind) ? a.code || "—" : "—"}</Td>
                       <Td>
                         <div className="text-ink-100">{a.name || "（名称未登録）"}</div>
                         {a.representative && a.representative !== a.name ? (

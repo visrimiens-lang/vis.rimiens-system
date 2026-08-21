@@ -19,8 +19,8 @@ import {
 import {
   AGENCY_TYPES,
   agencyTypeOf,
+  belongsToOrg,
   channelLabel,
-  isOrgStyleCode,
   statusTone,
 } from "@/lib/labels";
 import { PayUnitCell } from "@/components/PayUnitCell";
@@ -638,12 +638,12 @@ export default async function AdminAgenciesPage({
 }
 
 /**
- * その代理店が属している会社の代理店コード（英字4文字）。
- * 会社そのもの（SASA・METO）には出さない。自分がその会社だから。
+ * スタッフ・取次パートナーが属している会社の代理店コード。
+ * 個人販売代理店は自分自身が代理店なので、ここには出てこない
+ * （KVIS0002 が、その方の代理店コードそのもの）。
  */
 function orgCodeOf(a: Agency): string {
-  if (isOrgStyleCode(a.code)) return "";
-  return a.orgCode || (isOrgStyleCode(a.parentCode) ? a.parentCode : "");
+  return belongsToOrg(a.codeKind) ? a.orgCode || a.parentCode : "";
 }
 
 /* ---------- 表（代理店タブ） ---------- */
@@ -710,16 +710,6 @@ function AgencyTable({
                 ) : (
                   "—"
                 )}
-                {/*
-                  個人販売代理店（KVIS0002）は区分こそ会社だが、
-                  KVIS の下に採番した番号。1つだけ出すと会社のコードに見えるので、
-                  どの代理店コードの下の番号かを併せて出す。
-                */}
-                {!isOrgStyleCode(a.code) && orgCodeOf(a) ? (
-                  <div className="mt-0.5 text-xs font-normal text-ink-400">
-                    代理店コード {orgCodeOf(a)}
-                  </div>
-                ) : null}
               </Td>
               <Td>
                 <div className="min-w-0">

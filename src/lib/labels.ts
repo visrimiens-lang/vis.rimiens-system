@@ -342,23 +342,38 @@ export function agencyTypeToFields(
 }
 
 /**
- * コードの呼び方は「形」で決まる。
+ * 自分のコードの呼び方は、コード区分で決まる（2026-08-21 確認）。
  *
- *   英字だけ（SASA・METO・RIM）  ＝ 会社そのもの        → 代理店コード
- *   数字が付く（SASA0001・KVIS0002）＝ 会社の下に採番したもの → スタッフコード
+ *   会社（区分00）        → 代理店コード
+ *     ・法人の代理店       … 英字4文字（SASA・METO）
+ *     ・個人販売代理店     … 英数字8桁（KVIS0002）。個人だけ8桁になる
+ *   取次パートナー（01）  → 取次店コード（英数字8桁）
+ *   スタッフ（02）        → スタッフコード（英数字8桁）
  *
- * 個人販売代理店（KVIS0002）は区分こそ会社（00）だが、
- * KVIS の下に採番した番号なので、呼び方はスタッフコードにそろえる。
- * 1つの欄に混ぜると、KVIS0002 が会社のコードに見えてしまう。
+ * 形（数字が付くか）では決められない。個人販売代理店のコードは
+ * スタッフコードと同じ形だが、呼び方は「代理店コード」。
  */
+export function codeTermOf(codeKind: string | null | undefined): string {
+  if (codeKind === "02") return "スタッフコード";
+  if (codeKind === "01") return "取次店コード";
+  return "代理店コード";
+}
+
+/**
+ * 所属している会社の代理店コードを、自分のコードとは別に出すべき相手か。
+ *
+ * スタッフと取次パートナーは、会社の下に採番された人なので
+ * 「スタッフコード SASA0001 ／ 代理店コード SASA」と分けて出す。
+ * 個人販売代理店は自分自身が代理店なので、分けない。
+ */
+export function belongsToOrg(codeKind: string | null | undefined): boolean {
+  return codeKind === "01" || codeKind === "02";
+}
+
+/** 英字だけのコード（会社そのもの）か。自社コードの設定欄を出すかの判定に使う。 */
 export function isOrgStyleCode(code: string | null | undefined): boolean {
   const c = (code || "").trim();
   return c.length > 0 && !/\d/.test(c);
-}
-
-/** その代理店の自分のコードを何と呼ぶか。 */
-export function codeTermOf(code: string | null | undefined): string {
-  return isOrgStyleCode(code) ? "代理店コード" : "スタッフコード";
 }
 
 /**

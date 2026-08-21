@@ -255,9 +255,10 @@ export function StatusPanel({ agency }: { agency: AgencyDetail }) {
   const stopping = next === "停止・解約";
 
   /*
-   * 申込フォームから届いたばかりの代理店は、まず「承認する」を押すだけで済むようにする。
-   * これまでは下の選ぶ欄から「稼働中」を選び直す必要があり、
-   * 承認の操作だと気づかれないまま置かれることがあった。
+   * 承認フローは廃止したので、いま申込フォームから届くものは「稼働中」で入る。
+   * ここが出るのは、廃止より前に届いて未稼働のまま残っているものだけ。
+   * 下の選ぶ欄から「稼働中」を選び直す必要があると気づかれないまま
+   * 置かれることがあったため、ひと押しで済むボタンを残してある。
    */
   const awaitingApproval = agency.status === "未稼働";
 
@@ -276,15 +277,15 @@ export function StatusPanel({ agency }: { agency: AgencyDetail }) {
           <input type="hidden" name="id" value={agency.id} />
           <input type="hidden" name="status" value="稼働中" />
           <p className="text-sm text-ink-200">
-            この代理店は<strong className="text-ink-50">本部の承認待ち</strong>です。
-            内容を確かめたら、下のボタンで承認してください。
+            この代理店は<strong className="text-ink-50">まだ稼働中になっていません</strong>。
+            内容を確かめたら、下のボタンで稼働中にしてください。
           </p>
           <p className="mt-1 text-xs text-ink-400">
-            承認すると稼働中になり、登録されているメールアドレスあてに
-            ログインのご案内が自動で送られます（メール未登録のときは送られません）。
+            稼働中にすると、登録されているメールアドレスあてにログインのご案内が
+            自動で送られます（メール未登録のときは送られません）。
           </p>
           <button type="submit" disabled={pending} className={`${primaryBtn} mt-3`}>
-            {pending ? "承認しています…" : "この代理店を承認する"}
+            {pending ? "変更しています…" : "この代理店を稼働中にする"}
           </button>
         </form>
       ) : null}

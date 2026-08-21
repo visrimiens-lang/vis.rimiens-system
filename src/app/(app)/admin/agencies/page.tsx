@@ -202,11 +202,11 @@ export default async function AdminAgenciesPage({
   );
 
   /*
-   * 本部の承認を待っている代理店。
+   * まだ稼働中になっていない代理店。
    *
-   * 申込フォームから届いたものは「未稼働」で入る。本部が稼働中にするのが承認だが、
-   * 一覧に何も出ないため、届いていることに気づけなかった。
-   * 増枠申請と同じように、まっさきに知らせる。
+   * 承認フローは廃止したので、いま申込フォームから届くものは「稼働中」で入る。
+   * ここに出るのは、廃止より前に届いて未稼働のまま残っているものだけ。
+   * 放っておくと本人はログインもQRも受け取れないため、まっさきに知らせる。
    */
   const waitingApproval = all.filter(
     (a) => a.status === "未稼働" && a.registeredVia && a.registeredVia !== "手動登録",
@@ -216,17 +216,20 @@ export default async function AdminAgenciesPage({
   const approvalNotice =
     waitingApproval.length > 0 ? (
       <Notice tone="warn">
-        申込フォームから届いて{" "}
-        <strong className="text-ink-100">本部の承認を待っている代理店が {waitingApproval.length} 件</strong>{" "}
+        申込フォームから届いたまま{" "}
+        <strong className="text-ink-100">
+          稼働中になっていない代理店が {waitingApproval.length} 件
+        </strong>{" "}
         あります（
         {waitingApproval.slice(0, 3).map((a) => a.name || a.code).join("・")}
         {waitingApproval.length > 3 ? " ほか" : ""}）。
-        代理店コードを押して内容を確かめ、「承認する」を押してください。
+        このままではログインのご案内が届きません。代理店コードを押して内容を確かめ、
+        「稼働中にする」を押してください。
         <Link
           href={buildListHref(BASE, params, { status: "未稼働", tab: "" })}
           className="ml-2 underline underline-offset-4 hover:text-ink-50"
         >
-          承認待ちだけを見る
+          未稼働だけを見る
         </Link>
       </Notice>
     ) : null;
@@ -341,7 +344,7 @@ export default async function AdminAgenciesPage({
     pw: "",
   });
 
-  /* --- よく使う絞り込み（毎日の承認待ち探しを1押しにする） --- */
+  /* --- よく使う絞り込み（未稼働・パスワード未発行を1押しで探せるように） --- */
   const quickFilters: { key: string; label: string; href: string; active: boolean }[] = [
     {
       key: "idle",
@@ -988,7 +991,7 @@ function emptyDescription(tab: Tab, filtered: boolean): string {
     return "条件を変えてお試しください。キーワードは法人名・代理店コード・代表者名・メールアドレス・電話番号の一部で探せます。「よく使う絞り込み」を押している場合は、もう一度押すと解除できます。別のタブに入っている可能性もあるので、タブの数字もご確認ください。";
   }
   if (tab === "agency") {
-    return "代理店の申込が承認され、代理店マスタにコード区分 00 で登録されると、ここに自動で表示されます。";
+    return "申込フォームから届いてコード区分 00 で登録されると、ここに自動で表示されます。";
   }
   if (tab === "partner") {
     return "取次パートナー（コード区分 01）は、代理店が発行した紹介用QRから申し込まれると、ここに自動で表示されます。枠は消費しません。";

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { currentViewer } from "@/lib/auth";
+import { resendGuideMailAction } from "./agency-actions";
 import { audit, selectOne, update } from "@/lib/db";
 import {
   QR2_APPLIED,
@@ -201,15 +202,50 @@ export async function issueQrAction(
     return failed(`${QR_LABEL[kind]}を発行できませんでした。`, e);
   }
 
+  /*
+   * 発行したら、そのままご案内をお送りする。
+   *
+   * 登録した時点で送る案内には、まだ発行していないQRは載らない。
+   * 本部が発行したあとに「案内メールを送り直す」を押し忘れると、
+   * 相手はQRを受け取れないまま待つことになる。
+   * 発行＝渡せる状態になった瞬間なので、ここで自動的に届ける。
+   */
+  const mailed = await resendGuideMail(code);
+
   refresh(code);
+  const base =
+    kind === "qr2"
+      ? `${name} のご契約のご案内（QR2）を発行しました。`
+      : `${name} の体験のご案内（QR1）を発行しました。`;
   return {
-    ok:
-      kind === "qr2"
-        ? `${name} のご契約のご案内（QR2）を発行しました。QRと URL をお渡しください。`
-        : `${name} の体験のご案内（QR1）を発行しました。QRと URL をお渡しください。`,
+    ok: base + mailed,
     url,
     at: Date.now(),
   };
+}
+
+/**
+ * 発行したQRを載せた案内メールを送り直す。
+ *
+ * 送れても送れなくても発行そのものは成立させ、結果を言葉で返す。
+ * メールアドレスが未登録のときは、その旨を本部に伝えて手渡しに回してもらう。
+ */
+async function resendGuideMail(code: string): Promise<string> {
+  try {
+    const r = await resendGuideMailAction({}, formDataOf({ code }));
+    if (r.ok) return "あわせて、ご案内のメールをお送りしました。";
+    if (r.error) return `QRと URL をお渡しください。（${r.error}）`;
+  } catch {
+    // メールの失敗で発行を取り消さない
+  }
+  return "QRと URL をお渡しください。";
+}
+
+/** サーバーアクションに渡す形を作る小さな道具。 */
+function formDataOf(values: Record<string, string>): FormData {
+  const fd = new FormData();
+  for (const [k, v] of Object.entries(values)) fd.set(k, v);
+  return fd;
 }
 
 /* ═══════════════════ QR2 の承認・見送り ═══════════════════ */

@@ -522,15 +522,28 @@ export async function registerAgency(app: AgencyApplication): Promise<IntakeResu
    * 入力する形になった。どちらも「その会社を指す文字」なので同じ探し方でよい。
    */
   const belongsTo = isMember ? app.orgCode || app.inviteCode : app.inviteCode;
-  const parent = decided.parentFixed
-    ? await agencyByCode(decided.parentFixed)
+
+  /*
+   * エリア統括代理店は上位が総販売代理店（RIM）で固定という決まりだが、
+   * 入力された招待コードを黙って捨ててはいけない。
+   *
+   * 実際、招待コードに「AAAA」と打った申込がそのまま RIM の配下として
+   * 登録されたことがあった。打ち間違いに誰も気づけないまま、
+   * 別の系統に代理店が1社ぶら下がることになる。
+   *
+   * 入っていれば必ずその会社を探し、見つからなければ登録せず本部に知らせる。
+   * 空のときだけ、決まりどおり RIM を上位にする。
+   */
+  const wantsFixed = Boolean(decided.parentFixed) && !normalizeCode(app.inviteCode);
+  const parent = wantsFixed
+    ? await agencyByCode(decided.parentFixed as string)
     : await resolveParent(belongsTo);
 
   if (!parent) {
     return {
       ok: false,
       needsReview: true,
-      message: decided.parentFixed
+      message: wantsFixed
         ? `上位となる代理店（${decided.parentFixed}）が見つかりませんでした。本部での確認が必要です。`
         : isMember
           ? `自社コード「${belongsTo || "（未入力）"}」に合う代理店が見つかりませんでした。本部での確認が必要です。`

@@ -677,9 +677,9 @@ function AgencyTable({
     <Table>
       <thead>
         <tr>
-          {th("code", "コード")}
+          {th("code", "代理店コード")}
           {th("name", "法人名")}
-          {th("rank", "ランク")}
+          {th("rank", "代理店種別")}
           {th("channel", "販路種別")}
           {th("area", "エリア")}
           {th("parent", "上位代理店")}

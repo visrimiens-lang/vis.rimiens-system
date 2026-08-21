@@ -42,7 +42,7 @@ export function StopButton({
           <button
             type="button"
             onClick={() => setOpen(true)}
-            className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-200 transition hover:border-ink-600 hover:bg-ink-900"
+            className="whitespace-nowrap rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-200 transition hover:border-ink-600 hover:bg-ink-900"
           >
             利用を再開する
           </button>
@@ -67,14 +67,14 @@ export function StopButton({
           <button
             type="submit"
             disabled={unfreezing}
-            className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-200 transition hover:border-ink-600 hover:bg-ink-900 disabled:opacity-50"
+            className="whitespace-nowrap rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-200 transition hover:border-ink-600 hover:bg-ink-900 disabled:opacity-50"
           >
             {unfreezing ? "戻しています…" : "再開する"}
           </button>
           <button
             type="button"
             onClick={() => setOpen(false)}
-            className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-900"
+            className="whitespace-nowrap rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-900"
           >
             やめる
           </button>
@@ -92,7 +92,7 @@ export function StopButton({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="rounded-lg border border-bad-400/40 px-3 py-1.5 text-xs text-bad-100 transition hover:border-bad-400/70 hover:bg-bad-500/10"
+        className="whitespace-nowrap rounded-lg border border-bad-400/40 px-3 py-1.5 text-xs text-bad-100 transition hover:border-bad-400/70 hover:bg-bad-500/10"
       >
         QRを止める
       </button>
@@ -116,14 +116,14 @@ export function StopButton({
         <button
           type="submit"
           disabled={freezing}
-          className="rounded-lg border border-bad-400/40 px-3 py-1.5 text-xs text-bad-100 transition hover:bg-bad-500/10 disabled:opacity-50"
+          className="whitespace-nowrap rounded-lg border border-bad-400/40 px-3 py-1.5 text-xs text-bad-100 transition hover:bg-bad-500/10 disabled:opacity-50"
         >
           {freezing ? "止めています…" : "止める"}
         </button>
         <button
           type="button"
           onClick={() => setOpen(false)}
-          className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-900"
+          className="whitespace-nowrap rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-900"
         >
           やめる
         </button>

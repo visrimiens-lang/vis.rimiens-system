@@ -878,7 +878,9 @@ function PeopleTable({
                     frozen={qrFrozen(a)}
                   />
                 ) : (
-                  <span className="text-xs text-ink-500">QRが未発行です</span>
+                  <span className="whitespace-nowrap text-xs text-ink-500">
+                    QRが未発行です
+                  </span>
                 )}
               </Td>
             ) : null}

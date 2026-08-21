@@ -117,7 +117,13 @@ export type QrAgency = {
 /** 研修に合格している状態の呼び名。 */
 export const TRAINING_PASSED = "合格";
 
-/** QR2 発行申請の状態。 */
+/**
+ * QR2 のお渡しの状態。
+ *
+ * 2026-08-21 に申請・承認の運用はやめた（登録した時点でお渡しする）。
+ * 「未申請」「申請中」はそれ以前に登録された行に残っているだけで、
+ * 新しく書き込むことはない。「差戻し」は QR の停止に使い続けている。
+ */
 export const QR2_UNAPPLIED = "未申請";
 export const QR2_APPLIED = "申請中";
 export const QR2_APPROVED = "承認済";

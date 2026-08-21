@@ -5,10 +5,8 @@ import { currentViewer } from "@/lib/auth";
 import { resendGuideMailAction } from "./agency-actions";
 import { audit, selectOne, update } from "@/lib/db";
 import {
-  QR2_APPLIED,
   QR2_APPROVED,
   QR2_REJECTED,
-  QR2_UNAPPLIED,
   QR_LABEL,
   buildQrUrl,
   qr1Blocker,
@@ -248,171 +246,6 @@ function formDataOf(values: Record<string, string>): FormData {
   return fd;
 }
 
-/* ═══════════════════ QR2 の承認・見送り ═══════════════════ */
-
-/**
- * QR2 の発行を本部が承認する。承認しただけでは発行されない（続けて発行を押す）。
- *
- * 2026-08-21 に、研修の合否は QR2 の条件から外れた。
- * いまこの操作が要るのは、「発行を見送る」で差戻しにした相手を戻すときだけ。
- * 止めるのは、取次パートナー・停止中・停止解約・すでに承認済みのときだけ。
- */
-export async function approveQr2Action(
-  _prev: QrActionState,
-  formData: FormData,
-): Promise<QrActionState> {
-  const denied = await denyIfNotHq();
-  if (denied) return { error: denied };
-
-  const code = readCode(formData);
-  if (!code) return { error: BAD_CODE };
-
-  let name = code;
-  /** 承認する前の状態。お知らせの文面を変えるために覚えておく。 */
-  let before = QR2_UNAPPLIED;
-  try {
-    const agency = await loadAgency(code);
-    if (!agency) return { error: NOT_FOUND };
-    name = agency.name || code;
-
-    if (agency.codeKind === "01") {
-      return {
-        error:
-          "取次パートナーには個別のQRを発行しません。共通の公式LINEとご紹介フォームをご案内してください。",
-      };
-    }
-    // 停止中の承認は、記録の残らない解除になってしまう
-    const frozen = frozenBlocker(agency, name, "あらためて承認してください。");
-    if (frozen) return { error: frozen };
-
-    if (agency.status === "停止・解約") {
-      return {
-        error:
-          "停止・解約の登録には承認できません。先に稼働状況を確かめて、必要なら戻してください。",
-      };
-    }
-    if (agency.qr2Status === QR2_APPROVED) {
-      return {
-        error: "すでに承認済みです。「QR2を発行」からご案内を発行してください。",
-      };
-    }
-
-    before = agency.qr2Status || QR2_UNAPPLIED;
-
-    await update(`agencies?code=eq.${encodeURIComponent(code)}`, {
-      qr2_status: QR2_APPROVED,
-      qr2_rejected_note: null,
-    });
-    await audit(
-      await actorName(),
-      "QR2発行承認",
-      { type: "agency", key: code },
-      {
-        代理店: name,
-        承認前: before,
-        申請日: agency.qr2RequestedOn,
-      },
-    );
-  } catch (e) {
-    return failed("承認を保存できませんでした。", e);
-  }
-
-  refresh(code);
-  return {
-    ok:
-      before === QR2_APPLIED
-        ? `${name} の申請を承認しました。続けて「QR2を発行」を押すと、ご案内URLを作成します。`
-        : `${name} へのご契約のご案内（QR2）の発行を承認しました。続けて「QR2を発行」を押すと、ご案内URLを作成します。`,
-    at: Date.now(),
-  };
-}
-
-/**
- * QR2 の発行を見送る。理由は必ず残す（相手に伝える文面になる）。
- *
- * 申請が届いているときの差し戻しにも、いったん承認したものの取り消しにも、
- * 理由を書き直したいときにも、同じ操作を使う。
- * 承認を取り消しても、すでにお渡し済みのご案内URLは使えたままなので、
- * その場合はお知らせの文面で必ず注意していただく。
- */
-export async function rejectQr2Action(
-  _prev: QrActionState,
-  formData: FormData,
-): Promise<QrActionState> {
-  const denied = await denyIfNotHq();
-  if (denied) return { error: denied };
-
-  const code = readCode(formData);
-  if (!code) return { error: BAD_CODE };
-
-  const note = text(formData, "note").slice(0, REJECT_NOTE_MAX);
-  if (!note) {
-    return {
-      error: "見送る理由を入力してください。相手にはこの文面がそのまま伝わります。",
-    };
-  }
-
-  let name = code;
-  /** 見送る前の状態。お知らせの文面を変えるために覚えておく。 */
-  let before = QR2_UNAPPLIED;
-  /** すでにご案内URLをお渡し済みかどうか。 */
-  let issued = false;
-  try {
-    const agency = await loadAgency(code);
-    if (!agency) return { error: NOT_FOUND };
-    name = agency.name || code;
-
-    // 停止中に見送りの理由を書き換えると、停止の目印が消えてしまう
-    const frozen = frozenBlocker(
-      agency,
-      name,
-      "あらためて見送りの理由を書いてください。",
-    );
-    if (frozen) return { error: frozen };
-
-    if (agency.qr2Status === QR2_REJECTED && agency.qr2RejectedNote === note) {
-      return {
-        error: "同じ理由がすでに登録されています。文面を変えてから保存してください。",
-      };
-    }
-
-    before = agency.qr2Status || QR2_UNAPPLIED;
-    issued = Boolean(agency.qr2Url);
-
-    await update(`agencies?code=eq.${encodeURIComponent(code)}`, {
-      qr2_status: QR2_REJECTED,
-      qr2_rejected_note: note,
-    });
-    await audit(
-      await actorName(),
-      before === QR2_APPROVED ? "QR2発行承認取消" : "QR2発行見送り",
-      { type: "agency", key: code },
-      {
-        代理店: name,
-        理由: note,
-        見送る前: before,
-        申請日: agency.qr2RequestedOn,
-        発行済み: issued,
-      },
-    );
-  } catch (e) {
-    return failed("見送りを保存できませんでした。", e);
-  }
-
-  refresh(code);
-  const done =
-    before === QR2_APPROVED
-      ? `${name} への発行の承認を取り消しました。`
-      : before === QR2_APPLIED
-        ? `${name} の申請を差し戻しました。`
-        : `${name} への発行を見送りました。`;
-  const next = issued
-    ? "すでにお渡し済みのご案内URLはそのまま使えますので、お客様への案内を止める必要があれば直接ご連絡ください。"
-    : "理由をお伝えのうえ、整いしだい「発行を承認する」から進めてください。";
-
-  return { ok: `${done}${next}`, at: Date.now() };
-}
-
 /* ═══════════════════ QRの停止（コンプライアンス対応） ═══════════════════ */
 
 /**
@@ -542,16 +375,28 @@ export async function unfreezeQrAction(
     if (!isFrozen(agency)) {
       return {
         error:
-          `${name} のQRはいま停止されていません（発行の申請：${agency.qr2Status}）。` +
+          `${name} のQRはいま停止されていません。` +
           "解除の操作は必要ありません。画面を読み込み直してご確認ください。",
       };
     }
 
     const before = frozenReason(agency);
 
+    /*
+     * 解除したら、その場でご案内を出し直す。
+     *
+     * 以前は「未申請」に戻すだけだったので、解除しても相手の手元には
+     * 何も届かず、本部が発行を押し忘れると止まったままだった。
+     * 2026-08-21 に承認の仕組みをやめたので、解除＝また使える状態に戻す。
+     * 取次パートナー（区分01）には個別のQRを出さない決まりなので作らない。
+     */
+    const withQr = agency.codeKind !== "01";
     await update(`agencies?code=eq.${encodeURIComponent(code)}`, {
-      qr2_status: QR2_UNAPPLIED,
+      qr2_status: QR2_APPROVED,
       qr2_rejected_note: null,
+      ...(withQr
+        ? { qr1_url: buildQrUrl("qr1", code), qr2_url: buildQrUrl("qr2", code) }
+        : {}),
     });
     await audit(
       await actorName(),
@@ -561,18 +406,19 @@ export async function unfreezeQrAction(
         代理店: name,
         解除の理由: reason,
         停止したときの理由: before || "（記録なし）",
-        再発行: "必要（止める前のURLは戻していません）",
+        再発行: "解除と同時に出し直しました",
       },
     );
   } catch (e) {
     return failed("停止の解除を保存できませんでした。", e);
   }
 
+  // 解除したら、出し直したご案内をそのままお届けする
+  const mailed = await resendGuideMail(code);
+
   refresh(code);
   return {
-    ok:
-      `${name} のQRの停止を解除しました。止める前のURLは戻していませんので、発行し直してください。` +
-      "体験のご案内（QR1）は「QR1を発行」から、ご契約のご案内（QR2）は「QR2を発行」からお進みください。",
+    ok: `${name} のQRの停止を解除し、ご案内を出し直しました。${mailed}`,
     at: Date.now(),
   };
 }

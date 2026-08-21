@@ -494,8 +494,8 @@ export default async function AgencyDetailPage({
         />
       </div>
 
-      {/* ── 承認にあたる操作を、いちばん手に取りやすい場所に置く ── */}
-      <Card title="稼働状況の切り替え（本部の承認）">
+      {/* ── 稼働状況の切り替え。廃止前に届いた未稼働の分を戻すときに使う ── */}
+      <Card title="稼働状況の切り替え">
         <StatusPanel agency={agency} />
       </Card>
 
@@ -608,7 +608,7 @@ export default async function AgencyDetailPage({
               </span>
             ) : null}
           </Info>
-          {/* ご契約のご案内（QR2）の申請・承認は、下の「QRのご案内」欄にまとめている */}
+          {/* お客様へのご案内（QR）は、下の「QRのご案内」欄にまとめている */}
           <Info label="停止・解約の理由">
             {agency.suspendedReason ? (
               <>
@@ -641,7 +641,7 @@ export default async function AgencyDetailPage({
         </InfoGrid>
       </Card>
 
-      {/* ── お客様にお渡しするご案内（QR）の発行・承認 ── */}
+      {/* ── お客様にお渡しするご案内（QR）の発行と停止 ── */}
       <QrPanel agency={agencyRow} />
 
       <Card title="報酬の振込先">

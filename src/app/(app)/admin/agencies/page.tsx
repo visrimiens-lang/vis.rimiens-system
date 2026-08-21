@@ -533,20 +533,30 @@ export default async function AdminAgenciesPage({
             options={statusOptions}
             allLabel={`すべて（${tabRows.length}）`}
           />
-          <FilterSelect
-            name="rank"
-            label="代理店種別"
-            value={rank}
-            options={rankOptions}
-          />
-          <FilterSelect
-            name="channel"
-            label="販路種別"
-            value={channel}
-            options={channelOptions}
-            width="w-56"
-          />
-          <FilterSelect name="area" label="エリア" value={area} options={areaOptions} />
+          {/*
+            スタッフは全員が「スタッフ」・販路種別もエリアも持たない。
+            選んでも結果が変わらない欄は、このタブでは出さない。
+          */}
+          {tab === "staff" ? null : (
+            <FilterSelect
+              name="rank"
+              label="代理店種別"
+              value={rank}
+              options={rankOptions}
+            />
+          )}
+          {tab === "staff" ? null : (
+            <FilterSelect
+              name="channel"
+              label="販路種別"
+              value={channel}
+              options={channelOptions}
+              width="w-56"
+            />
+          )}
+          {tab === "agency" ? (
+            <FilterSelect name="area" label="エリア" value={area} options={areaOptions} />
+          ) : null}
           <FilterActions clearHref={clearHref} filtered={isFiltered} />
         </FilterBar>
       </Card>

@@ -56,7 +56,7 @@ import { defaultPayUnit } from "@/lib/pay-defaults";
 const BASE = "/organization";
 
 /** 見出しを押して並び替えられる列。 */
-const SORT_COLUMNS = ["code", "name", "rank", "kind", "status", "email", "phone", "parent"];
+const SORT_COLUMNS = ["code", "name", "rank", "status", "email", "phone", "parent"];
 
 /** 既定はコードの若い順（組織図と同じ並び）。 */
 const DEFAULT_SORT: SortState = { column: "", desc: false };
@@ -227,7 +227,6 @@ export default async function OrganizationPage({
     code: (a) => a.code,
     name: (a) => a.name,
     rank: (a) => agencyTypeOf(a.rank, a.channel, a.codeKind),
-    kind: (a) => codeKindLabel(a.codeKind),
     status: (a) => a.status,
     email: (a) => a.email,
     phone: (a) => a.phone,
@@ -430,13 +429,6 @@ export default async function OrganizationPage({
                       params={params}
                     />
                     <SortableTh
-                      column="kind"
-                      label="区分"
-                      sort={sort}
-                      basePath={BASE}
-                      params={params}
-                    />
-                    <SortableTh
                       column="status"
                       label="稼働状況"
                       sort={sort}
@@ -482,7 +474,7 @@ export default async function OrganizationPage({
                           : a.code || "—"}
                       </Td>
                       <Td numeric>{belongsToOrg(a.codeKind) ? a.code || "—" : "—"}</Td>
-                      <Td>
+                      <Td className="whitespace-nowrap">
                         <div className="text-ink-100">{a.name || "（名称未登録）"}</div>
                         {a.representative && a.representative !== a.name ? (
                           <div className="mt-1 text-xs text-ink-400">
@@ -490,16 +482,11 @@ export default async function OrganizationPage({
                           </div>
                         ) : null}
                       </Td>
-                      <Td>
+                      <Td className="whitespace-nowrap">
                         {/* 申込フォームと同じ呼び方で出す（「取次」ではなく「販売代理店」） */}
                         <Badge tone={a.rank === "総販売代理店" ? "gold" : "neutral"}>
                           {agencyTypeOf(a.rank, a.channel, a.codeKind)}
                         </Badge>
-                      </Td>
-                      <Td>
-                        <span className="text-xs text-ink-300">
-                          {codeKindLabel(a.codeKind)}
-                        </span>
                       </Td>
                       <Td>
                         <Badge tone={statusTone(a.status)}>{a.status || "未設定"}</Badge>

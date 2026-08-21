@@ -48,7 +48,7 @@ import {
   FilterText,
   SortableTh,
 } from "@/components/SortableTh";
-import { channelLabel, codeKindLabel, rankShort, statusTone } from "@/lib/labels";
+import { agencyTypeOf, codeKindLabel, statusTone } from "@/lib/labels";
 import { SlotRequestButton } from "./SlotRequestButton";
 import { PayUnitCell } from "@/components/PayUnitCell";
 import { defaultPayUnit } from "@/lib/pay-defaults";
@@ -226,7 +226,7 @@ export default async function OrganizationPage({
   const accessors: Accessors<Agency> = {
     code: (a) => a.code,
     name: (a) => a.name,
-    rank: (a) => rankShort(a.rank, a.codeKind),
+    rank: (a) => agencyTypeOf(a.rank, a.channel, a.codeKind),
     kind: (a) => codeKindLabel(a.codeKind),
     status: (a) => a.status,
     email: (a) => a.email,
@@ -311,7 +311,7 @@ export default async function OrganizationPage({
               const isSelf = agency.code === me.code;
               // 階層と区分が同じ呼び方になる相手（取次パートナー・スタッフ）は、
               // 同じ言葉を2つ並べない。
-              const rankText = rankShort(agency.rank, agency.codeKind);
+              const rankText = agencyTypeOf(agency.rank, agency.channel, agency.codeKind);
               const kindText = codeKindLabel(agency.codeKind);
               return (
                 <li
@@ -414,6 +414,7 @@ export default async function OrganizationPage({
                       basePath={BASE}
                       params={params}
                     />
+                    <Th>スタッフコード</Th>
                     <SortableTh
                       column="name"
                       label="名前"
@@ -423,7 +424,7 @@ export default async function OrganizationPage({
                     />
                     <SortableTh
                       column="rank"
-                      label="階層"
+                      label="代理店種別"
                       sort={sort}
                       basePath={BASE}
                       params={params}
@@ -469,7 +470,15 @@ export default async function OrganizationPage({
                 <tbody>
                   {contactRows.map((a) => (
                     <tr key={a.code || a.recordId}>
-                      <Td numeric>{a.code || "—"}</Td>
+                      {/*
+                        スタッフは「所属している会社の代理店コード」と
+                        「自分のスタッフコード」を分けて出す。
+                        1つの欄にまとめると、SASA0001 が代理店のコードに見えてしまう。
+                      */}
+                      <Td numeric>
+                        {a.codeKind === "02" ? a.parentCode || "—" : a.code || "—"}
+                      </Td>
+                      <Td numeric>{a.codeKind === "02" ? a.code || "—" : "—"}</Td>
                       <Td>
                         <div className="text-ink-100">{a.name || "（名称未登録）"}</div>
                         {a.representative && a.representative !== a.name ? (
@@ -479,14 +488,10 @@ export default async function OrganizationPage({
                         ) : null}
                       </Td>
                       <Td>
+                        {/* 申込フォームと同じ呼び方で出す（「取次」ではなく「販売代理店」） */}
                         <Badge tone={a.rank === "総販売代理店" ? "gold" : "neutral"}>
-                          {rankShort(a.rank, a.codeKind)}
+                          {agencyTypeOf(a.rank, a.channel, a.codeKind)}
                         </Badge>
-                        {a.channel && a.channel !== "未設定" ? (
-                          <div className="mt-1 text-xs text-ink-400">
-                            {channelLabel(a.channel)}
-                          </div>
-                        ) : null}
                       </Td>
                       <Td>
                         <span className="text-xs text-ink-300">

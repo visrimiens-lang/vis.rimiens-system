@@ -9,7 +9,7 @@ import {
 } from "@/lib/agencies";
 import { select } from "@/lib/db";
 import { areaUsage, breakdownSlots, slotModelOf } from "@/lib/slots";
-import { rankShort } from "@/lib/labels";
+import { agencyTypeOf } from "@/lib/labels";
 import {
   parseSort,
   sortRows,
@@ -383,7 +383,7 @@ export default async function AdminRequestsPage({
                       </div>
                     </Td>
                     <Td className="whitespace-nowrap">
-                      {rankShort(a.rank, a.codeKind)}
+                      {agencyTypeOf(a.rank, a.channel, a.codeKind)}
                       {a.specialSlot ? (
                         <span className="ml-1.5 align-middle">
                           <Badge tone="gold">特別枠</Badge>
@@ -483,7 +483,7 @@ export default async function AdminRequestsPage({
               <thead>
                 <tr>
                   <Th>代理店</Th>
-                  <Th>ランク</Th>
+                  <Th>代理店種別</Th>
                   <Th>エリア</Th>
                   <Th>上位代理店</Th>
                   <Th>いちばん埋まっている枠</Th>
@@ -526,7 +526,7 @@ export default async function AdminRequestsPage({
                       </div>
                     </Td>
                     <Td className="whitespace-nowrap">
-                      {rankShort(agency.rank, agency.codeKind)}
+                      {agencyTypeOf(agency.rank, agency.channel, agency.codeKind)}
                     </Td>
                     <Td>{agency.area || "—"}</Td>
                     <Td>{agency.parentName || agency.parentCode || "—"}</Td>

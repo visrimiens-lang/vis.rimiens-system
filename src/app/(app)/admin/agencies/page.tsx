@@ -785,6 +785,13 @@ function PeopleTable({
    * 本人のコードと、所属している会社のコードを別の列にする。
    */
   const codeLabel = isStaff ? "スタッフコード" : "パートナーコード";
+  /*
+   * 全員が同じ値になる列は出さない。
+   * スタッフは全員が「スタッフ」で、支払先にもならない（お支払いは会社ごと）。
+   * ただし、誰かに個別の支払額が入っているときは、隠すと気づけなくなるので出す。
+   */
+  const showKind = new Set(rows.map((a) => agencyTypeOf(a.rank, a.channel, a.codeKind))).size > 1;
+  const showPay = !isStaff || rows.some((a) => a.payUnit !== null && a.payUnit !== undefined);
   const th = (column: string, label: string) => (
     <SortableTh column={column} label={label} sort={sort} basePath={BASE} params={params} />
   );
@@ -796,10 +803,10 @@ function PeopleTable({
           {th("code", codeLabel)}
           {th("parent", "代理店コード")}
           {th("name", "氏名")}
-          {th("rank", "区分")}
+          {showKind ? th("rank", "区分") : null}
           <Th>所属代理店</Th>
           {isStaff ? null : th("channel", "販路種別")}
-          <Th align="right">支払額（1台・税抜）</Th>
+          {showPay ? <Th align="right">支払額（1台・税抜）</Th> : null}
           {th("status", "稼働ステータス")}
           {isStaff ? <Th>QR</Th> : null}
           {isStaff ? <Th>QRを止める</Th> : null}
@@ -831,23 +838,29 @@ function PeopleTable({
               <div className="truncate text-ink-100">{a.name || "（名称未登録）"}</div>
             </Td>
             {/* 申込フォームと同じ呼び方で出す（「2次代理店」「取次店」ではなく） */}
-            <Td className="whitespace-nowrap">{agencyTypeOf(a.rank, a.channel, a.codeKind)}</Td>
+            {showKind ? (
+              <Td className="whitespace-nowrap">
+                {agencyTypeOf(a.rank, a.channel, a.codeKind)}
+              </Td>
+            ) : null}
             <Td>
               <div className="truncate text-ink-200">
                 {a.parentName || a.parentCode || "—"}
               </div>
             </Td>
             {isStaff ? null : <Td>{channelLabel(a.channel)}</Td>}
-            <Td numeric align="right">
-              <PayUnitCell
-                code={a.code}
-                name={a.name || a.code}
-                value={a.payUnit}
-                fallback={defaultPayUnit(a)}
-                note={a.payUnitNote}
-                editable
-              />
-            </Td>
+            {showPay ? (
+              <Td numeric align="right">
+                <PayUnitCell
+                  code={a.code}
+                  name={a.name || a.code}
+                  value={a.payUnit}
+                  fallback={defaultPayUnit(a)}
+                  note={a.payUnitNote}
+                  editable
+                />
+              </Td>
+            ) : null}
             <Td>
               <Status status={a.status} />
             </Td>

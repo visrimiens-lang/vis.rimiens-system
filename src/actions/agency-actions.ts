@@ -12,6 +12,7 @@ import {
   nextAgencyCode,
   orgOf,
 } from "@/lib/intake";
+import { agencyTypeToFields } from "@/lib/labels";
 import { PORTAL_URL, approvalMail, sendMail } from "@/lib/mail";
 import { OFFICIAL_LINE_URL, tossUpUrl } from "@/lib/qr";
 import { areaUsage, breakdownSlots, slotModelOf } from "@/lib/slots";
@@ -477,7 +478,19 @@ export async function updateAgencyAction(
     parentName = "";
   }
 
-  const nextRank = pick(text(formData, "rank"), RANKS, s(current, "rank") || "取次店");
+  /*
+   * 代理店種別（申込フォームと同じ言い方）から、ランクと販路種別を決める。
+   *
+   * 画面では1つの欄にまとめてある。以前は「ランク」と「販路種別」を
+   * 別々に選ばせていたが、ランクの選択肢がデータベースの値そのままで、
+   * 申込フォームにある「エリア統括代理店」が出てこず、
+   * 3次の4種類もすべて「取次店」に見えていた。
+   * 古い画面から rank / channel が直接送られてきたときも受けられるようにしておく。
+   */
+  const typed = agencyTypeToFields(text(formData, "agencyType"));
+  const nextRank = typed
+    ? typed.rank
+    : pick(text(formData, "rank"), RANKS, s(current, "rank") || "取次店");
   const nextKind = pick(text(formData, "codeKind"), CODE_KINDS, "");
 
   /*
@@ -513,7 +526,9 @@ export async function updateAgencyAction(
     name: t.name,
     rep_name: orNull(t.repName),
     rank: nextRank,
-    channel: pick(text(formData, "channel"), CHANNELS, s(current, "channel") || "未設定"),
+    channel: typed
+      ? typed.channel
+      : pick(text(formData, "channel"), CHANNELS, s(current, "channel") || "未設定"),
     code_kind: orNull(nextKind),
     parent_code: orNull(parentCode),
     parent_name: orNull(parentName),
@@ -1245,12 +1260,13 @@ export async function createAgencyAction(
     };
   }
 
-  const rank = pick(
+  const newTyped = agencyTypeToFields(text(formData, "agencyType"));
+  const rank = newTyped ? newTyped.rank : pick(
     text(formData, "rank"),
     RANKS,
     kind === "00" ? "2次代理店" : "取次店",
   );
-  const channel = pick(
+  const channel = newTyped ? newTyped.channel : pick(
     text(formData, "channel"),
     CHANNELS,
     kind === "01" ? "サロン提携パートナー（取次）" : "未設定",

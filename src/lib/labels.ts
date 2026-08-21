@@ -284,3 +284,59 @@ export function codeKindLabel(codeKind: string | null | undefined): string {
 
   return "区分未設定";
 }
+
+/* ------------------------------------------------------------------ *
+ * 代理店種別（申込フォームと同じ言い方）
+ * ------------------------------------------------------------------ */
+
+/**
+ * 申込フォームの「代理店種別」と、データベースの持ち方の対応。
+ *
+ * ■ なぜ要るか
+ *
+ * 本部の画面は「ランク」と「販路種別」を別々の欄で選ばせていた。
+ * ところがランクの選択肢はデータベースの値そのままで、
+ *
+ *   ・申込フォームにある「エリア統括代理店」が出てこない（「2次代理店」と出る）
+ *   ・3次の4種類がすべて「取次店」に見え、どれを選べばよいか分からない
+ *
+ * という状態だった。フォームで選んだ種別が画面に出てこないため、
+ * 本部が手で登録するときに元の申込と違う組み合わせを選んでしまう。
+ *
+ * 申込フォームの4つの選択肢をそのまま1つの欄にして、
+ * 保存するときにランクと販路種別へ分けて入れる。
+ * データベースの持ち方（rank と channel）は変えていない。
+ */
+export const AGENCY_TYPES: {
+  value: string;
+  rank: AgencyRank;
+  channel: SalesChannel;
+}[] = [
+  { value: "エリア統括代理店", rank: "2次代理店", channel: "販売代理店" },
+  { value: "販売代理店", rank: "取次店", channel: "販売代理店" },
+  { value: "サロン代理店", rank: "取次店", channel: "サロン代理店" },
+  { value: "個人販売代理店", rank: "取次店", channel: "個人販売パートナー" },
+  { value: "取次パートナー（紹介のみ）", rank: "取次店", channel: "サロン提携パートナー（取次）" },
+  { value: "総販売代理店", rank: "総販売代理店", channel: "未設定" },
+];
+
+/** ランクと販路種別から、申込フォームと同じ呼び方を返す。 */
+export function agencyTypeOf(
+  rank: string | null | undefined,
+  channel: string | null | undefined,
+  codeKind?: string | null,
+): string {
+  if (codeKind === "02") return "スタッフ";
+  const hit = AGENCY_TYPES.find((t) => t.rank === rank && t.channel === channel);
+  if (hit) return hit.value;
+  // 販路種別が入っていない古いデータは、ランクの呼び方だけで返す
+  return rankLabel(rank, codeKind);
+}
+
+/** 申込フォームの呼び方から、保存する形（ランクと販路種別）を引く。 */
+export function agencyTypeToFields(
+  value: string,
+): { rank: AgencyRank; channel: SalesChannel } | null {
+  const hit = AGENCY_TYPES.find((t) => t.value === value);
+  return hit ? { rank: hit.rank, channel: hit.channel } : null;
+}

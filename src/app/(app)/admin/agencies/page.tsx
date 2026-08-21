@@ -16,7 +16,7 @@ import {
   type SearchParams,
   type SortState,
 } from "@/lib/list-params";
-import { channelLabel, rankLabel, rankShort, statusTone } from "@/lib/labels";
+import { agencyTypeOf, channelLabel, rankLabel, statusTone } from "@/lib/labels";
 import { PayUnitCell } from "@/components/PayUnitCell";
 import { defaultPayUnit } from "@/lib/pay-defaults";
 import type { Agency } from "@/lib/types";
@@ -680,7 +680,8 @@ function AgencyTable({
                   ) : null}
                 </div>
               </Td>
-              <Td className="whitespace-nowrap">{rankShort(a.rank, a.codeKind)}</Td>
+              {/* 申込フォームと同じ呼び方で出す（「2次代理店」「取次店」ではなく） */}
+              <Td className="whitespace-nowrap">{agencyTypeOf(a.rank, a.channel, a.codeKind)}</Td>
               <Td>{channelLabel(a.channel)}</Td>
               <Td>{a.area || "—"}</Td>
               <Td>
@@ -790,7 +791,8 @@ function PeopleTable({
             <Td>
               <div className="truncate text-ink-100">{a.name || "（名称未登録）"}</div>
             </Td>
-            <Td className="whitespace-nowrap">{rankShort(a.rank, a.codeKind)}</Td>
+            {/* 申込フォームと同じ呼び方で出す（「2次代理店」「取次店」ではなく） */}
+              <Td className="whitespace-nowrap">{agencyTypeOf(a.rank, a.channel, a.codeKind)}</Td>
             <Td>{channelLabel(a.channel)}</Td>
             <Td>
               <Parent agency={a} />

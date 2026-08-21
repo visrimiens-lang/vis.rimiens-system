@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import { select, selectOne, val } from "@/lib/db";
 import { listAllAgencies, slotLimitsOf } from "@/lib/agencies";
+import { agencyTypeOf } from "@/lib/labels";
 import { areaUsage, breakdownSlots, slotModelOf } from "@/lib/slots";
 import type { Agency } from "@/lib/types";
 import type { QrSource } from "@/lib/qr";
@@ -493,8 +494,13 @@ export default async function AgencyDetailPage({
           </Info>
           <Info label="法人名・お名前">{orDash(agency.name)}</Info>
           <Info label="代表者名">{orDash(agency.repName)}</Info>
-          <Info label="ランク">{orDash(agency.rank)}</Info>
-          <Info label="販路種別">{orDash(agency.channel)}</Info>
+          {/* 申込フォームと同じ呼び方で出す。データベースの持ち方（ランク＋販路種別）も併記する */}
+          <Info label="代理店種別">
+            {agencyTypeOf(agency.rank, agency.channel, agency.codeKind)}
+            <div className="mt-0.5 text-xs text-ink-400">
+              {orDash(agency.rank)} ／ {orDash(agency.channel)}
+            </div>
+          </Info>
           <Info label="コード区分">
             {agency.codeKind ? `${agency.codeKind}・${kindLabel(agency.codeKind)}` : orDash("")}
           </Info>

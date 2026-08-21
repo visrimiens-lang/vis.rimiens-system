@@ -9,6 +9,7 @@ import {
   type AgencyActionState,
 } from "@/actions/agency-actions";
 import { Notice, StatusBadge } from "@/components/ui";
+import { AGENCY_TYPES, agencyTypeOf } from "@/lib/labels";
 
 /**
  * 本部が代理店の内容を書き換える画面。
@@ -439,29 +440,15 @@ export function EditForm({
           />
 
           <SelectField
-            name="rank"
-            label="ランク"
-            defaultValue={agency.rank || "取次店"}
+            name="agencyType"
+            label="代理店種別"
+            defaultValue={agencyTypeOf(agency.rank, agency.channel)}
             disabled={pending}
-            hint="報酬の単価がランクごとに変わります。"
+            hint="申込フォームの選択肢と同じです。報酬の単価と、上位の枠の数え方がこれで決まります。"
           >
-            {RANKS.map((v) => (
-              <option key={v} value={v}>
-                {v}
-              </option>
-            ))}
-          </SelectField>
-
-          <SelectField
-            name="channel"
-            label="販路種別"
-            defaultValue={agency.channel || "未設定"}
-            disabled={pending}
-            hint="上位の枠は、この販路種別ごとに数えます。"
-          >
-            {CHANNELS.map((v) => (
-              <option key={v} value={v}>
-                {v}
+            {AGENCY_TYPES.map((v) => (
+              <option key={v.value} value={v.value}>
+                {v.value}
               </option>
             ))}
           </SelectField>
@@ -791,17 +778,15 @@ export function NewChildForm({
               </option>
             ))}
           </SelectField>
-          <SelectField name="rank" label="ランク" defaultValue="2次代理店" disabled={pending}>
-            {RANKS.map((v) => (
-              <option key={v} value={v}>
-                {v}
-              </option>
-            ))}
-          </SelectField>
-          <SelectField name="channel" label="販路種別" defaultValue="未設定" disabled={pending}>
-            {CHANNELS.map((v) => (
-              <option key={v} value={v}>
-                {v}
+          <SelectField
+            name="agencyType"
+            label="代理店種別"
+            defaultValue="販売代理店"
+            disabled={pending}
+          >
+            {AGENCY_TYPES.map((v) => (
+              <option key={v.value} value={v.value}>
+                {v.value}
               </option>
             ))}
           </SelectField>

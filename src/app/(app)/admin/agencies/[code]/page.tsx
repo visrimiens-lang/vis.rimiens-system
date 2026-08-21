@@ -251,6 +251,19 @@ export default async function AgencyDetailPage({
         : "代理店マスタの読み込みに失敗しました。時間をおいて開き直してください。";
   }
 
+  /*
+   * 所属する会社の、さらに上の代理店。
+   * スタッフ・取次パートナーは「所属」と「上位」が別なので、両方を出す。
+   *   ITSU0001（スタッフ）… 所属＝株式会社樹（ITSU）／上位＝株式会社佐々木（SASA）
+   */
+  const parentOfParent = (() => {
+    const pc = s(row, "parent_code");
+    if (!pc) return null;
+    const company = everyone.find((a) => a.code === pc);
+    if (!company || !company.parentCode) return null;
+    return { code: company.parentCode, name: company.parentName };
+  })();
+
   const backLink = (
     <Link
       href="/admin/agencies"
@@ -485,7 +498,11 @@ export default async function AgencyDetailPage({
           <Info label="コード区分">
             {agency.codeKind ? `${agency.codeKind}・${kindLabel(agency.codeKind)}` : orDash("")}
           </Info>
-          <Info label="上位代理店">
+          {/*
+            スタッフ・取次パートナーは「所属する会社」と「その上の代理店」が別。
+            1つの欄にまとめると、どちらの意味か読み取れない。
+          */}
+          <Info label={agency.codeKind === "00" ? "上位代理店" : "所属する会社"}>
             {agency.parentCode ? (
               <Link
                 href={`/admin/agencies/${encodeURIComponent(agency.parentCode)}`}
@@ -500,6 +517,22 @@ export default async function AgencyDetailPage({
               <span className="text-ink-400">上位なし（本部の直下）</span>
             )}
           </Info>
+          {/* 会社以外は、所属する会社の「さらに上」も出す */}
+          {agency.codeKind !== "00" ? (
+            <Info label="上位代理店">
+              {parentOfParent ? (
+                <Link
+                  href={`/admin/agencies/${encodeURIComponent(parentOfParent.code)}`}
+                  className="underline underline-offset-4 hover:text-gold-300"
+                >
+                  {parentOfParent.name || parentOfParent.code}
+                  <span className="tabnum ml-1.5 text-xs text-ink-400">{parentOfParent.code}</span>
+                </Link>
+              ) : (
+                <span className="text-ink-400">—</span>
+              )}
+            </Info>
+          ) : null}
           <Info label="エリア区分">{orDash(agency.areaClass || agency.area)}</Info>
           <Info label="登録の経緯">{orDash(s(row, "registered_via"))}</Info>
         </InfoGrid>

@@ -74,6 +74,32 @@ export default async function AdminStaffPage() {
     error = e instanceof Error ? e.message : "一覧を読み込めませんでした。";
   }
 
+  /*
+   * 「所属」と「上位」を分けて出すための対応表。
+   *
+   * これまで1つの列に「所属（上位）」とまとめていたため、
+   *   スタッフ … 所属する会社
+   *   会社     … その会社の上位代理店
+   * という別のものが同じ欄に並び、どちらの意味か読み取れなかった。
+   *
+   *   スタッフ ITSU0001 … 所属＝株式会社樹（ITSU）／上位＝株式会社佐々木（SASA）
+   *   会社     ITSU     … 所属＝—              ／上位＝株式会社佐々木（SASA）
+   *
+   * 所属会社の上位を出すために、全代理店の「上位コードと名前」を控えておく。
+   */
+  let ancestors = new Map<string, { code: string; name: string }>();
+  try {
+    const all = await selectAll<Row>("agencies?select=code,parent_code,parent_name");
+    ancestors = new Map(
+      all.map((a) => [
+        s_(a, "code"),
+        { code: s_(a, "parent_code"), name: s_(a, "parent_name") },
+      ]),
+    );
+  } catch {
+    // 引けなくても一覧は出す（上位の欄が空になるだけ）
+  }
+
   const frozen = rows.filter(isFrozen);
   const issued = rows.filter((r) => s_(r, "qr1_url") || s_(r, "qr2_url"));
   const staff = rows.filter((r) => s_(r, "code_kind") === "02");
@@ -121,7 +147,8 @@ export default async function AdminStaffPage() {
                 <Th>コード</Th>
                 <Th>お名前</Th>
                 <Th>区分</Th>
-                <Th>所属（上位）</Th>
+                <Th>所属</Th>
+                <Th>上位</Th>
                 <Th>研修</Th>
                 <Th>QR</Th>
                 <Th>操作</Th>
@@ -130,6 +157,15 @@ export default async function AdminStaffPage() {
             <tbody>
               {rows.map((r) => {
                 const code = s_(r, "code");
+                const isStaff = s_(r, "code_kind") === "02";
+                /*
+                 * 上位の出し方。
+                 *   スタッフ … 所属している会社の、さらに上の代理店
+                 *   会社     … その会社の上位代理店（これまでどおり）
+                 */
+                const upper = isStaff
+                  ? ancestors.get(s_(r, "parent_code")) ?? { code: "", name: "" }
+                  : { code: s_(r, "parent_code"), name: s_(r, "parent_name") };
                 const stopped = isFrozen(r);
                 const hasQr = Boolean(s_(r, "qr1_url") || s_(r, "qr2_url"));
                 return (
@@ -149,11 +185,31 @@ export default async function AdminStaffPage() {
                       ) : null}
                     </Td>
                     <Td>{KIND_LABEL[s_(r, "code_kind")] ?? "—"}</Td>
+                    {/*
+                      所属 … スタッフが属している会社。会社そのものには所属が無いので「—」。
+                      上位 … その上の代理店。会社なら自分の上位、スタッフなら所属会社の上位。
+                    */}
                     <Td>
-                      <div className="tabnum text-xs text-ink-400">
-                        {s_(r, "parent_code") || "—"}
-                      </div>
-                      <div>{s_(r, "parent_name") || ""}</div>
+                      {isStaff ? (
+                        <>
+                          <div className="tabnum text-xs text-ink-400">
+                            {s_(r, "parent_code") || "—"}
+                          </div>
+                          <div>{s_(r, "parent_name") || ""}</div>
+                        </>
+                      ) : (
+                        <span className="text-ink-500">—</span>
+                      )}
+                    </Td>
+                    <Td>
+                      {upper.code ? (
+                        <>
+                          <div className="tabnum text-xs text-ink-400">{upper.code}</div>
+                          <div>{upper.name || ""}</div>
+                        </>
+                      ) : (
+                        <span className="text-ink-500">—</span>
+                      )}
                     </Td>
                     <Td>
                       <Badge tone={s_(r, "training_status") === "合格" ? "good" : "neutral"}>

@@ -1,6 +1,13 @@
 import "server-only";
 import { audit, insert, select, selectOne, update } from "./db";
-import { HQ_MAIL, acquisitionMail, licenseTestMail, sendMail } from "./mail";
+import {
+  HQ_MAIL,
+  PORTAL_URL,
+  acquisitionMail,
+  approvalMail,
+  licenseTestMail,
+  sendMail,
+} from "./mail";
 
 /**
  * 外から届いた申込を受け止めて、代理店・トスアップ・デモ機として登録する。
@@ -666,7 +673,21 @@ export async function registerAgency(app: AgencyApplication): Promise<IntakeResu
        */
       invite_code: wantsBareCode ? orgCode : null,
       area_class: normalizeArea(app.areaClass || "") || null,
-      status: "未稼働",
+      /*
+       * 申込フォームから届いたものは、その時点で稼働中にする。
+       *
+       * どのフォームも、実世界の関門を通ったあとに入力する決まりになっている
+       * （会社は業務委託契約を結んだあと、スタッフは研修を受けたあと）。
+       * 画面上でもう一度承認を挟むと、本部が押すまで代理店が
+       * 自分のコードもポータルのURLも受け取れないまま止まる。
+       *
+       * ご契約のご案内（QR2）だけは、これまでどおり研修の合格が要る。
+       * お客様のご契約とお支払いに進む案内なので、そこは別の関門として残す。
+       *
+       * 本部が電話やFAXの申込を手で登録するときは「未稼働」のままで、
+       * 内容を確かめてから稼働中にする（createAgencyAction）。
+       */
+      status: "稼働中",
       email: app.email || null,
       phone: app.phone || null,
       zip: app.zip || null,
@@ -689,12 +710,48 @@ export async function registerAgency(app: AgencyApplication): Promise<IntakeResu
   await audit("intake", "代理店登録", { type: "agency", key: code }, {
     形式: app.formKind,
     上位: s_(parent, "code"),
+    稼働状況: "稼働中（申込フォーム経由のため自動）",
   });
+
+  /*
+   * 届いた時点でご案内を送る。研修の合否は待たない。
+   *
+   * これまで案内メールは本部が稼働中に切り替えたときだけ送られていた。
+   * 承認の操作をなくしたので、ここで送らないと
+   * 代理店・スタッフが自分のコードもポータルのURLも受け取れない。
+   *
+   * ご契約のご案内（QR2）は研修の合格が要るため、この時点では載らない。
+   * 合格して発行したあとに、本部が「案内メールを送り直す」で改めて届けられる。
+   *
+   * パスワードはまだ発行していないので、その旨だけ伝える
+   * （発行は本部が代理店管理から行い、1度だけ画面に出る決まり）。
+   * 送れなくても登録は成立させる。届かないことは記録で分かる。
+   */
+  if (app.email) {
+    try {
+      const mail = approvalMail({
+        name,
+        code,
+        kind:
+          kind === KIND_STAFF ? "スタッフ"
+          : kind === KIND_REFERRER ? "取次パートナー"
+          : "会社",
+        portalUrl: PORTAL_URL,
+        passwordIssued: false,
+      });
+      await sendMail(app.email, mail.subject, mail.body);
+      await update(`agencies?code=eq.${encodeURIComponent(code)}`, {
+        guide_mailed_at: new Date().toISOString(),
+      });
+    } catch {
+      // 送れなくても登録は成立させる
+    }
+  }
 
   return {
     ok: true,
     code,
-    message: `${name} を ${code} として登録しました。本部の確認後に稼働中になります。`,
+    message: `${name} を ${code} として登録しました。ご案内のメールをお送りしています。`,
   };
 }
 

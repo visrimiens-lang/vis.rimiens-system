@@ -340,3 +340,38 @@ export function agencyTypeToFields(
   const hit = AGENCY_TYPES.find((t) => t.value === value);
   return hit ? { rank: hit.rank, channel: hit.channel } : null;
 }
+
+/**
+ * コードの呼び方は「形」で決まる。
+ *
+ *   英字だけ（SASA・METO・RIM）  ＝ 会社そのもの        → 代理店コード
+ *   数字が付く（SASA0001・KVIS0002）＝ 会社の下に採番したもの → スタッフコード
+ *
+ * 個人販売代理店（KVIS0002）は区分こそ会社（00）だが、
+ * KVIS の下に採番した番号なので、呼び方はスタッフコードにそろえる。
+ * 1つの欄に混ぜると、KVIS0002 が会社のコードに見えてしまう。
+ */
+export function isOrgStyleCode(code: string | null | undefined): boolean {
+  const c = (code || "").trim();
+  return c.length > 0 && !/\d/.test(c);
+}
+
+/** その代理店の自分のコードを何と呼ぶか。 */
+export function codeTermOf(code: string | null | undefined): string {
+  return isOrgStyleCode(code) ? "代理店コード" : "スタッフコード";
+}
+
+/**
+ * マイページ（ポータル）を使う相手か。
+ *
+ * 2026-08-21 決定：マイページを使うのはエリア統括代理店と総販売代理店だけ。
+ * 販売代理店・サロン代理店・個人販売代理店・取次パートナー・スタッフには、
+ * ログインの案内を送らず、お客様へのご案内（QR）だけをお伝えする。
+ */
+export function usesPortal(
+  rank: string | null | undefined,
+  codeKind?: string | null,
+): boolean {
+  if (codeKind === "01" || codeKind === "02") return false;
+  return rank === "総販売代理店" || rank === "2次代理店";
+}

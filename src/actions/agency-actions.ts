@@ -12,7 +12,7 @@ import {
   nextAgencyCode,
   orgOf,
 } from "@/lib/intake";
-import { agencyTypeToFields } from "@/lib/labels";
+import { agencyTypeToFields, usesPortal } from "@/lib/labels";
 import { PORTAL_URL, approvalMail, sendMail } from "@/lib/mail";
 import { OFFICIAL_LINE_URL, tossUpUrl } from "@/lib/qr";
 import { areaUsage, breakdownSlots, slotModelOf } from "@/lib/slots";
@@ -753,6 +753,8 @@ async function sendGuideMail(
     name: label,
     code,
     kind: plan.kind,
+    // マイページを使うのはエリア統括代理店と総販売代理店だけ（2026-08-21 決定）
+    usesPortal: usesPortal(s(row, "rank"), s(row, "code_kind")),
     portalUrl: PORTAL_URL,
     // パスワードの値は渡さない。発行済みかどうかだけを伝える。
     passwordIssued: Boolean(s(row, "portal_password")),

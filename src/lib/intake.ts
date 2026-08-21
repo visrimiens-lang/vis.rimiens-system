@@ -1,5 +1,6 @@
 import "server-only";
 import { audit, insert, select, selectOne, update } from "./db";
+import { usesPortal } from "./labels";
 import {
   HQ_MAIL,
   PORTAL_URL,
@@ -749,6 +750,8 @@ export async function registerAgency(app: AgencyApplication): Promise<IntakeResu
           kind === KIND_STAFF ? "スタッフ"
           : kind === KIND_REFERRER ? "取次パートナー"
           : "会社",
+        // マイページを使うのはエリア統括代理店と総販売代理店だけ（2026-08-21 決定）
+        usesPortal: usesPortal(rank, kind),
         portalUrl: PORTAL_URL,
         passwordIssued: false,
       });

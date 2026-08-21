@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import { select, selectOne, val } from "@/lib/db";
 import { listAllAgencies, slotLimitsOf } from "@/lib/agencies";
-import { agencyTypeOf } from "@/lib/labels";
+import { agencyTypeOf, codeTermOf, isOrgStyleCode } from "@/lib/labels";
 import { areaUsage, breakdownSlots, slotModelOf } from "@/lib/slots";
 import type { Agency } from "@/lib/types";
 import type { QrSource } from "@/lib/qr";
@@ -403,6 +403,13 @@ export default async function AgencyDetailPage({
     (a) => a.codeKind === "02" && a.status !== "停止・解約",
   );
 
+  /*
+   * この人が属している会社の代理店コード（英字4文字）。
+   * 会社そのもの（SASA・METO）には出さない。自分がその会社だから。
+   */
+  const orgCodeOf = (a: { code: string; orgCode: string; parentCode: string }): string =>
+    isOrgStyleCode(a.code) ? "" : a.orgCode || (isOrgStyleCode(a.parentCode) ? a.parentCode : "");
+
   const canHaveChildren =
     !["01", "02"].includes(agency.codeKind) && agency.rank !== "取次店";
 
@@ -410,7 +417,9 @@ export default async function AgencyDetailPage({
     <div className="space-y-6">
       <PageHeader
         title={title}
-        description={`代理店コード ${agency.code}・${kindLabel(agency.codeKind)}・${agency.rank || "ランク未設定"}`}
+        description={`${codeTermOf(agency.code)} ${agency.code}${
+          orgCodeOf(agency) ? `・代理店コード ${orgCodeOf(agency)}` : ""
+        }・${kindLabel(agency.codeKind)}・${agencyTypeOf(agency.rank, agency.channel, agency.codeKind)}`}
         actions={backLink}
       />
 
@@ -489,9 +498,15 @@ export default async function AgencyDetailPage({
 
       <Card title="基本情報">
         <InfoGrid>
-          <Info label="代理店コード">
+          <Info label={codeTermOf(agency.code)}>
             <span className="tabnum">{agency.code}</span>
           </Info>
+          {/* 会社そのものでないコードは、どの会社の下の番号かを併せて出す */}
+          {orgCodeOf(agency) ? (
+            <Info label="代理店コード">
+              <span className="tabnum">{orgCodeOf(agency)}</span>
+            </Info>
+          ) : null}
           <Info label="法人名・お名前">{orDash(agency.name)}</Info>
           <Info label="代表者名">{orDash(agency.repName)}</Info>
           {/* 申込フォームと同じ呼び方で出す。データベースの持ち方（ランク＋販路種別）も併記する */}

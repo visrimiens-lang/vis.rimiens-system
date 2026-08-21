@@ -16,7 +16,13 @@ import {
   type SearchParams,
   type SortState,
 } from "@/lib/list-params";
-import { AGENCY_TYPES, agencyTypeOf, channelLabel, statusTone } from "@/lib/labels";
+import {
+  AGENCY_TYPES,
+  agencyTypeOf,
+  channelLabel,
+  isOrgStyleCode,
+  statusTone,
+} from "@/lib/labels";
 import { PayUnitCell } from "@/components/PayUnitCell";
 import { defaultPayUnit } from "@/lib/pay-defaults";
 import type { Agency } from "@/lib/types";
@@ -631,6 +637,15 @@ export default async function AdminAgenciesPage({
   );
 }
 
+/**
+ * その代理店が属している会社の代理店コード（英字4文字）。
+ * 会社そのもの（SASA・METO）には出さない。自分がその会社だから。
+ */
+function orgCodeOf(a: Agency): string {
+  if (isOrgStyleCode(a.code)) return "";
+  return a.orgCode || (isOrgStyleCode(a.parentCode) ? a.parentCode : "");
+}
+
 /* ---------- 表（代理店タブ） ---------- */
 
 function AgencyTable({
@@ -662,7 +677,7 @@ function AgencyTable({
     <Table>
       <thead>
         <tr>
-          {th("code", "代理店コード")}
+          {th("code", "コード")}
           {th("name", "法人名")}
           {th("rank", "ランク")}
           {th("channel", "販路種別")}
@@ -695,6 +710,16 @@ function AgencyTable({
                 ) : (
                   "—"
                 )}
+                {/*
+                  個人販売代理店（KVIS0002）は区分こそ会社だが、
+                  KVIS の下に採番した番号。1つだけ出すと会社のコードに見えるので、
+                  どの代理店コードの下の番号かを併せて出す。
+                */}
+                {!isOrgStyleCode(a.code) && orgCodeOf(a) ? (
+                  <div className="mt-0.5 text-xs font-normal text-ink-400">
+                    代理店コード {orgCodeOf(a)}
+                  </div>
+                ) : null}
               </Td>
               <Td>
                 <div className="min-w-0">
@@ -832,7 +857,7 @@ function PeopleTable({
               )}
             </Td>
             <Td numeric className="whitespace-nowrap text-ink-300">
-              {a.parentCode || "—"}
+              {orgCodeOf(a) || a.parentCode || "—"}
             </Td>
             <Td>
               <div className="truncate text-ink-100">{a.name || "（名称未登録）"}</div>

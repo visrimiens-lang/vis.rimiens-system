@@ -160,10 +160,21 @@ function portalGuide(
  * QR1／QR2 のURLは、発行済みのときだけ載せる。まだのときは
  * 「本部よりお渡しします」と書く（空欄のURLをお送りしない）。
  */
+/** 段落の出し分けでできた余分な空行を1つに詰める。 */
+function tidyBody(body: string): string {
+  return body.replace(/\n{3,}/g, "\n\n");
+}
+
 export function approvalMail(opts: {
   name: string;
   code: string;
   kind: "会社" | "スタッフ" | "取次パートナー";
+  /**
+   * マイページ（ポータル）を使う相手か。
+   * 2026-08-21 決定：マイページを使うのはエリア統括代理店と総販売代理店だけ。
+   * それ以外にはログインの話を書かず、お客様へのご案内（QR）だけをお伝えする。
+   */
+  usesPortal?: boolean;
   /** マイページのURL。空のときは「本部よりご案内します」と書く。 */
   portalUrl: string;
   /**
@@ -178,15 +189,20 @@ export function approvalMail(opts: {
 }): { subject: string; body: string } {
   const { name, code, kind, portalUrl } = opts;
   const passwordIssued = opts.passwordIssued === true;
+  const usesPortal = opts.usesPortal === true;
+  // マイページを使わない相手には、ログインの話をひとことも書かない。
+  const portalBlock = usesPortal
+    ? `\n■ マイページ\nご契約状況・お客様の一覧・売上と報酬は、マイページでご確認いただけます。\n\n${portalGuide(code, portalUrl, passwordIssued)}\n\nはじめてログインされましたら、アカウント設定からパスワードのご変更を\nお願いいたします。\n`
+    : "";
 
   if (kind === "取次パートナー") {
     // 取次パートナーに個別QRは出さない（2026-07-30 決定・2026-08-07 でバグ確定）
     return {
       subject: "【VIS】取次パートナー登録が完了しました",
-      body: `${name} 様
+      body: tidyBody(`${name} 様
 
 このたびは VIS 取次パートナーにご登録いただき、ありがとうございます。
-下記のとおり承認いたしました。
+下記のとおり登録が完了しました。
 
   取次店コード： ${code}
 
@@ -203,20 +219,16 @@ export function approvalMail(opts: {
 
   公式LINE： ${opts.lineQrUrl || "（本部よりご案内します）"}
 
-■ マイページ
-ご紹介いただいたお客様の状況は、マイページでもご確認いただけます。
-
-${portalGuide(code, portalUrl, passwordIssued)}
-
+${portalBlock}
 ご紹介後のお客様対応は、担当の代理店より順次ご連絡いたします。
-${SIGN}`,
+${SIGN}`),
     };
   }
 
   if (kind === "スタッフ") {
     return {
       subject: "【VIS】販売ライセンスの登録が完了しました",
-      body: `${name} 様
+      body: tidyBody(`${name} 様
 
 販売ライセンスのご登録が完了しました。
 
@@ -231,39 +243,29 @@ ${SIGN}`,
 ご契約のご案内（QR2）は、研修に合格し本部の承認を受けた方のみ
 お使いいただけます。
 
-■ マイページ
-ご担当のお客様の状況と、ご自身の売上はマイページでご確認いただけます。
-報酬の金額は所属先の代理店にお問い合わせください。
-
-${portalGuide(code, portalUrl, passwordIssued)}
-
-はじめてログインされましたら、アカウント設定からパスワードのご変更を
-お願いいたします。
-${SIGN}`,
+${portalBlock}
+ご不明な点は、所属先の代理店または本部までお問い合わせください。
+${SIGN}`),
     };
   }
 
   /*
    * 会社としての代理店登録。
-   * ここにQRのご案内は入れない（会社にお渡しするものではないため）。
+   *
+   * マイページを使うエリア統括代理店・総販売代理店には、これまでどおり
+   * ログインのご案内を送る。ここにQRは入れない（お客様にお見せするQRは、
+   * 販売するご本人にお渡しするもの）。
    */
-  return {
-    subject: "【VIS】代理店登録が完了しました／マイページのご案内",
-    body: `${name} 御中
+  if (usesPortal) {
+    return {
+      subject: "【VIS】代理店登録が完了しました／マイページのご案内",
+      body: tidyBody(`${name} 御中
 
 このたびは VIS 代理店にご登録いただき、ありがとうございます。
-下記のとおり承認いたしました。
+下記のとおり登録が完了しました。
 
   代理店コード： ${code}
-
-■ マイページ
-ご契約状況・お客様の一覧・売上と報酬は、マイページでご確認いただけます。
-
-${portalGuide(code, portalUrl, passwordIssued)}
-
-はじめてログインされましたら、アカウント設定からパスワードのご変更を
-お願いいたします。
-
+${portalBlock}
 ■ 配下の登録について
 スタッフや取次パートナーのご登録は、本部までご連絡ください。
 枠の空き状況もマイページでご確認いただけます。
@@ -271,7 +273,34 @@ ${portalGuide(code, portalUrl, passwordIssued)}
 ■ お客様へのご案内（QR）について
 お客様にお見せするご案内（QRコード）は、販売ライセンスをお持ちの
 スタッフの方それぞれにお渡しします。ご登録の際は本部までご連絡ください。
-${SIGN}`,
+${SIGN}`),
+    };
+  }
+
+  /*
+   * マイページを使わない代理店（販売代理店・サロン代理店・個人販売代理店）。
+   * ログインの話は書かず、お客様へのご案内（QR）だけをお伝えする。
+   */
+  return {
+    subject: "【VIS】代理店登録が完了しました",
+    body: tidyBody(`${name} 御中
+
+このたびは VIS 代理店にご登録いただき、ありがとうございます。
+下記のとおり登録が完了しました。
+
+  代理店コード： ${code}
+
+■ お客様へのご案内
+下記の2つをお使いください。
+
+  体験のご案内（QR1）　： ${opts.qr1Url || LATER}
+  ご契約のご案内（QR2）： ${opts.qr2Url || LATER}
+
+ご契約のご案内（QR2）は、研修に合格し本部の承認を受けた方のみ
+お使いいただけます。
+
+ご不明な点は本部までお問い合わせください。
+${SIGN}`),
   };
 }
 
@@ -306,7 +335,7 @@ export function acquisitionMail(opts: {
 
   return {
     subject: "【VIS】ご成約のお知らせ",
-    body: `${opts.agencyName} ${honorific}
+    body: tidyBody(`${opts.agencyName} ${honorific}
 
 お客様のご成約がありましたのでお知らせいたします。
 
@@ -315,7 +344,7 @@ export function acquisitionMail(opts: {
   金額　： ${opts.amount.toLocaleString()} 円
 
 ${guide}
-${SIGN}`,
+${SIGN}`),
   };
 }
 
@@ -328,7 +357,7 @@ export function licenseTestMail(opts: {
 }): { subject: string; body: string } {
   return {
     subject: `【VIS】ライセンステストの提出がありました（${opts.name} 様）`,
-    body: `ライセンステストの提出がありました。採点をお願いいたします。
+    body: tidyBody(`ライセンステストの提出がありました。採点をお願いいたします。
 
   お名前　　： ${opts.name}
   所属コード： ${opts.agencyCode || "（未入力）"}
@@ -338,6 +367,6 @@ ${opts.detail || ""}
 
 合否をご確認のうえ、合格の場合は代理店マスタの研修ステータスを
 「合格」に変更してください。
-${SIGN}`,
+${SIGN}`),
   };
 }

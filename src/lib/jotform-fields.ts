@@ -38,9 +38,16 @@ function pick(data: Record<string, unknown>, ...names: string[]): string {
         if (v === null || v === undefined) continue;
         if (typeof v === "object") {
           const o = v as Record<string, unknown>;
-          // 氏名は {first, last}。日本語なので「姓 名」の順で並べる。
+          /*
+           * 氏名は {first, last} で届く。
+           *
+           * JotForm の「姓／名」は、この4フォームでは first に姓、last に名が入る
+           * （実際の申込 6629236644225492462 は first=東山 / last=和史）。
+           * ここを逆に並べていたため「和史 東山」「純汰 東」のように
+           * 姓名が入れ替わって登録され、承認メールの宛名も逆になっていた。
+           */
           if (o.last || o.first) {
-            const joined = [o.last, o.first].filter(Boolean).join(" ").trim();
+            const joined = [o.first, o.last].filter(Boolean).join(" ").trim();
             if (joined) return joined;
           }
           // 生年月日は {year, month, day}

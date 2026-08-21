@@ -580,6 +580,26 @@ export async function registerAgency(app: AgencyApplication): Promise<IntakeResu
    *   スタッフ・取次パートナー … 所属する会社の「英字＋4桁」
    */
   const wantsBareCode = kind === KIND_COMPANY && !isIndividual;
+
+  /*
+   * 会社の申込で自社コードが入っていないときは登録しない。
+   *
+   * 入っていないと上位の組織をそのまま引き継ぐため、エリア統括の申込では
+   * Rimiens 自身の英字（RIMI）が代理店コードとして取られてしまう。
+   * 1社目は登録できてしまい、2社目から「RIMI はすでに使っています」で
+   * 止まるので、気づいたときには親子関係が壊れている。
+   * 自社コードの欄が無い古い申込フォームが残っているため、ここで受け止める。
+   */
+  if (wantsBareCode && !normalizeCode(app.orgCode || "")) {
+    return {
+      ok: false,
+      needsReview: true,
+      message:
+        "自社代理店コード（半角大文字4文字）が入っていません。" +
+        "申込フォームに欄が無い場合は、本部で4文字を決めて代理店管理から登録してください。",
+    };
+  }
+
   let code: string | null = orgCode;
 
   if (wantsBareCode) {

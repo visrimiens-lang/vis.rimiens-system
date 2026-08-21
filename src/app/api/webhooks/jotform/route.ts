@@ -182,9 +182,24 @@ export async function POST(req: NextRequest) {
       ),
       repName: pick(data, "代表者", "代表者名", "representative"),
       email: pick(data, "input32", "メール", "email", "mail"),
-      phone: pick(data, "input33", "携帯電話", "電話", "phone", "tel"),
+      // 「電話番号」(input50) を先に見る。サロン代理店の申込では
+      // 「店舗電話番号」(input51) が先に並ぶため、名前の一部一致だと店舗番号を拾ってしまう。
+      phone: pick(data, "input50", "input33", "携帯電話", "電話番号", "電話", "phone", "tel"),
       zip: pick(data, "郵便番号", "zip", "postal"),
-      address: pick(data, "住所", "address"),
+      /*
+       * 住所。実フォームは 都道府県・市区町村・番地・建物名 に分かれていて
+       * 「住所」という項目が無いため、これまで全件が空で登録されていた
+       * （契約書や請求書の送付先が台帳に残らない）。分かれている欄をつなぐ。
+       */
+      address:
+        [
+          pick(data, "都道府県", "prefecture", "pref"),
+          pick(data, "市区町村", "city"),
+          pick(data, "番地", "street"),
+          pick(data, "建物名", "building"),
+        ]
+          .filter(Boolean)
+          .join("") || pick(data, "住所", "address"),
       shopName: pick(data, "input60", "店舗名", "屋号", "shop"),
       birthday: pick(data, "input19", "生年月日", "birthday"),
       inviteCode: pick(data, "input48", "招待コード", "紹介コード", "上位代理店コード"),
@@ -215,7 +230,7 @@ export async function POST(req: NextRequest) {
       bank: {
         name: pick(data, "銀行名", "bankName"),
         branch: pick(data, "支店名", "branch"),
-        type: pick(data, "口座種別", "accountType"),
+        type: pick(data, "預金種別", "口座種別", "accountType"),
         number: pick(data, "口座番号", "accountNumber"),
         holder: pick(data, "口座名義", "accountHolder"),
       },

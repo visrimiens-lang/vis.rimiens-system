@@ -190,9 +190,12 @@ export async function reprocessInboxAction(
         ),
         repName: pick("代表者", "代表者名", "representative"),
         email: pick("input32", "メール", "email", "mail"),
-        phone: pick("input33", "携帯電話", "電話", "phone", "tel"),
+        phone: pick("input50", "input33", "携帯電話", "電話番号", "電話", "phone", "tel"),
         zip: pick("郵便番号", "zip", "postal"),
-        address: pick("住所", "address"),
+        address:
+          [pick("都道府県", "prefecture", "pref"), pick("市区町村", "city"), pick("番地", "street"), pick("建物名", "building")]
+            .filter(Boolean)
+            .join("") || pick("住所", "address"),
         shopName: pick("input60", "店舗名", "屋号", "shop"),
         birthday: pick("input19", "生年月日", "birthday"),
         inviteCode: pick("input48", "招待コード", "紹介コード", "上位代理店コード"),
@@ -207,7 +210,7 @@ export async function reprocessInboxAction(
         bank: {
           name: pick("銀行名", "bankName"),
           branch: pick("支店名", "branch"),
-          type: pick("口座種別", "accountType"),
+          type: pick("預金種別", "口座種別", "accountType"),
           number: pick("口座番号", "accountNumber"),
           holder: pick("口座名義", "accountHolder"),
         },

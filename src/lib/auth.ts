@@ -1,4 +1,5 @@
 import "server-only";
+import { normalizeCode } from "./intake";
 import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
 import { cache } from "react";
 import { cookies } from "next/headers";
@@ -162,7 +163,14 @@ export async function login(
   /** 接続元のIPアドレス。分からなければ空でよい（IDごとの制限だけが効く）。 */
   clientIp = "",
 ): Promise<LoginResult> {
-  const id = loginId.trim();
+  /*
+   * 代理店コードは、招待コードや決済の ?ref= と同じ形にそろえてから引く。
+   * ここだけ素の trim だったため、「tsta0001」や全角で打つとログインできず、
+   * しかも失敗の回数だけが積まれて、そのうちロックまで進んでいた
+   * （失敗の理由は画面に出さない作りなので、本人にも本部にも原因が分からない）。
+   * 本部のアカウントは下の方で大文字小文字を無視して比べているので、そちらに合わせる。
+   */
+  const id = normalizeCode(loginId);
   if (!id || !password) {
     await bcrypt.compare(password || "x", DUMMY_HASH);
     return { ok: false };

@@ -419,7 +419,7 @@ export default async function AgencyDetailPage({
         title={title}
         description={`${codeTermOf(agency.code)} ${agency.code}${
           orgCodeOf(agency) ? `・代理店コード ${orgCodeOf(agency)}` : ""
-        }・${kindLabel(agency.codeKind)}・${agencyTypeOf(agency.rank, agency.channel, agency.codeKind)}`}
+        }・${agencyTypeOf(agency.rank, agency.channel, agency.codeKind)}`}
         actions={backLink}
       />
 
@@ -841,7 +841,7 @@ export default async function AgencyDetailPage({
         )}
       </Card>
 
-      {agency.codeKind === "00" ? (
+      {agency.codeKind === "00" && isOrgStyleCode(agency.code) ? (
         <Card title="自社代理店コード（配下の採番に使う英字）">
           <OrgCodeForm code={agency.code} name={agency.name} current={agency.orgCode} />
         </Card>

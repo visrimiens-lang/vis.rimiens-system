@@ -199,7 +199,36 @@ export default async function AdminAgenciesPage({
     />
   );
 
+  /*
+   * 本部の承認を待っている代理店。
+   *
+   * 申込フォームから届いたものは「未稼働」で入る。本部が稼働中にするのが承認だが、
+   * 一覧に何も出ないため、届いていることに気づけなかった。
+   * 増枠申請と同じように、まっさきに知らせる。
+   */
+  const waitingApproval = all.filter(
+    (a) => a.status === "未稼働" && a.registeredVia && a.registeredVia !== "手動登録",
+  );
+
   /* 取り込めずに残っている申込・受注があれば、まっさきに知らせる。 */
+  const approvalNotice =
+    waitingApproval.length > 0 ? (
+      <Notice tone="warn">
+        申込フォームから届いて{" "}
+        <strong className="text-ink-100">本部の承認を待っている代理店が {waitingApproval.length} 件</strong>{" "}
+        あります（
+        {waitingApproval.slice(0, 3).map((a) => a.name || a.code).join("・")}
+        {waitingApproval.length > 3 ? " ほか" : ""}）。
+        代理店コードを押して内容を確かめ、「承認する」を押してください。
+        <Link
+          href={buildListHref(BASE, params, { status: "未稼働", tab: "" })}
+          className="ml-2 underline underline-offset-4 hover:text-ink-50"
+        >
+          承認待ちだけを見る
+        </Link>
+      </Notice>
+    ) : null;
+
   const inboxNotice =
     stuckInbox > 0 ? (
       <Notice tone="warn">
@@ -357,6 +386,7 @@ export default async function AdminAgenciesPage({
   return (
     <div className="space-y-6">
       {header}
+      {approvalNotice}
       {inboxNotice}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

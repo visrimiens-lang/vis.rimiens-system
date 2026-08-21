@@ -253,6 +253,13 @@ export function StatusPanel({ agency }: { agency: AgencyDetail }) {
   const changed = next !== agency.status;
   const stopping = next === "停止・解約";
 
+  /*
+   * 申込フォームから届いたばかりの代理店は、まず「承認する」を押すだけで済むようにする。
+   * これまでは下の選ぶ欄から「稼働中」を選び直す必要があり、
+   * 承認の操作だと気づかれないまま置かれることがあった。
+   */
+  const awaitingApproval = agency.status === "未稼働";
+
   return (
     <div className="px-5 py-5">
       <div className="flex flex-wrap items-center gap-3">
@@ -262,6 +269,24 @@ export function StatusPanel({ agency }: { agency: AgencyDetail }) {
           <span className="text-xs text-ink-400">理由：{agency.suspendedReason}</span>
         ) : null}
       </div>
+
+      {awaitingApproval ? (
+        <form action={run} className="mt-4 rounded-xl border border-gold-500/40 bg-gold-500/5 p-4">
+          <input type="hidden" name="id" value={agency.id} />
+          <input type="hidden" name="status" value="稼働中" />
+          <p className="text-sm text-ink-200">
+            この代理店は<strong className="text-ink-50">本部の承認待ち</strong>です。
+            内容を確かめたら、下のボタンで承認してください。
+          </p>
+          <p className="mt-1 text-xs text-ink-400">
+            承認すると稼働中になり、登録されているメールアドレスあてに
+            ログインのご案内が自動で送られます（メール未登録のときは送られません）。
+          </p>
+          <button type="submit" disabled={pending} className={`${primaryBtn} mt-3`}>
+            {pending ? "承認しています…" : "この代理店を承認する"}
+          </button>
+        </form>
+      ) : null}
 
       <form action={run} className="mt-4 space-y-4">
         <input type="hidden" name="id" value={agency.id} />

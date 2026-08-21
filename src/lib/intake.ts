@@ -68,6 +68,13 @@ export type IntakeResult =
  *   招待コードに `R_M` と打つだけで別の会社の配下として登録が通ってしまう。
  *   入口でそろえて、照合は完全一致のままにする。
  */
+/**
+ * 個人販売代理店みんなで使う共通の英字（2026-08-20 決定）。
+ * 個人は会社名が無く一人ずつ英字を決められないため、皆で同じ英字を使い
+ * KVIS0001・KVIS0002 と番号で分かれる。KVIS という会社は存在しない。
+ */
+export const KOJIN_ORG = "KVIS";
+
 export function normalizeCode(input: string): string {
   return (input || "")
     .normalize("NFKC")   // 全角英数字を半角に
@@ -479,10 +486,36 @@ function kindOf(
 }
 
 /**
+ * すでに登録されている同じ人を探す。
+ *
+ * 販売ライセンス認定登録は、これから登録する人だけでなく、
+ * すでに個人販売代理店として登録済みの人からも届く
+ * （個人販売代理店の方がライセンスを取った場合）。
+ * そのまま流すと同じ人が2件になり、QRも報酬の付け先も二重になる。
+ *
+ * お名前が同じで、メールアドレスが一致すれば同一人物として扱う。
+ * 解約済みは除く（同じ名前の別の方が入り直すことがあるため）。
+ */
+async function findSamePerson(name: string, email: string): Promise<Row | null> {
+  const nm = (name || "").replace(/[\s\u3000]/g, "");
+  const mail = (email || "").trim().toLowerCase();
+  if (!nm || !mail) return null;
+  const rows = await select<Row>(
+    `agencies?select=code,name,status,code_kind&email=eq.${encodeURIComponent(mail)}`,
+  );
+  return (
+    rows.find(
+      (r) =>
+        s_(r, "name").replace(/[\s\u3000]/g, "") === nm && s_(r, "status") !== "停止・解約",
+    ) ?? null
+  );
+}
+
+/**
  * 申込から代理店を登録する。
  *
- * 登録した時点では「未稼働」。本部が内容を確認して稼働中にする運用（承認制の維持）。
- * 2026-07-30 の会議で「自動発行にはしない」と決まっているため、ここで承認まではしない。
+ * 2026-08-21 に承認フローを廃止した。登録した時点で「稼働中」になり、
+ * 案内のメールもその場で送る（研修の合否は待たない）。
  */
 export async function registerAgency(app: AgencyApplication): Promise<IntakeResult> {
   const name = (app.name || "").trim();
@@ -500,6 +533,25 @@ export async function registerAgency(app: AgencyApplication): Promise<IntakeResu
 
   const decided = kindOf(app.formKind, app.agencyType);
   const { kind, rank } = decided;
+
+  /*
+   * 販売ライセンス認定登録は、すでに登録済みの方からも届く。
+   * 実際、個人販売代理店として KVIS0002 で登録済みの方が、
+   * 自社コードに「KVIS」と入れてこのフォームを出したことがあった
+   * （KVIS は個人販売代理店みんなの共通コードで、会社としては存在しない）。
+   * 同じ人をもう1件作らず、登録済みとして受け止める。
+   */
+  if (kind === KIND_STAFF) {
+    const same = await findSamePerson(name, app.email || "");
+    if (same) {
+      const code = s_(same, "code");
+      return {
+        ok: true,
+        code,
+        message: `${name} さんは ${code} として登録済みです。販売ライセンス認定の登録として受け付けました。`,
+      };
+    }
+  }
   // 申込フォームが販路種別を直接送ってきていればそれを優先する
   const channel = app.channel || decided.channel;
 
@@ -547,7 +599,9 @@ export async function registerAgency(app: AgencyApplication): Promise<IntakeResu
       message: wantsFixed
         ? `上位となる代理店（${decided.parentFixed}）が見つかりませんでした。本部での確認が必要です。`
         : isMember
-          ? `自社コード「${belongsTo || "（未入力）"}」に合う代理店が見つかりませんでした。本部での確認が必要です。`
+          ? normalizeCode(belongsTo) === KOJIN_ORG
+            ? `自社コード「${KOJIN_ORG}」は個人販売代理店みんなの共通コードで、会社としては登録されていません。所属先の代理店コード（例 SASA）を入れ直してもらうか、ご本人がすでに個人販売代理店として登録済みであれば、そのままで結構です。`
+            : `自社コード「${belongsTo || "（未入力）"}」に合う代理店が見つかりませんでした。入力された文字が合っているか、その会社が登録済みかをご確認ください。`
           : `招待コード「${app.inviteCode || "（未入力）"}」に合う上位代理店が見つかりませんでした。本部での確認が必要です。`,
     };
   }
@@ -576,7 +630,6 @@ export async function registerAgency(app: AgencyApplication): Promise<IntakeResu
    * 会社が自社コードを入れずに申し込んだとき（欄を必須にする前の申込や、
    * 本部の代理入力）は、上位の組織をそのまま引き継いで従来どおり採番する。
    */
-  const KOJIN_ORG = "KVIS";
   const orgCode = isMember
     ? orgOf(parent)
     : isIndividual

@@ -48,7 +48,12 @@ import {
   FilterText,
   SortableTh,
 } from "@/components/SortableTh";
-import { agencyTypeOf, codeKindLabel, statusTone } from "@/lib/labels";
+import {
+  agencyTypeOf,
+  codeKindLabel,
+  isOrgStyleCode,
+  statusTone,
+} from "@/lib/labels";
 import { SlotRequestButton } from "./SlotRequestButton";
 import { PayUnitCell } from "@/components/PayUnitCell";
 import { defaultPayUnit } from "@/lib/pay-defaults";
@@ -471,14 +476,16 @@ export default async function OrganizationPage({
                   {contactRows.map((a) => (
                     <tr key={a.code || a.recordId}>
                       {/*
-                        スタッフは「所属している会社の代理店コード」と
-                        「自分のスタッフコード」を分けて出す。
+                        コードの呼び方は形で決まる。英字だけ（SASA）は会社そのもの、
+                        数字が付く（SASA0001・KVIS0002）は会社の下に採番した番号。
                         1つの欄にまとめると、SASA0001 が代理店のコードに見えてしまう。
                       */}
                       <Td numeric>
-                        {a.codeKind === "02" ? a.parentCode || "—" : a.code || "—"}
+                        {isOrgStyleCode(a.code)
+                          ? a.code
+                          : a.orgCode || a.parentCode || "—"}
                       </Td>
-                      <Td numeric>{a.codeKind === "02" ? a.code || "—" : "—"}</Td>
+                      <Td numeric>{isOrgStyleCode(a.code) ? "—" : a.code || "—"}</Td>
                       <Td>
                         <div className="text-ink-100">{a.name || "（名称未登録）"}</div>
                         {a.representative && a.representative !== a.name ? (

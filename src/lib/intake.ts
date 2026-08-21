@@ -1,6 +1,7 @@
 import "server-only";
 import { audit, insert, select, selectOne, update } from "./db";
 import { usesPortal } from "./labels";
+import { OFFICIAL_LINE_URL, QR2_APPROVED, buildQrUrl, tossUpUrl } from "./qr";
 import {
   HQ_MAIL,
   PORTAL_URL,
@@ -512,6 +513,62 @@ async function findSamePerson(name: string, email: string): Promise<Row | null> 
 }
 
 /**
+ * すでにいる相手に、お客様へのご案内（QR1・QR2）をお渡しする。
+ *
+ * 未発行なら発行してから、案内のメールを送る。
+ * 取次パートナー（区分01）には個別のQRを出さない決まりなので発行しない。
+ * QRを停止している相手は、止めたURLが戻ってしまうので触らない。
+ */
+async function ensureQrAndGuide(row: Row): Promise<string> {
+  const code = s_(row, "code");
+  if (!code) return "";
+  const frozen =
+    s_(row, "qr2_status") === "差戻し" && s_(row, "qr2_rejected_note").startsWith("【QR停止】");
+  if (frozen) return "（QRを停止中のため、ご案内はお送りしていません）";
+
+  const withQr = s_(row, "code_kind") !== KIND_REFERRER;
+  const patch: Record<string, unknown> = {};
+  if (withQr && !s_(row, "qr1_url")) patch.qr1_url = buildQrUrl("qr1", code);
+  if (withQr && !s_(row, "qr2_url")) patch.qr2_url = buildQrUrl("qr2", code);
+  if (withQr && s_(row, "qr2_status") !== QR2_APPROVED) patch.qr2_status = QR2_APPROVED;
+
+  try {
+    if (Object.keys(patch).length > 0) {
+      await update(`agencies?code=eq.${encodeURIComponent(code)}`, patch);
+    }
+    const fresh = await selectOne<Row>(
+      `agencies?select=*&code=eq.${encodeURIComponent(code)}`,
+    );
+    const to = s_(fresh, "email");
+    if (!to) return "（メールアドレスが未登録のため、ご案内はお送りしていません）";
+    const kindOfRow = s_(fresh, "code_kind");
+    const mail = approvalMail({
+      name: s_(fresh, "name") || code,
+      code,
+      kind:
+        kindOfRow === KIND_STAFF ? "スタッフ"
+        : kindOfRow === KIND_REFERRER ? "取次パートナー"
+        : "会社",
+      usesPortal: usesPortal(s_(fresh, "rank"), kindOfRow),
+      portalUrl: PORTAL_URL,
+      passwordIssued: Boolean(s_(fresh, "portal_password")),
+      qr1Url: s_(fresh, "qr1_url") || undefined,
+      qr2Url: s_(fresh, "qr2_url") || undefined,
+      lineQrUrl: kindOfRow === KIND_REFERRER ? OFFICIAL_LINE_URL : undefined,
+      tossFormUrl: kindOfRow === KIND_REFERRER ? tossUpUrl(code) || undefined : undefined,
+    });
+    await sendMail(to, mail.subject, mail.body);
+    await update(`agencies?code=eq.${encodeURIComponent(code)}`, {
+      guide_mailed_at: new Date().toISOString(),
+    });
+    return "お客様へのご案内（QR）をメールでお送りしました。";
+  } catch {
+    // 送れなくても、受け止めたこと自体は成立させる
+    return "（ご案内のメールは送れませんでした。代理店管理から送り直してください）";
+  }
+}
+
+/**
  * 申込から代理店を登録する。
  *
  * 2026-08-21 に承認フローを廃止した。登録した時点で「稼働中」になり、
@@ -545,10 +602,17 @@ export async function registerAgency(app: AgencyApplication): Promise<IntakeResu
     const same = await findSamePerson(name, app.email || "");
     if (same) {
       const code = s_(same, "code");
+      /*
+       * すでに登録済みでも、お客様へのご案内（QR1・QR2）はお渡しする。
+       * 未発行なら発行して、案内のメールをあらためてお送りする。
+       */
+      const mailed = await ensureQrAndGuide(same);
       return {
         ok: true,
         code,
-        message: `${name} さんは ${code} として登録済みです。販売ライセンス認定の登録として受け付けました。`,
+        message:
+          `${name} さんは ${code} として登録済みです。販売ライセンス認定の登録として受け付けました。` +
+          mailed,
       };
     }
   }
@@ -698,6 +762,20 @@ export async function registerAgency(app: AgencyApplication): Promise<IntakeResu
     }
   }
 
+  /*
+   * お客様へのご案内（QR1・QR2）は、登録した時点でお渡しする。
+   *
+   * 2026-08-21 決定：ご契約のご案内（QR2）に研修の合格も本部の承認も要らない。
+   * 以前は研修に合格するまで出せなかったため、登録のご案内が届いても
+   * 肝心のQR2が空欄のまま、本部が発行するのを待つことになっていた。
+   *
+   * 取次パートナー（区分01）には個別のQRを出さない決まりなので、ここでも作らない
+   * （共通の公式LINEとご紹介フォームをメールでご案内する）。
+   */
+  const withQr = kind !== KIND_REFERRER;
+  const qr1Url = withQr ? buildQrUrl("qr1", code) : "";
+  const qr2Url = withQr ? buildQrUrl("qr2", code) : "";
+
   await insert("agencies", [
     {
       code,
@@ -748,13 +826,13 @@ export async function registerAgency(app: AgencyApplication): Promise<IntakeResu
        * 画面上でもう一度承認を挟むと、本部が押すまで代理店が
        * 自分のコードもポータルのURLも受け取れないまま止まる。
        *
-       * ご契約のご案内（QR2）だけは、これまでどおり研修の合格が要る。
-       * お客様のご契約とお支払いに進む案内なので、そこは別の関門として残す。
-       *
        * 本部が電話やFAXの申込を手で登録するときは「未稼働」のままで、
        * 内容を確かめてから稼働中にする（createAgencyAction）。
        */
       status: "稼働中",
+      // 登録と同時にお渡しするご案内。承認の状態も「承認済」で入れておく
+      // （QRの停止は、この列を「差戻し」に変えて表す仕組みのため）。
+      ...(withQr ? { qr1_url: qr1Url, qr2_url: qr2Url, qr2_status: QR2_APPROVED } : {}),
       email: app.email || null,
       phone: app.phone || null,
       zip: app.zip || null,
@@ -807,6 +885,11 @@ export async function registerAgency(app: AgencyApplication): Promise<IntakeResu
         usesPortal: usesPortal(rank, kind),
         portalUrl: PORTAL_URL,
         passwordIssued: false,
+        // 登録と同時に発行したご案内。取次パートナーには個別QRを出さない
+        qr1Url: qr1Url || undefined,
+        qr2Url: qr2Url || undefined,
+        lineQrUrl: kind === KIND_REFERRER ? OFFICIAL_LINE_URL : undefined,
+        tossFormUrl: kind === KIND_REFERRER ? tossUpUrl(code) || undefined : undefined,
       });
       await sendMail(app.email, mail.subject, mail.body);
       await update(`agencies?code=eq.${encodeURIComponent(code)}`, {

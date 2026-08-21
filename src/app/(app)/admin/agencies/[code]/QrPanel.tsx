@@ -12,11 +12,8 @@ import {
 } from "@/actions/qr-actions";
 import {
   OFFICIAL_LINE_URL,
-  QR2_APPLIED,
   QR2_APPROVED,
   QR2_REJECTED,
-  QR2_UNAPPLIED,
-  TRAINING_PASSED,
   isTossPartner,
   qrImageUrl,
   readQrAgency,
@@ -55,7 +52,7 @@ function freezeReasonOf(rejectedNote: string): string {
  * 本部が代理店へお渡しするQRを発行する画面。
  *
  *   QR1 … 体験・デモのご案内（公式LINEの友だち追加）
- *   QR2 … ご契約・お支払いのご案内。研修に合格し、本部が承認した相手だけ。
+ *   QR2 … ご契約・お支払いのご案内。登録した時点でお渡しする（2026-08-21〜）。
  *
  * 取次パートナーには個別のQRを出さない。共通の公式LINEと、
  * お客様をご紹介いただくフォームをご案内する（2026-08-07 会議で確定）。
@@ -96,8 +93,6 @@ export function QrPanel({ agency }: { agency: QrSource }) {
         <Qr2Section
           code={a.code}
           issuedUrl={a.qr2Url}
-          trainingStatus={a.trainingStatus}
-          trainingPassedOn={a.trainingPassedOn}
           qr2Status={a.qr2Status}
           requestedOn={a.qr2RequestedOn}
           rejectedNote={a.qr2RejectedNote}
@@ -187,7 +182,7 @@ function Qr1Section({
             QR1　体験・デモのご案内
           </h3>
           <p className="mt-1.5 text-sm leading-relaxed text-ink-300">
-            お客様に公式LINEを友だち追加していただくご案内です。研修の合否にかかわらずお渡しできます。
+            お客様に公式LINEを友だち追加していただくご案内です。登録した時点でお渡ししています。
             友だち追加は LINE の中で完結するため、
             <strong className="text-ink-100">このご案内からは誰のご紹介かを記録できません</strong>。
             紹介元は、ご契約のご案内（QR2）のお支払いフォームで記録されます。
@@ -250,8 +245,6 @@ function Qr1Section({
 function Qr2Section({
   code,
   issuedUrl,
-  trainingStatus,
-  trainingPassedOn,
   qr2Status,
   requestedOn,
   rejectedNote,
@@ -260,8 +253,6 @@ function Qr2Section({
 }: {
   code: string;
   issuedUrl: string;
-  trainingStatus: string;
-  trainingPassedOn: string;
   qr2Status: string;
   requestedOn: string;
   rejectedNote: string;
@@ -274,7 +265,6 @@ function Qr2Section({
   const [rejectState, reject, rejecting] = useActionState(rejectQr2Action, initial);
   const [rejectOpen, setRejectOpen] = useState(false);
 
-  const passed = trainingStatus === TRAINING_PASSED;
   const url = frozen ? "" : issueState.url || issuedUrl;
   const busy = issuing || approving || rejecting;
 
@@ -287,9 +277,9 @@ function Qr2Section({
             QR2　ご契約・お支払いのご案内
           </h3>
           <p className="mt-1.5 text-sm leading-relaxed text-ink-300">
-            お客様がご契約とお支払いに進むためのご案内です。
-            <strong className="text-ink-100">研修に合格した方だけ</strong>にお渡しでき、
-            発行には本部の承認が必要です。
+            お客様がご契約とお支払いに進むためのご案内です。登録した時点で
+            発行され、案内メールでお渡ししています。ここでは作り直しと、
+            問題があったときの停止ができます。
           </p>
         </div>
         <Badge tone={frozen ? "bad" : url ? "good" : "neutral"}>
@@ -299,16 +289,7 @@ function Qr2Section({
 
       <dl className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border border-ink-800 bg-ink-850/60 px-4 py-3 text-sm">
         <div className="flex items-center gap-2">
-          <dt className="text-ink-400">研修</dt>
-          <dd>
-            <StatusBadge status={trainingStatus || "未受講"} />
-          </dd>
-          {passed && trainingPassedOn ? (
-            <dd className="tabnum text-xs text-ink-400">合格 {jpDate(trainingPassedOn)}</dd>
-          ) : null}
-        </div>
-        <div className="flex items-center gap-2">
-          <dt className="text-ink-400">発行の申請</dt>
+          <dt className="text-ink-400">お渡しの状態</dt>
           <dd>
             <StatusBadge status={qr2Status} />
           </dd>
@@ -325,44 +306,23 @@ function Qr2Section({
       ) : null}
 
       {/*
-        上から順に、発行できない理由の重い方から出す。
-        1. 停止中（コンプライアンス対応で止めている）
-        2. 研修に合格していない
-        どちらでもなければ、承認と発行の欄を出す。
+        発行できないのは、QRを停止しているときだけ。
+        2026-08-21 に、研修の合格と本部の承認は条件から外した。
       */}
       {frozen ? (
         <Notice tone="bad">
           この代理店のQRは停止中です。ご契約のご案内（QR2）は発行できません。
           止めた理由の確認と解除は、下の「QRの停止」欄から行ってください。
-          解除しても、発行の承認からのやり直しになります。
-        </Notice>
-      ) : !passed ? (
-        <Notice tone="warn">
-          研修に合格していません（現在：{trainingStatus || "未受講"}）。
-          ご契約のご案内（QR2）は、研修に合格した方にのみお渡しできます。
-          研修の結果を登録してから、あらためてこの画面をご確認ください。
+          解除したあとは、あらためて発行し直してください。
         </Notice>
       ) : (
         <div className="space-y-4">
           {/* いまの状況の説明 */}
-          {qr2Status === QR2_APPROVED ? (
-            <Notice tone="info">
-              本部の承認が済んでいます。下の「
-              {url ? "QR2を作り直す" : "QR2を発行"}」からご案内を
-              {url ? "作り直せます" : "発行できます"}。
-            </Notice>
-          ) : qr2Status === QR2_APPLIED ? (
-            <div className="rounded-lg border border-warn-500/40 bg-warn-500/10 px-4 py-3">
-              <p className="text-sm leading-relaxed text-warn-100">
-                ご契約のご案内（QR2）の発行を申請されています。内容を確かめて、
-                承認するか見送るかを選んでください。
-              </p>
-            </div>
-          ) : qr2Status === QR2_REJECTED ? (
+          {qr2Status === QR2_REJECTED ? (
             <div className="space-y-2 rounded-lg border border-bad-500/40 bg-bad-500/10 px-4 py-3">
               <p className="text-sm leading-relaxed text-bad-100">
                 この代理店へのご契約のご案内（QR2）は、いまは見送っています。
-                お渡しできる状態が整ったら、「発行を承認する」を押してください。
+                お渡しできる状態が整ったら、「お渡しできる状態に戻す」を押してください。
               </p>
               {rejectedNote ? (
                 <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink-200">
@@ -371,27 +331,19 @@ function Qr2Section({
                 </p>
               ) : null}
             </div>
-          ) : qr2Status === QR2_UNAPPLIED ? (
-            <Notice tone="info">
-              研修には合格していますが、本部の承認がまだです。
-              代理店から発行のご依頼を受けたら（お電話・メール・研修の場でも構いません）、
-              内容を確かめて「発行を承認する」を押してください。承認するとQR2を発行できます。
-            </Notice>
-          ) : (
-            <Notice tone="warn">
-              発行の承認の状況（現在：{qr2Status}）を読み取れませんでした。
-              代理店の登録内容をご確認のうえ、お渡しして差し支えなければ
-              「発行を承認する」を押してください。
-            </Notice>
-          )}
+          ) : null}
 
-          {/* 承認と見送り。申請が届いていなくても本部の判断で進められる。 */}
+          {/*
+            見送りからの復帰と、手で見送る操作。
+            ふだんは使わない（登録した時点でお渡ししている）ので、
+            必要なときだけ出す。
+          */}
           <div className="flex flex-wrap items-center gap-3">
             {qr2Status !== QR2_APPROVED ? (
               <form action={approve}>
                 <input type="hidden" name="code" value={code} />
                 <button type="submit" disabled={busy || suspended} className={primaryBtn}>
-                  {approving ? "承認中…" : "発行を承認する"}
+                  {approving ? "戻しています…" : "お渡しできる状態に戻す"}
                 </button>
               </form>
             ) : null}
@@ -402,11 +354,9 @@ function Qr2Section({
                 disabled={busy}
                 className={quietBtn}
               >
-                {qr2Status === QR2_APPROVED
-                  ? "承認を取り消す"
-                  : qr2Status === QR2_REJECTED
-                    ? "見送りの理由を書き直す"
-                    : "発行を見送る"}
+                {qr2Status === QR2_REJECTED
+                  ? "見送りの理由を書き直す"
+                  : "このQR2を見送る"}
               </button>
             ) : null}
           </div>
@@ -416,7 +366,7 @@ function Qr2Section({
               <input type="hidden" name="code" value={code} />
               <label className="block">
                 <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-ink-400">
-                  {qr2Status === QR2_APPROVED ? "承認を取り消す理由" : "見送る理由"}
+                  見送る理由
                 </span>
                 <textarea
                   name="note"
@@ -424,7 +374,7 @@ function Qr2Section({
                   required
                   maxLength={500}
                   defaultValue={qr2Status === QR2_REJECTED ? rejectedNote : ""}
-                  placeholder="例：研修の受講記録が確認できませんでした。受講のうえ、あらためてご相談ください。"
+                  placeholder="例：お客様への説明の仕方に確認したい点があるため、いったん見送ります。"
                   disabled={busy}
                   className="mt-1.5 w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2.5 text-sm leading-relaxed text-ink-50 transition focus:border-gold-500 focus:outline-none disabled:opacity-60"
                 />
@@ -437,9 +387,7 @@ function Qr2Section({
                 <button type="submit" disabled={busy} className={dangerBtn}>
                   {rejecting
                     ? "保存中…"
-                    : qr2Status === QR2_APPROVED
-                      ? "この理由で承認を取り消す"
-                      : "この理由で見送る"}
+                    : "この理由で見送る"}
                 </button>
                 <button
                   type="button"
@@ -458,13 +406,13 @@ function Qr2Section({
       {url ? (
         <UrlBlock
           title="ご契約のご案内（QR2）"
-          description="このQRとURLは、研修に合格し承認を受けた方だけにお渡しください。"
+          description="お客様がご契約とお支払いに進むためのご案内です。"
           url={url}
           fileName={`${code}_QR2_ご契約のご案内`}
         />
       ) : null}
 
-      {passed && qr2Status === QR2_APPROVED ? (
+      {qr2Status === QR2_APPROVED ? (
         <form action={issue} className="flex flex-wrap items-center gap-3">
           <input type="hidden" name="code" value={code} />
           <input type="hidden" name="kind" value="qr2" />

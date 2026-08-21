@@ -71,7 +71,7 @@ export const QR_LABEL: Record<QrKind, string> = {
  * lib/agencies.ts が返す形は渡せない。あちらは codeKind / status /
  * qr1Url / qr2Url しか持っておらず、研修の合否（training_status）も
  * 発行申請の状況（qr2_status）も入っていないため、渡してしまうと
- * 「研修に合格していません」「申請が届いていません」と誤って表示される。
+ * 「お渡しの状態を読み取れませんでした」と誤って表示される。
  * 取り違えをその場で気づけるよう、判断に使う項目は必須にしてある。
  *
  * 見るのは次の項目だけ:
@@ -183,7 +183,10 @@ export function canIssueQr(a: QrAgency): boolean {
   return true;
 }
 
-/** 研修に合格しているか。QR2 を出せるかどうかの前提。 */
+/**
+ * 研修に合格しているか。
+ * 2026-08-21 から QR2 の条件ではない（記録として残すだけ）。
+ */
 export function isTrainingPassed(a: QrAgency): boolean {
   return a.trainingStatus === TRAINING_PASSED;
 }
@@ -191,6 +194,11 @@ export function isTrainingPassed(a: QrAgency): boolean {
 /**
  * QR2 をいま発行できない理由。発行できるときは null。
  * 画面の出し分けにも、保存前の確認にも同じものを使う。
+ *
+ * 2026-08-21 決定：研修の合否と本部の承認は、QR2 の条件にしない。
+ * 登録した時点で QR1・QR2 の両方をお渡しする運用に変わったため。
+ * 止めるのは「取次パートナー（個別QRを出さない決まり）」と
+ * 「停止・解約」、それに QR の停止中（frozenBlocker が別に見る）だけ。
  */
 export function qr2Blocker(a: QrAgency): string | null {
   if (a.codeKind === "01") {
@@ -198,18 +206,6 @@ export function qr2Blocker(a: QrAgency): string | null {
   }
   if (a.status === "停止・解約") {
     return "停止・解約の登録には発行できません。稼働状況をご確認ください。";
-  }
-  if (a.trainingStatus === STATUS_UNREADABLE) {
-    return "研修の状況を読み取れませんでした。画面を読み込み直してからお試しください。それでも直らない場合は、代理店の登録内容をご確認ください。";
-  }
-  if (a.trainingStatus !== TRAINING_PASSED) {
-    return "研修に合格していません。研修に合格するまで、ご契約のご案内（QR2）はお渡しできません。";
-  }
-  if (a.qr2Status === STATUS_UNREADABLE) {
-    return "発行の申請の状況を読み取れませんでした。画面を読み込み直してからお試しください。それでも直らない場合は、代理店の登録内容をご確認ください。";
-  }
-  if (a.qr2Status !== QR2_APPROVED) {
-    return "本部の承認がまだです。申請の内容を確かめて「承認する」を押してから発行してください。";
   }
   return null;
 }

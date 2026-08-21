@@ -10,7 +10,6 @@ import {
   QR2_REJECTED,
   QR2_UNAPPLIED,
   QR_LABEL,
-  TRAINING_PASSED,
   buildQrUrl,
   qr1Blocker,
   qr2Blocker,
@@ -157,8 +156,9 @@ function refresh(code: string): void {
 /**
  * QR1 / QR2 のご案内URLを作って保存する。
  *
- * QR2 は「研修に合格」かつ「本部が承認済」でなければ発行しない。
+ * 2026-08-21 から、QR2 に研修の合格も本部の承認も要らない。
  * 取次パートナーには個別のQRを発行しない（共通の公式LINEをご案内する）。
+ * QR を停止している相手には発行しない（止めたURLが戻ってしまうため）。
  */
 export async function issueQrAction(
   _prev: QrActionState,
@@ -253,9 +253,9 @@ function formDataOf(values: Record<string, string>): FormData {
 /**
  * QR2 の発行を本部が承認する。承認しただけでは発行されない（続けて発行を押す）。
  *
- * 代理店からのご依頼は、電話・メール・研修の場など、この画面の外で届くことがある。
- * そのため「発行の申請」が画面に届いていなくても、本部の判断で承認できるようにしている。
- * 止めるのは、取次パートナー・研修に未合格・停止・解約・すでに承認済みのときだけ。
+ * 2026-08-21 に、研修の合否は QR2 の条件から外れた。
+ * いまこの操作が要るのは、「発行を見送る」で差戻しにした相手を戻すときだけ。
+ * 止めるのは、取次パートナー・停止中・停止解約・すでに承認済みのときだけ。
  */
 export async function approveQr2Action(
   _prev: QrActionState,
@@ -285,13 +285,6 @@ export async function approveQr2Action(
     const frozen = frozenBlocker(agency, name, "あらためて承認してください。");
     if (frozen) return { error: frozen };
 
-    if (agency.trainingStatus !== TRAINING_PASSED) {
-      return {
-        error:
-          `${name} はまだ研修に合格していません（現在：${agency.trainingStatus || "未受講"}）。` +
-          "合格を確認してから承認してください。",
-      };
-    }
     if (agency.status === "停止・解約") {
       return {
         error:
@@ -316,7 +309,6 @@ export async function approveQr2Action(
       { type: "agency", key: code },
       {
         代理店: name,
-        研修: agency.trainingStatus,
         承認前: before,
         申請日: agency.qr2RequestedOn,
       },
@@ -580,8 +572,7 @@ export async function unfreezeQrAction(
   return {
     ok:
       `${name} のQRの停止を解除しました。止める前のURLは戻していませんので、発行し直してください。` +
-      "体験のご案内（QR1）は「QR1を発行」から、ご契約のご案内（QR2）は研修の合格を確かめて" +
-      "「発行を承認する」からお進みください。",
+      "体験のご案内（QR1）は「QR1を発行」から、ご契約のご案内（QR2）は「QR2を発行」からお進みください。",
     at: Date.now(),
   };
 }

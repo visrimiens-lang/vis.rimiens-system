@@ -6,7 +6,7 @@ import { setPayUnitAction, type PayUnitState } from "@/actions/pay-unit-actions"
 /**
  * 「この相手にいくら払うか」を、一覧の行の中でそのまま直せる欄。
  *
- * 既定（商品マスタのランク別単価）のときは既定の額をうすく出し、
+ * 既定（推奨の税抜単価。lib/pay-defaults.ts）のときは既定の額をうすく出し、
  * 個別に決めてあるときはその額をはっきり出す。
  * 空にして保存すると既定に戻る。
  *
@@ -25,7 +25,7 @@ export function PayUnitCell({
   name: string;
   /** 個別に決めてある額。未設定なら null */
   value: number | null;
-  /** 未設定のときに実際に使われる額（商品マスタのランク別単価） */
+  /** 未設定のときに実際に使われる額（推奨の税抜単価。lib/pay-defaults.ts） */
   fallback: number | null;
   note: string;
   editable: boolean;

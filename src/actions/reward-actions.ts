@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
+import { bankReady as bankReadyShared } from "@/lib/bank";
 import { audit, selectOne, update } from "@/lib/db";
 
 /**
@@ -152,12 +153,14 @@ async function hqLabel(): Promise<string | null> {
  * ここで止めると支払い自体ができなくなるため、支払いは通して画面で注意だけ出す。
  */
 function bankReady(agency: Row | null): boolean {
-  return Boolean(
-    s_(agency, "bank_name") &&
-      s_(agency, "bank_branch") &&
-      s_(agency, "account_no") &&
-      s_(agency, "account_holder"),
-  );
+  if (!agency) return false;
+  // 判定の中身は src/lib/bank.ts に1つだけ置いてある（画面側と揃えるため）
+  return bankReadyShared({
+    bankName: s_(agency, "bank_name"),
+    bankBranch: s_(agency, "bank_branch"),
+    accountNo: s_(agency, "account_no"),
+    accountHolder: s_(agency, "account_holder"),
+  });
 }
 
 /** 振込先を、記録に残してよい形にする（口座番号は残さない）。 */

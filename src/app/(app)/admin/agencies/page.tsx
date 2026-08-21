@@ -672,7 +672,7 @@ function AgencyTable({
               {/*
                 この代理店に払う1台あたりの額。本部は誰の額でも変えられる
                 （権限の判定は actions/pay-unit-actions.ts が行う）。
-                空欄なら既定（商品マスタのランク別単価）が使われる。
+                空欄なら既定（推奨の税抜単価）が使われる。
               */}
               <Td numeric align="right">
                 <PayUnitCell

@@ -535,17 +535,32 @@ export async function registerAgency(app: AgencyApplication): Promise<IntakeResu
   if (!allowed.ok) return { ok: false, needsReview: true, message: allowed.reason };
 
   /*
+   * 個人販売代理店かどうか。販路種別と登録区分（法人／個人）の両方で見る。
+   * コードの決め方と、英字だけのコードを取らせない判定の両方で使う。
+   */
+  const isIndividual =
+    channel === "個人販売パートナー" || (app.entityType || "").includes("個人");
+
+  /*
    * 組織の英字（自社コード）を決める。
    *
    *   会社の申込          … 申込者が入力した自社代理店コードが、その会社の組織になる
+   *   個人販売代理店       … 全員 KVIS で固定（2026-08-20 決定）。
+   *                        個人は会社名が無く一人ずつ英字を決められないため、
+   *                        皆で同じ英字を使い KVIS0001・KVIS0002 と番号で分かれる。
+   *                        欄に別の文字を打っても KVIS に直す。誰の配下かはコードではなく
+   *                        招待コードで決まった上位（parent_code）で持つので、困らない。
    *   スタッフ・取次パートナー … 所属する会社の組織を引き継ぐ
    *
    * 会社が自社コードを入れずに申し込んだとき（欄を必須にする前の申込や、
    * 本部の代理入力）は、上位の組織をそのまま引き継いで従来どおり採番する。
    */
+  const KOJIN_ORG = "KVIS";
   const orgCode = isMember
     ? orgOf(parent)
-    : normalizeCode(app.orgCode || "") || orgOf(parent);
+    : isIndividual
+      ? KOJIN_ORG
+      : normalizeCode(app.orgCode || "") || orgOf(parent);
 
   if (!isOrgCode(orgCode)) {
     return {
@@ -563,13 +578,7 @@ export async function registerAgency(app: AgencyApplication): Promise<IntakeResu
    *   会社              … 自社コードそのもの（MENO・ASUE）。RIM・MET と同じ形。
    *   個人販売代理店      … 自社コードを皆で共有するため「英字＋4桁」（KVIS0001）
    *   スタッフ・取次パートナー … 所属する会社の「英字＋4桁」
-   *
-   * 個人かどうかは、販路種別と登録区分の両方で見る。
-   * 個人の方が代理店種別を選び間違えても、皆で使う英字（KVIS）を
-   * 1人目が英字だけのコードとして取ってしまわないようにするため。
    */
-  const isIndividual =
-    channel === "個人販売パートナー" || (app.entityType || "").includes("個人");
   const wantsBareCode = kind === KIND_COMPANY && !isIndividual;
   let code: string | null = orgCode;
 

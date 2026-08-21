@@ -1,3 +1,4 @@
+import { bankReady, missingBankFields } from "@/lib/bank";
 import { Fragment } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -84,7 +85,7 @@ export const metadata = { title: "報酬の支払管理（本部）｜VIS 代理
  * この値は「さすがに多すぎる」を止めるための保険で、
  * ふだんの取得件数の上限ではない。ここに達したときだけ
  * 「全部は出ていない」と画面に書く。
- * 報酬は受注1件から階層ぶん（最大4行）立つので、受注一覧より多めにとる。
+ * 報酬は受注1件から本部が払うぶん（総販・2次の最大2行＋紹介）立つので、受注一覧より多めにとる。
  */
 const LIMIT = 20000;
 
@@ -198,25 +199,11 @@ function toAgencyInfo(r: Row): AgencyInfo {
   };
 }
 
-/**
- * 振込先がそろっているか。
- * 判定は src/actions/reward-actions.ts と同じ（画面で押せるのに保存で断られる、
- * あるいはその逆が起きないように、条件を揃えてある）。
+/*
+ * 振込先の判定は src/lib/bank.ts に1つだけ置いてある
+ * （サーバー側 reward-actions.ts と条件を揃えるため。
+ *   口座番号の形まで見る理由もそちらに書いてある）。
  */
-function bankReady(a: AgencyInfo | null): boolean {
-  return Boolean(a && a.bankName && a.bankBranch && a.accountNo && a.accountHolder);
-}
-
-/** 振込先のうち、何が足りないのか。 */
-function missingBankFields(a: AgencyInfo | null): string[] {
-  if (!a) return ["金融機関名", "支店名", "口座番号", "口座名義"];
-  const missing: string[] = [];
-  if (!a.bankName) missing.push("金融機関名");
-  if (!a.bankBranch) missing.push("支店名");
-  if (!a.accountNo) missing.push("口座番号");
-  if (!a.accountHolder) missing.push("口座名義");
-  return missing;
-}
 
 /** 支払通知や確認画面に出す振込先の1行。 */
 function bankOneLine(a: AgencyInfo | null): string {

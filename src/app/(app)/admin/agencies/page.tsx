@@ -16,7 +16,7 @@ import {
   type SearchParams,
   type SortState,
 } from "@/lib/list-params";
-import { agencyTypeOf, channelLabel, rankLabel, statusTone } from "@/lib/labels";
+import { AGENCY_TYPES, agencyTypeOf, channelLabel, statusTone } from "@/lib/labels";
 import { PayUnitCell } from "@/components/PayUnitCell";
 import { defaultPayUnit } from "@/lib/pay-defaults";
 import type { Agency } from "@/lib/types";
@@ -42,6 +42,7 @@ import {
   SortableTh,
 } from "@/components/SortableTh";
 import { IssuePassword } from "./IssuePassword";
+import { StopButton } from "./StopButton";
 import { ResetRequests } from "./ResetRequests";
 
 const BASE = "/admin/agencies";
@@ -150,7 +151,8 @@ export default async function AdminAgenciesPage({
   const tab = toTab(readParam(params, "tab"));
   const keyword = readParam(params, "keyword");
   const status = readChoice(params, "status", STATUSES);
-  const rank = readChoice(params, "rank", RANKS);
+  // 絞り込みは申込フォームと同じ「代理店種別」で行う（ランクは画面に出さない）
+  const rank = readParam(params, "rank") || ALL;
   const channel = readParam(params, "channel") || ALL;
   const area = readParam(params, "area") || ALL;
   const askedPw = readChoice(params, "pw", PASSWORD_FILTERS);
@@ -279,7 +281,8 @@ export default async function AdminAgenciesPage({
     if (!matchesKeyword(keyword, [a.code, a.name, a.representative, a.email, a.phone]))
       return false;
     if (status !== ALL && a.status !== status) return false;
-    if (rank !== ALL && a.rank !== rank) return false;
+    if (rank !== ALL && agencyTypeOf(a.rank, a.channel, a.codeKind) !== rank)
+      return false;
     if (channel !== ALL && a.channel !== channel) return false;
     if (area !== ALL && a.area !== area) return false;
     if (pw === "none" && hasPassword(a)) return false;
@@ -363,10 +366,12 @@ export default async function AdminAgenciesPage({
   // 選択肢は、いま開いているタブに実際にある値から作る（他のタブの値は出さない）
   // 絞り込みに渡す値はデータベースのままにして、画面に出す文言だけ呼び方を差し替える。
   const statusOptions = buildOptions(tabRows, (a) => a.status, STATUSES, status);
-  const rankOptions = buildOptions(tabRows, (a) => a.rank, RANKS, rank).map((o) => ({
-    ...o,
-    label: rankLabel(o.value),
-  }));
+  const rankOptions = buildOptions(
+    tabRows,
+    (a) => agencyTypeOf(a.rank, a.channel, a.codeKind),
+    AGENCY_TYPES.map((t) => t.value),
+    rank,
+  ).filter((o) => o.count > 0 || o.value === rank);
   const channelOptions = buildOptions(tabRows, (a) => a.channel, CHANNELS, channel).map(
     (o) => ({ ...o, label: channelLabel(o.value) }),
   );
@@ -528,7 +533,12 @@ export default async function AdminAgenciesPage({
             options={statusOptions}
             allLabel={`すべて（${tabRows.length}）`}
           />
-          <FilterSelect name="rank" label="ランク" value={rank} options={rankOptions} />
+          <FilterSelect
+            name="rank"
+            label="代理店種別"
+            value={rank}
+            options={rankOptions}
+          />
           <FilterSelect
             name="channel"
             label="販路種別"
@@ -573,6 +583,7 @@ export default async function AdminAgenciesPage({
           />
         ) : (
           <PeopleTable
+            tab={tab}
             rows={rows}
             hasPassword={hasPassword}
             sort={sort}
@@ -741,17 +752,26 @@ function AgencyTable({
 /* ---------- 表（取次・スタッフタブ） ---------- */
 
 function PeopleTable({
+  tab,
   rows,
   hasPassword,
   sort,
   params,
 }: {
+  tab: Tab;
   rows: Agency[];
   /** ポータルのログイン情報を発行済みか（確認できないときは null） */
   hasPassword: (a: Agency) => boolean | null;
   sort: SortState;
   params: SearchParams;
 }) {
+  const isStaff = tab === "staff";
+  /*
+   * スタッフ・取次パートナーのコードは「所属会社の英字4文字＋4桁」。
+   * 1列にまとめると SASA0001 が会社のコードに見えてしまうため、
+   * 本人のコードと、所属している会社のコードを別の列にする。
+   */
+  const codeLabel = isStaff ? "スタッフコード" : "パートナーコード";
   const th = (column: string, label: string) => (
     <SortableTh column={column} label={label} sort={sort} basePath={BASE} params={params} />
   );
@@ -760,13 +780,16 @@ function PeopleTable({
     <Table>
       <thead>
         <tr>
-          {th("code", "コード")}
+          {th("code", codeLabel)}
+          {th("parent", "代理店コード")}
           {th("name", "氏名")}
           {th("rank", "区分")}
-          {th("channel", "販路種別")}
-          {th("parent", "上位代理店")}
+          <Th>所属代理店</Th>
+          {isStaff ? null : th("channel", "販路種別")}
           <Th align="right">支払額（1台・税抜）</Th>
           {th("status", "稼働ステータス")}
+          {isStaff ? <Th>QR</Th> : null}
+          {isStaff ? <Th>QRを止める</Th> : null}
           {th("email", "メールアドレス")}
           {th("phone", "電話番号")}
           {th("password", "パスワード")}
@@ -788,15 +811,20 @@ function PeopleTable({
                 "—"
               )}
             </Td>
+            <Td numeric className="whitespace-nowrap text-ink-300">
+              {a.parentCode || "—"}
+            </Td>
             <Td>
               <div className="truncate text-ink-100">{a.name || "（名称未登録）"}</div>
             </Td>
             {/* 申込フォームと同じ呼び方で出す（「2次代理店」「取次店」ではなく） */}
-              <Td className="whitespace-nowrap">{agencyTypeOf(a.rank, a.channel, a.codeKind)}</Td>
-            <Td>{channelLabel(a.channel)}</Td>
+            <Td className="whitespace-nowrap">{agencyTypeOf(a.rank, a.channel, a.codeKind)}</Td>
             <Td>
-              <Parent agency={a} />
+              <div className="truncate text-ink-200">
+                {a.parentName || a.parentCode || "—"}
+              </div>
             </Td>
+            {isStaff ? null : <Td>{channelLabel(a.channel)}</Td>}
             <Td numeric align="right">
               <PayUnitCell
                 code={a.code}
@@ -810,6 +838,24 @@ function PeopleTable({
             <Td>
               <Status status={a.status} />
             </Td>
+            {isStaff ? (
+              <Td className="whitespace-nowrap">
+                <QrMark agency={a} />
+              </Td>
+            ) : null}
+            {isStaff ? (
+              <Td>
+                {a.qr1Url || a.qr2Url || qrFrozen(a) ? (
+                  <StopButton
+                    code={a.code}
+                    name={a.name || a.code}
+                    frozen={qrFrozen(a)}
+                  />
+                ) : (
+                  <span className="text-xs text-ink-500">QRが未発行です</span>
+                )}
+              </Td>
+            ) : null}
             <Td>
               <Mail email={a.email} />
             </Td>
@@ -830,6 +876,37 @@ function PeopleTable({
 }
 
 /* ---------- 表の中の小さな部品 ---------- */
+
+/**
+ * QRの停止は「QR2の発行申請を差戻しにして、理由の頭に目印を付ける」形で持っている。
+ * ★ actions/qr-actions.ts と admin/agencies/[code]/QrPanel.tsx にも同じ文字列がある。
+ *   片方だけ変えると停止中を見分けられなくなるので、必ずそろえること。
+ */
+const FREEZE_MARK = "【QR停止】";
+
+function qrFrozen(a: Agency): boolean {
+  return a.qr2Status === "差戻し" && a.qr2RejectedNote.startsWith(FREEZE_MARK);
+}
+
+/** QRを渡しているか、いま止めているか。止めた理由もその場で読めるようにする。 */
+function QrMark({ agency }: { agency: Agency }) {
+  if (qrFrozen(agency)) {
+    const reason = agency.qr2RejectedNote.slice(FREEZE_MARK.length).trim();
+    return (
+      <div>
+        <Badge tone="bad">停止中</Badge>
+        {reason ? (
+          <div className="mt-1 max-w-40 truncate text-xs text-ink-400" title={reason}>
+            {reason}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+  const has = [agency.qr1Url ? "体験" : "", agency.qr2Url ? "ご契約" : ""].filter(Boolean);
+  if (has.length === 0) return <span className="text-xs text-ink-500">未発行</span>;
+  return <span className="text-xs text-ink-300">{has.join("・")}</span>;
+}
 
 /** 稼働ステータス。色は labels.ts の statusTone に合わせる。 */
 function Status({ status }: { status: string }) {

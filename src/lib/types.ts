@@ -46,6 +46,9 @@ export type Agency = {
   registeredVia: string;
   createdAt: string;
   qr1Url: string;
+  qr2Status: string;
+  qr2RejectedNote: string;
+  trainingStatus: string;
   qr2Url: string;
   /**
    * 上位からこの代理店に払う1台あたりの報酬額。

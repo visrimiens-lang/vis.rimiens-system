@@ -8,7 +8,6 @@ import {
   Building2,
   ClipboardList,
   FileText,
-  IdCard,
   Inbox,
   LayoutDashboard,
   LogOut,
@@ -64,7 +63,6 @@ const HQ_ITEMS: Item[] = [
   { href: "/admin/rewards", label: "報酬の支払", icon: Wallet },
   { href: "/admin/agencies", label: "代理店管理", icon: Building2 },
   // 問題のあった相手のQRを、探し回らずその場で止められる場所。代理店管理のすぐ下に置く。
-  { href: "/admin/staff", label: "スタッフコード", icon: IdCard },
   { href: "/admin/customers", label: "顧客管理", icon: UserRound },
   { href: "/admin/products", label: "商品マスタ", icon: Package },
   { href: "/admin/demo", label: "デモ機管理", icon: Boxes },

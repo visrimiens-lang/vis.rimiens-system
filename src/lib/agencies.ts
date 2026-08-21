@@ -45,6 +45,9 @@ function toAgency(r: Row): Agency {
     registeredVia: s_(r, "registered_via"),
     createdAt: s_(r, "created_at"),
     qr1Url: s_(r, "qr1_url"),
+    qr2Status: s_(r, "qr2_status"),
+    qr2RejectedNote: s_(r, "qr2_rejected_note"),
+    trainingStatus: s_(r, "training_status"),
     qr2Url: s_(r, "qr2_url"),
     /*
      * 上位が決めた「この相手に払う額」。

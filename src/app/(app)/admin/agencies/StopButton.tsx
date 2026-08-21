@@ -4,7 +4,7 @@ import { useActionState, useState } from "react";
 import { freezeQrAction, unfreezeQrAction, type QrActionState } from "@/actions/qr-actions";
 
 /**
- * スタッフ一覧から、そのスタッフのQRを止める／戻すためのボタン。
+ * 代理店管理のスタッフ一覧から、そのスタッフのQRを止める／戻すためのボタン。
  *
  * 止めると当システムからのご案内（QR1・QR2）が消え、
  * QR2 の発行申請は「差戻し」に戻る。稼働状況は変えないので、

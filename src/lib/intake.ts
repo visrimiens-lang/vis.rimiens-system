@@ -482,8 +482,26 @@ function kindOf(
   if (t) {
     return { kind: KIND_COMPANY, rank: t.rank, channel: t.channel, parentFixed: t.parentFixed };
   }
-  // 種別が分からないとき。多く払う側に倒さない。
-  return { kind: KIND_COMPANY, rank: "取次店", channel: "販売代理店" };
+  /*
+   * 種別の欄が無いとき。
+   *
+   * 2026-08-22 に代理店システム登録フォームが作り替えられ、
+   * 「代理店種別」「招待コード」「エリア」の欄がなくなった。
+   * このフォームはエリア統括代理店の申込専用になり、上位は総販売代理店で固定。
+   * 販売代理店・サロン代理店・個人販売代理店は、このフォームからは入らず、
+   * 販売ライセンス認定登録（スタッフ）として登録して、
+   * 所属会社と種別をポータル側で設定する運用に変わった。
+   *
+   * 以前はここで「販売代理店」に倒していたが、いまの申込は必ず統括なので、
+   * そのまま通すと上位が決まらず受信箱に取り残される。
+   */
+  const area = AGENCY_TYPES["エリア統括代理店"];
+  return {
+    kind: KIND_COMPANY,
+    rank: area.rank,
+    channel: area.channel,
+    parentFixed: area.parentFixed,
+  };
 }
 
 /**

@@ -402,3 +402,21 @@ export function usesPortal(
   if (codeKind === "01" || codeKind === "02") return false;
   return rank === "総販売代理店" || rank === "2次代理店";
 }
+
+/**
+ * 会社名をまとめるためのキー。
+ *
+ * 報酬の明細を会社ごとにまとめるとき、表記のゆれで同じ会社が2行に割れないようにする。
+ *   「株式会社樹」「(株)樹」「㈱樹」「株式会社 樹」→ すべて同じ会社として扱う
+ *
+ * 画面に出す名前は元のまま。まとめるときの照合にだけ使う。
+ */
+export function companyKey(name: string | null | undefined): string {
+  return (name || "")
+    .normalize("NFKC")
+    .replace(/[\s\u3000]/g, "")
+    .replace(/[(（]株[)）]|㈱/g, "株式会社")
+    .replace(/[(（]有[)）]|㈲/g, "有限会社")
+    .replace(/[(（]同[)）]/g, "合同会社")
+    .toLowerCase();
+}

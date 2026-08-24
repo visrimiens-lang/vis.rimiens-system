@@ -238,6 +238,35 @@ async function renameParentLabel(code: string, name: string): Promise<number> {
 }
 
 /**
+ * 会社の名前を変えたとき、その会社に所属しているスタッフの
+ * 「所属会社名」も新しい名前にそろえる。
+ *
+ * 所属会社名は報酬を会社ごとにまとめるキーになっている（2026-08-22〜）。
+ * ここを直さないと、改名した後の売上だけが新しい名前で別の行に立ち、
+ * 同じ会社の支払通知が2枚に割れる。
+ *
+ * 直すのは「古い名前のまま残っている行」だけ。
+ * 別の会社名を手で入れてある行（本当に他社に所属している人）は触らない。
+ */
+async function renameCompanyLabel(
+  oldName: string,
+  newName: string,
+): Promise<number> {
+  const before = (oldName || "").trim();
+  if (!before || before === newName) return 0;
+  try {
+    const rows = await update<Row>(
+      `agencies?company_name=eq.${encodeURIComponent(before)}`,
+      { company_name: newName },
+    );
+    return rows.length;
+  } catch {
+    // 列がまだ無い環境では何もしない（名前の変更そのものは通す）
+    return 0;
+  }
+}
+
+/**
  * 配下・孫までの「ゼロ次代理店」を、新しい組織にそろえる。
  * 直した件数を返す。
  *
@@ -609,6 +638,10 @@ export async function updateAgencyAction(
       renamed = await renameParentLabel(code, t.name);
       if (renamed > 0) {
         notes.push(`直下 ${renamed} 件の「上位」の表示も新しい名前に直しました。`);
+      }
+      const recompany = await renameCompanyLabel(s(current, "name"), t.name);
+      if (recompany > 0) {
+        notes.push(`${recompany} 名の「所属会社名」も新しい名前に直しました。`);
       }
     } catch {
       troubles.push(

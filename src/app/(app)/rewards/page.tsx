@@ -35,7 +35,7 @@ import {
   type SortState,
 } from "@/lib/list-params";
 import { SortableTh } from "@/components/SortableTh";
-import { rankLabel } from "@/lib/labels";
+import { rankLabel, companyKey} from "@/lib/labels";
 import { MonthSelect } from "./MonthSelect";
 
 const BASE = "/rewards";
@@ -330,14 +330,20 @@ export default async function RewardsPage({
     | { kind: "member"; g: OwnerGroup }
   )[] = [];
   {
-    const byCompany = new Map<string, OwnerGroup[]>();
+    /*
+      まとめるキーは表記のゆれを吸収したもの（companyKey）。
+      「株式会社樹」と「(株)樹」が2行に割れると、支払通知が二重になる。
+      画面に出す名前は、その会社で最初に出てきた書き方をそのまま使う。
+    */
+    const byCompany = new Map<string, { label: string; list: OwnerGroup[] }>();
     for (const g of groups) {
-      const key = g.company || g.name || g.code;
-      const list = byCompany.get(key) ?? [];
-      list.push(g);
-      byCompany.set(key, list);
+      const label = g.company || g.name || g.code;
+      const key = companyKey(label) || g.code;
+      const hit = byCompany.get(key);
+      if (hit) hit.list.push(g);
+      else byCompany.set(key, { label, list: [g] });
     }
-    for (const [company, list] of byCompany) {
+    for (const [, { label: company, list }] of byCompany) {
       const units = list.reduce((s, g) => s + g.units, 0);
       // 会社に1人しかいないときは、小計を挟まずその人の行だけ出す
       if (list.length === 1) {
@@ -622,12 +628,6 @@ export default async function RewardsPage({
                     {yen(rewardTotal)}
                   </Td>
                 ) : null}
-                {showReward ? <Td>{null}</Td> : null}
-                {showReward ? (
-                  <Td numeric align="right" className="font-semibold text-gold-400">
-                    {hasPayout ? yen(payoutTotal) : "—"}
-                  </Td>
-                ) : null}
                 <Td>{null}</Td>
               </tr>
             </tfoot>
@@ -702,6 +702,13 @@ export default async function RewardsPage({
                 {showReward ? (
                   <Td numeric align="right" className="font-semibold text-gold-400">
                     {yen(rewardTotal)}
+                  </Td>
+                ) : null}
+                {/* 支払単価は人ごとに違うので、合計は出さない */}
+                {showReward ? <Td>{null}</Td> : null}
+                {showReward ? (
+                  <Td numeric align="right" className="font-semibold text-gold-400">
+                    {hasPayout ? yen(payoutTotal) : "—"}
                   </Td>
                 ) : null}
               </tr>

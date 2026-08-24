@@ -19,10 +19,13 @@ import { STAFF_TYPES } from "@/lib/labels";
  * ■ 誰が変えられるか
  *
  *   ・本部
- *   ・そのスタッフの直上（所属しているエリア統括代理店）
+ *   ・そのスタッフの上にいる代理店（直上でなくてもよい）
  *
- * 支払額（pay-unit-actions.ts）と同じ決まりにそろえてある。
- * 間に人が挟まっている相手を飛び越えて変えられないように、直上だけに限る。
+ * 支払額（pay-unit-actions.ts）は「直上だけ」に限っている。お金の話なので、
+ * 間に人が挟まっている相手の取り分を飛び越えて決められないようにするため。
+ * こちらは金額に関わらない情報で、しかも旧方式で登録された会社
+ * （株式会社樹など）の配下スタッフは統括から見ると孫にあたるため、
+ * 直上だけに限ると誰も直せない人が出る。上にいる代理店なら直せることにする。
  *
  * ■ ランクと販路種別は触らない
  *
@@ -86,11 +89,31 @@ export async function setStaffProfileAction(
   }
 
   const isHq = viewer.kind === "hq";
-  const isParent = viewer.kind === "agency" && viewer.code === s_(target, "parent_code");
-  if (!isHq && !isParent) {
+  /*
+   * 自分の配下にいるかを、上へたどって確かめる。
+   * 画面から来た値ではなく、その都度データベースの parent_code をたどる。
+   * 途中で輪になっていても止まるように、見た相手を覚えておく。
+   */
+  let isAbove = false;
+  if (!isHq && viewer.kind === "agency") {
+    const seen = new Set<string>();
+    let cur = s_(target, "parent_code");
+    while (cur && !seen.has(cur)) {
+      if (cur === viewer.code) {
+        isAbove = true;
+        break;
+      }
+      seen.add(cur);
+      const up = await selectOne<Row>(
+        `agencies?select=parent_code&code=eq.${encodeURIComponent(cur)}`,
+      );
+      cur = s_(up, "parent_code");
+    }
+  }
+  if (!isHq && !isAbove) {
     return {
       error:
-        "このスタッフの所属と種別を変えられるのは、本部と所属先の代理店だけです。",
+        "このスタッフの所属と種別を変えられるのは、本部と、上にいる代理店だけです。",
     };
   }
 

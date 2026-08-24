@@ -544,7 +544,13 @@ export default async function OrganizationPage({
                             companyName={a.companyName}
                             staffType={a.staffType}
                             fallbackName={a.parentName}
-                            editable={a.parentCode === me.code}
+                            /*
+                              所属会社名と種別は、配下であれば直せる。
+                              旧方式で登録された会社（株式会社樹など）の配下スタッフは
+                              統括から見ると孫にあたるため、直下に限ると誰も直せなくなる。
+                              金額に関わらない情報なので、配下すべてに開く。
+                            */
+                            editable
                           />
                         ) : (
                           <span className="text-ink-500">—</span>

@@ -323,11 +323,26 @@ export default async function CustomersPage({
     ? periodOrders.filter((o) => o.recordId === pinnedOrder)
     : periodOrders;
 
+  /*
+   * 担当コード → その人が属している会社のコード。
+   * 会社を選んで絞ったときに、その会社のスタッフぶんも拾えるようにする。
+   * さかのぼるのは1段だけ（会社 → その配下）。
+   */
+  const companyOfCode = new Map<string, string>();
+  for (const m of members) {
+    if (m.parentCode) companyOfCode.set(m.code, m.parentCode);
+  }
+
   // 担当コードごとの件数（期間で絞ったあと・担当で絞る前）
   const countByCode = new Map<string, number>();
   for (const o of scoped) {
     const key = o.ownerCode || "";
     countByCode.set(key, (countByCode.get(key) ?? 0) + 1);
+    // 会社を選んだときの件数にも、その会社の人ぶんを足しておく
+    const company = companyOfCode.get(key);
+    if (company && company !== key) {
+      countByCode.set(company, (countByCode.get(company) ?? 0) + 1);
+    }
   }
 
   // 選択肢は「配下の全コード」＋「受注に出てきたコード」。0件の人も選べるようにする。
@@ -359,7 +374,17 @@ export default async function CustomersPage({
 
   /* --- 絞り込み --- */
   const found = scoped.filter((o) => {
-    if (selectedCode !== ALL && o.ownerCode !== selectedCode) return false;
+    /*
+      担当で絞る。会社（旧方式で自分のコードを持つ ITSU など）を選んだときは、
+      その会社に所属する人ぶんも含める。
+      2026-08-22 に担当をスタッフ本人にしたため、会社コードだけで絞ると
+      その会社の売上が1件も出てこなくなる。
+    */
+    if (selectedCode !== ALL) {
+      const own = o.ownerCode === selectedCode;
+      const sameCompany = companyOfCode.get(o.ownerCode) === selectedCode;
+      if (!own && !sameCompany) return false;
+    }
     // 2026-07-09 の回答書どおり、お客様の氏名と電話番号で探せるようにする。
     return matchesKeyword(keyword, [o.customerName, o.phone]);
   });

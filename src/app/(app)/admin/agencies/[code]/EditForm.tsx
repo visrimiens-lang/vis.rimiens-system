@@ -403,6 +403,14 @@ export function EditForm({
 }) {
   const [state, run, pending] = useActionState(updateAgencyAction, initial);
 
+  /*
+    いまのランク＋販路種別が、申込フォームの6種別のどれに当たるか。
+    どれにも当たらない古いデータ（例: 取次店＋未設定）のときは、
+    うっかり別の種別で上書きされないように「いまの設定のまま」を選べるようにする。
+  */
+  const currentAgencyType = agencyTypeOf(agency.rank, agency.channel, agency.codeKind);
+  const knownAgencyType = AGENCY_TYPES.some((v) => v.value === currentAgencyType);
+
   // 日付として読めない生年月日は、消してしまわないよう文字のまま直してもらう
   const birthdayValue = toDateValue(agency.birthday);
   const birthdayUnreadable = Boolean(agency.birthday) && !birthdayValue;
@@ -500,10 +508,21 @@ export function EditForm({
             <SelectField
               name="agencyType"
               label="代理店種別"
-              defaultValue={agencyTypeOf(agency.rank, agency.channel, agency.codeKind)}
+              /*
+                いまの値が選択肢に無いときは、何も選ばない状態にする。
+                選択肢に無い値を defaultValue に渡すと、ブラウザは先頭
+                （エリア統括代理店）を選んだ状態にしてしまう。それに気づかず
+                他の項目を直して保存すると、ランクが 取次店 → 2次代理店 に化け、
+                本部の報酬台帳に 62,700 円が立つ。
+                （ランク＋販路種別の組が申込フォームの6種別に無い古いデータで起きる）
+              */
+              defaultValue={knownAgencyType ? currentAgencyType : ""}
               disabled={pending}
               hint="申込フォームの選択肢と同じです。報酬の単価と、上位の枠の数え方がこれで決まります。"
             >
+              {knownAgencyType ? null : (
+                <option value="">いまの設定のまま（{currentAgencyType}）</option>
+              )}
               {AGENCY_TYPES.map((v) => (
                 <option key={v.value} value={v.value}>
                   {v.value}

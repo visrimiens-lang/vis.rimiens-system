@@ -106,6 +106,8 @@ function groupByOwner(
   names: Map<string, string>,
   companies: Map<string, string>,
   payTo: Map<string, { unit: number | null; custom: boolean }>,
+  /** 担当コード → 支払額を引く相手のコード（スタッフなら所属会社にさかのぼる） */
+  payeeOf: Map<string, string>,
   selfCode: string,
 ): OwnerGroup[] {
   const buckets = new Map<string, OrderWithReward[]>();
@@ -118,8 +120,17 @@ function groupByOwner(
   return [...buckets.entries()]
     .map(([code, list]) => {
       const units = sumUnits(list);
-      // 自分の売上には払わない。配下として登録されているコードにだけ支払額を出す。
-      const pay = code !== selfCode ? payTo.get(code) : undefined;
+      /*
+       * 自分の売上には払わない。配下として登録されているコードにだけ支払額を出す。
+       *
+       * 担当がスタッフのときは、本人に個別の額が入っていればそれを使い、
+       * 入っていなければ所属している会社の額を使う（payeeOf がその相手を返す）。
+       * 2026-08-22 に担当をスタッフ本人にしたため、ここで会社まで
+       * さかのぼらないと、旧方式で登録された会社ぶんの支払額が
+       * まるごと「—」になり、支払通知から金額が消える。
+       */
+      const payeeCode = code !== selfCode ? (payeeOf.get(code) ?? code) : "";
+      const pay = payeeCode ? payTo.get(payeeCode) : undefined;
       const payUnit = pay?.unit ?? null;
       return {
         code,
@@ -192,6 +203,8 @@ export default async function RewardsPage({
   /** 担当コード → 所属会社名。会社ごとにまとめて見るために使う（2026-08-22〜）。 */
   let companies = new Map<string, string>();
   let payTo = new Map<string, { unit: number | null; custom: boolean }>();
+  /** 担当コード → 支払額を引く相手のコード（下の payeeOf の説明を参照）。 */
+  let payeeOf = new Map<string, string>();
   /** 報酬の単価を引くときのランク（データベースの値）。表示には rankLabel() を通す。 */
   let rewardRank = "";
   let rewardAvailable = true;
@@ -226,6 +239,34 @@ export default async function RewardsPage({
           d.code,
           { unit: effectivePayUnit(d), custom: d.payUnit !== null },
         ]),
+      );
+      /*
+       * 「この担当ぶんの支払額を、誰の単価で計算するか」。
+       *
+       * 2026-08-22 に受注の担当をスタッフ本人にしたため、そのままだと
+       * 旧方式（会社が自分のコードを持つ）で登録された会社ぶんの支払額が
+       * まるごと「—」になる。ITSU0001 が売った3台は、SASA から見れば
+       * 「株式会社樹（ITSU）に払う」ぶんなので、会社までさかのぼって単価を引く。
+       *
+       *   本人に個別の額が入っている        … 本人
+       *   入っていない                     … 自分の直下にあたる祖先までさかのぼる
+       *
+       * 新方式（スタッフが直下）なら本人がそのまま直下なので、さかのぼらない。
+       */
+      const parentOf = new Map(descendants.map((d) => [d.code, d.parentCode]));
+      payeeOf = new Map(
+        descendants.map((d) => {
+          if (d.payUnit !== null) return [d.code, d.code];
+          let cur = d.code;
+          const seen = new Set<string>();
+          while (!seen.has(cur)) {
+            seen.add(cur);
+            const up = parentOf.get(cur);
+            if (!up || up === self.code) break;
+            cur = up;
+          }
+          return [d.code, cur];
+        }),
       );
       rewardRank = effectiveRank(self);
       rewardAvailable = canComputeReward(self);
@@ -276,7 +317,7 @@ export default async function RewardsPage({
   const rewardTotal = showReward && rewardAvailable ? sumReward(rows) : null;
   const hasMissingUnit =
     showReward && (!rewardAvailable || rows.some((r) => r.unitReward === null));
-  const groups = groupByOwner(rows, names, companies, payTo, viewer.code);
+  const groups = groupByOwner(rows, names, companies, payTo, payeeOf, viewer.code);
 
   /*
    * 会社ごとの小計を挟んだ並びを作る（2026-08-22〜）。
@@ -298,26 +339,42 @@ export default async function RewardsPage({
     }
     for (const [company, list] of byCompany) {
       const units = list.reduce((s, g) => s + g.units, 0);
-      const rewardVals = list.map((g) => g.reward).filter((v): v is number => v !== null);
-      const payoutVals = list.map((g) => g.payout).filter((v): v is number => v !== null);
       // 会社に1人しかいないときは、小計を挟まずその人の行だけ出す
       if (list.length === 1) {
         companyRows.push({ kind: "member", g: list[0] });
         continue;
       }
+      /*
+       * 1人でも算出できない人がいれば、小計は出さずに「—」にする。
+       * 出せるぶんだけ足すと、欠けた額があるのに「それらしい数字」が出て、
+       * そのまま支払通知を作ると払い漏れる。
+       * 明細1件ぶんでも単価が引けなければ null にする sumReward と同じ決まり。
+       */
       companyRows.push({
         kind: "company",
         company,
         count: list.length,
         units,
-        reward: rewardVals.length > 0 ? rewardVals.reduce((s, v) => s + v, 0) : null,
-        payout: payoutVals.length > 0 ? payoutVals.reduce((s, v) => s + v, 0) : null,
+        reward: list.some((g) => g.reward === null)
+          ? null
+          : list.reduce((s, g) => s + (g.reward ?? 0), 0),
+        payout: list.some((g) => g.payout === null)
+          ? null
+          : list.reduce((s, g) => s + (g.payout ?? 0), 0),
       });
       for (const g of list) companyRows.push({ kind: "member", g });
     }
   }
-  const payoutTotal = groups.reduce((t, g) => t + (g.payout ?? 0), 0);
-  const hasPayout = groups.some((g) => g.payout !== null);
+  /*
+   * お支払額の合計。
+   * 払う相手のうち1人でも単価が引けないときは合計を出さない。
+   * 以前は null を 0 として足していたため、スタッフぶんが抜けた額が
+   * 「合計」として出て、警告も出ないまま支払通知が作られる状態だった。
+   */
+  const payable = groups.filter((g) => g.code !== viewer.code);
+  const missingPayUnit = payable.filter((g) => g.payout === null);
+  const payoutTotal = payable.reduce((t, g) => t + (g.payout ?? 0), 0);
+  const hasPayout = payable.length > 0 && missingPayUnit.length === 0;
   const rewardRankText = rankLabel(rewardRank);
 
   // 「150台 × 62,700円」の形で見せられるのは、単価が1種類に揃っているときだけ。
@@ -426,6 +483,19 @@ export default async function RewardsPage({
           {rankMissing
             ? "代理店ランクが登録されていないため、報酬額を計算できません。本部にご確認ください。"
             : "販売代理店分の1台あたり単価が商品マスタに未設定のため、金額を表示できません。本部にお問い合わせください。"}
+        </Notice>
+      ) : null}
+
+      {/*
+        支払額が出せない相手がいるときは、必ず知らせる。
+        黙って0として足すと、欠けた額に気づかないまま支払通知が作られる。
+      */}
+      {showReward && missingPayUnit.length > 0 ? (
+        <Notice tone="warn">
+          支払額を出せない担当が {missingPayUnit.length} 名います（
+          {missingPayUnit.map((g) => g.name || g.code).join("、")}）。
+          「組織と枠」でその方の支払額（1台あたり・税抜）を入れると、お支払額と合計が出ます。
+          入るまで、お支払額の合計は出しません。
         </Notice>
       ) : null}
 

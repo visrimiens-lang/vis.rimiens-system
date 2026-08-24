@@ -2,6 +2,7 @@ import "server-only";
 import { audit, insert, select, selectOne, update } from "./db";
 import { usesPortal } from "./labels";
 import { OFFICIAL_LINE_URL, QR2_APPROVED, buildQrUrl, tossUpUrl } from "./qr";
+import { AREA_QUOTA, DEFAULT_STAFF_LIMIT } from "./slots";
 import {
   HQ_MAIL,
   PORTAL_URL,
@@ -264,6 +265,8 @@ export async function canRegisterUnder(
   parent: Row,
   kind: string,
   channel: string,
+  /** 申込に入っていたエリア区分。統括代理店のエリア枠（全国60社）を見るのに使う。 */
+  areaClass = "",
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   const parentRank = s_(parent, "rank");
   const parentKind = s_(parent, "code_kind");
@@ -291,6 +294,35 @@ export async function canRegisterUnder(
   if (parent["special_slot"] === true) return { ok: true };
 
   /*
+   * 上位が総販売代理店のときは、配下がエリア統括代理店になる。
+   * 枠は「スタッフ100名」ではなく、全国60社のエリア枠で見る。
+   *
+   * ここを見ていなかったため、関東が 15/15 で埋まっていても
+   * 申込フォームからは 16 社目が登録できてしまっていた
+   * （本部が手で登録すると checkSlotRoom が弾くので、経路で答えが違った）。
+   */
+  if (s_(parent, "rank") === "総販売代理店" && kind !== KIND_STAFF) {
+    const area = normalizeArea(areaClass || "");
+    const quota = AREA_QUOTA.find((q) => q.area === area);
+    if (quota) {
+      const rows = await select<Row>(
+        `agencies?select=id,rank,status,area_class,area&rank=eq.${encodeURIComponent("2次代理店")}`,
+      );
+      const used = rows.filter(
+        (a) =>
+          s_(a, "status") !== "停止・解約" &&
+          normalizeArea(s_(a, "area_class") || s_(a, "area")) === area,
+      ).length;
+      if (used >= quota.limit) {
+        return {
+          ok: false,
+          reason: `${area}の統括代理店は上限（${quota.limit}社）に達しています。本部での確認が必要です。`,
+        };
+      }
+    }
+  }
+
+  /*
    * 枠の空きを見る。
    *
    * 2026-08-22 から枠は「スタッフ100名」の1本になり、
@@ -300,7 +332,17 @@ export async function canRegisterUnder(
    * （またはその逆）という食い違いが起きる。申込は受信箱に
    * needsReview として溜まるだけなので、気づくのが遅れる。
    */
-  const limit = Number(parent["limit_staff"] ?? 0) || 0;
+  /*
+   * 列がまだ無い／NULL のときは既定（100名）で見る。
+   * ここを 0（上限なし）に倒すと、画面が「100 / 100 名・枠が埋まりました」と
+   * 出しているのに、申込フォームからの登録だけが素通りして 101 人目が入る。
+   * 数え方も既定値も、画面（lib/agencies.ts の toAgency）と必ずそろえること。
+   */
+  const rawLimit = parent["limit_staff"];
+  const limit =
+    rawLimit === null || rawLimit === undefined
+      ? DEFAULT_STAFF_LIMIT
+      : Number(rawLimit) || 0;
   if (limit <= 0) return { ok: true }; // 0 は「上限なし」
 
   const siblings = await select<Row>(
@@ -681,7 +723,7 @@ export async function registerAgency(app: AgencyApplication): Promise<IntakeResu
     };
   }
 
-  const allowed = await canRegisterUnder(parent, kind, channel);
+  const allowed = await canRegisterUnder(parent, kind, channel, app.areaClass || "");
   if (!allowed.ok) return { ok: false, needsReview: true, message: allowed.reason };
 
   /*

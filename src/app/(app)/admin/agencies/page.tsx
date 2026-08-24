@@ -409,19 +409,19 @@ export default async function AdminAgenciesPage({
           label="代理店"
           value={String(agencies.length)}
           unit="社"
-          hint="コード区分 00 ・上位の枠を消費する"
+          hint="コード区分 00 ・上位の枠を1名ぶん使う"
         />
         <StatTile
           label="取次パートナー"
           value={String(partners.length)}
           unit="件"
-          hint="コード区分 01 ・枠は消費しない"
+          hint="コード区分 01 ・上位の枠を1名ぶん使う"
         />
         <StatTile
           label="スタッフ"
           value={String(staff.length)}
           unit="名"
-          hint="コード区分 02 ・枠は消費しない"
+          hint="コード区分 02 ・上位の枠を1名ぶん使う"
         />
         <StatTile
           label="増枠申請"
@@ -615,7 +615,7 @@ export default async function AdminAgenciesPage({
       {tab === "agency" && rows.length > 0 ? (
         <p className="text-xs leading-relaxed text-ink-400">
           枠は「直下にいる代理店（コード区分 00・解約分を除く）」の数を数えています。
-          取次パートナーとスタッフは何社増えても枠を消費しません。
+直下にいる方は、コード区分にかかわらず1名ぶん枠を使います（2026-08-22〜）。
         </p>
       ) : null}
 
@@ -1046,7 +1046,7 @@ function emptyDescription(tab: Tab, filtered: boolean): string {
     return "申込フォームから届いてコード区分 00 で登録されると、ここに自動で表示されます。";
   }
   if (tab === "partner") {
-    return "取次パートナー（コード区分 01）は、代理店が発行した紹介用QRから申し込まれると、ここに自動で表示されます。枠は消費しません。";
+    return "取次パートナー（コード区分 01）は、代理店が発行した紹介用QRから申し込まれると、ここに自動で表示されます。";
   }
-  return "スタッフ（コード区分 02）は、代理店が自社の担当者を登録すると、ここに自動で表示されます。枠は消費しません。";
+  return "スタッフ（コード区分 02）は、代理店が自社の担当者を登録すると、ここに自動で表示されます。";
 }

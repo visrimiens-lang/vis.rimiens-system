@@ -79,9 +79,9 @@ const CHANNELS = [
   "未設定",
 ] as const;
 const CODE_KINDS: { value: string; label: string }[] = [
-  { value: "00", label: "00 ・会社（枠を消費する）" },
-  { value: "01", label: "01 ・取次パートナー（取次枠を消費する）" },
-  { value: "02", label: "02 ・スタッフ（枠を消費しない）" },
+  { value: "00", label: "00 ・会社" },
+  { value: "01", label: "01 ・取次パートナー" },
+  { value: "02", label: "02 ・スタッフ" },
 ];
 const STATUSES = ["未稼働", "稼働中", "停止・解約"] as const;
 const TRAININGS = ["未受講", "受講中", "合格", "不合格"] as const;

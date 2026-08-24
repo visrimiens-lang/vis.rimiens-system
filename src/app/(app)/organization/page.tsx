@@ -6,7 +6,6 @@ import {
   findAgencyByCode,
   getSlotSummary,
   listDirectChildren,
-  slotLimitsOf,
   type SlotSummary,
 } from "@/lib/agencies";
 import {
@@ -125,7 +124,7 @@ export default async function OrganizationPage({
   const header = (
     <PageHeader
       title="組織と枠"
-      description="配下の代理店の並びと、枠の空き状況をまとめています。枠は販路種別ごとに分かれていて、合計100枠です。配下の連絡先（メールアドレス・電話番号）もこの画面で確認できます。"
+      description="配下の並びと、枠の空き状況をまとめています。枠はスタッフ100名です。配下の連絡先（メールアドレス・電話番号）もこの画面で確認でき、所属会社と種別はこの画面で設定します。"
     />
   );
 
@@ -153,8 +152,8 @@ export default async function OrganizationPage({
         const usage = areaUsage(await listAllAgencies());
         areaRows = usage.rows;
         areaTotal = usage.total;
-      } else if (model === "channel") {
-        breakdown = breakdownSlots(me, direct, slotLimitsOf(me));
+      } else if (model === "staff") {
+        breakdown = breakdownSlots(me, direct);
       }
       // model === "none"（取次パートナー・スタッフ）は配下を持たないため枠を出さない
     }
@@ -202,9 +201,9 @@ export default async function OrganizationPage({
   // まとめて入る区分なので、「販売代理店」と書くと配下の統括代理店まで
   // 販売代理店として数えているように見えてしまう。
   const kindRows = [
-    { kind: "00", note: "（コード区分00）", slot: "1社分消費" },
-    { kind: "01", note: "", slot: "消費しない" },
-    { kind: "02", note: "", slot: "消費しない" },
+    { kind: "00", note: "（コード区分00）", slot: "1名分消費" },
+    { kind: "01", note: "", slot: "1名分消費" },
+    { kind: "02", note: "", slot: "1名分消費" },
     { kind: "", note: "", slot: "—" },
   ]
     .map((b) => ({
@@ -215,9 +214,7 @@ export default async function OrganizationPage({
     }))
     .filter((b) => b.kind !== "" || b.all > 0);
 
-  const suspendedDirect = directChildren.filter(
-    (a) => a.codeKind === "00" && a.status === "停止・解約",
-  ).length;
+  const suspendedDirect = directChildren.filter((a) => a.status === "停止・解約").length;
 
   /* --- 配下の一覧（連絡先つき） --- */
   const contacts = descendants.filter((a) =>

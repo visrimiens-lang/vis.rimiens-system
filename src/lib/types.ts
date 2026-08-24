@@ -44,8 +44,15 @@ export type Agency = {
   email: string;
   phone: string;
   status: string;
-  slotLimit: number;
-  /** 販路種別ごとの枠上限。0 は未設定（既定値で扱う）。 */
+  /**
+   * 直下に登録できるスタッフの上限（2026-08-22〜）。
+   * 0 は「上限なし」。既定は100名。
+   */
+  staffLimit: number;
+  /**
+   * 販路種別ごとの枠上限（2026-08-22 より前の持ち方）。
+   * 枠はスタッフ1本にまとめたので、いまは本部の操作記録を読むためだけに残している。
+   */
   slotLimits: {
     販売代理店枠上限: number;
     サロン代理店枠上限: number;

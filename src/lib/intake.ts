@@ -277,48 +277,41 @@ export async function canRegisterUnder(
   }
 
   /*
-   * 自社のスタッフは、どのランクの会社でも登録できる。枠も使わない。
+   * 会社の下に代理店はぶら下げられない（4次以降の禁止）。
+   * ただしスタッフは「人」なので、どのランクの会社の下にも登録できる。
    *
-   * ここは下の「取次店の下に代理店は登録できません」より前に置くこと。
-   * 3次代理店（販売代理店・サロン代理店）はランクが「取次店」なので、
-   * 順番が逆だとスタッフの登録が全部はじかれてしまう。
-   * 2026-08-20 の打合せで決まった「3次代理店も自社コードでスタッフを登録する」
-   * （アスペクト → ASUE0001）が、それだと1件も通らない。
-   *
-   * スタッフが売った売上は所属先の会社に付く（resolveAttribution）ので、
-   * 支払いの段が増えるわけではなく、4次以降の禁止にはあたらない。
+   * ここは順番が大事。3次代理店（販売代理店・サロン代理店）はランクが
+   * 「取次店」なので、先に取次店を弾くとスタッフの登録が全部はじかれる。
    */
-  if (kind === KIND_STAFF) return { ok: true };
-
-  if (parentRank === "取次店") {
+  if (kind !== KIND_STAFF && parentRank === "取次店") {
     return { ok: false, reason: `${s_(parent, "name")} の下に代理店は登録できません。` };
   }
 
   // 特別枠は上限の対象外
   if (parent["special_slot"] === true) return { ok: true };
 
-  // 枠の空きを見る
-  const column =
-    channel === "サロン代理店" ? "limit_salon"
-    : channel === "個人販売パートナー" ? "limit_kojin"
-    : channel === "サロン提携パートナー（取次）" ? "limit_toritsugi"
-    : "limit_hanbai";
-  const limit = Number(parent[column] ?? 0) || 0;
+  /*
+   * 枠の空きを見る。
+   *
+   * 2026-08-22 から枠は「スタッフ100名」の1本になり、
+   * 直下にいる稼働中の相手は区分にかかわらず1名ぶん使う。
+   * 数え方は画面（lib/slots.ts の consumesSlot）と必ずそろえること。
+   * ここだけ古い数え方が残ると「画面では空きがあるのに申込は弾かれる」
+   * （またはその逆）という食い違いが起きる。申込は受信箱に
+   * needsReview として溜まるだけなので、気づくのが遅れる。
+   */
+  const limit = Number(parent["limit_staff"] ?? 0) || 0;
+  if (limit <= 0) return { ok: true }; // 0 は「上限なし」
 
   const siblings = await select<Row>(
-    `agencies?select=id,channel,code_kind,status&parent_code=eq.${encodeURIComponent(s_(parent, "code"))}`,
+    `agencies?select=id,status&parent_code=eq.${encodeURIComponent(s_(parent, "code"))}`,
   );
-  const used = siblings.filter(
-    (a) =>
-      s_(a, "status") !== "停止・解約" &&
-      s_(a, "code_kind") !== KIND_STAFF &&
-      s_(a, "channel") === channel,
-  ).length;
+  const used = siblings.filter((a) => s_(a, "status") !== "停止・解約").length;
 
-  if (limit > 0 && used >= limit) {
+  if (used >= limit) {
     return {
       ok: false,
-      reason: `${s_(parent, "name")} の「${channel}」の枠が上限（${limit}）に達しています。増枠の承認が必要です。`,
+      reason: `${s_(parent, "name")} の枠が上限（${limit}名）に達しています。増枠の承認が必要です。`,
     };
   }
   return { ok: true };

@@ -1,8 +1,12 @@
 import "server-only";
 import { select, selectAll, selectOne, update, val } from "./db";
 import type { Agency, AgencyRank, CodeKind, OrgNode, SalesChannel } from "./types";
+import { DEFAULT_STAFF_LIMIT, breakdownSlots } from "./slots";
 
-/** 枠の既定値。App9 側が未設定でもこの値で扱う。 */
+/**
+ * 旧・販売代理店枠の既定値。
+ * 枠がスタッフ1本になる前の値で、いまは古いデータを読むときだけ使う。
+ */
 export const DEFAULT_SLOT_LIMIT = 10;
 
 /** データベースの1行を、画面が使う形に直す。 */
@@ -34,7 +38,10 @@ function toAgency(r: Row): Agency {
     email: s_(r, "email"),
     phone: s_(r, "phone"),
     status: s_(r, "status"),
-    slotLimit: n_(r, "limit_hanbai") || DEFAULT_SLOT_LIMIT,
+    staffLimit:
+      r["limit_staff"] === null || r["limit_staff"] === undefined
+        ? DEFAULT_STAFF_LIMIT
+        : n_(r, "limit_staff"),
     slotLimits: {
       販売代理店枠上限: n_(r, "limit_hanbai"),
       サロン代理店枠上限: n_(r, "limit_salon"),
@@ -66,7 +73,7 @@ function toAgency(r: Row): Agency {
  *
  * selectAll を使い、保存先の1回あたりの上限（1000件）で切られないようにする。
  * ここが切られると、枠の残りを数え間違えたり、組織図から枝が消えたりするが、
- * 画面には何も出ないため気づけない。代理店は1社あたり100枠の設計なので、
+ * 画面には何も出ないため気づけない。代理店は1社あたり100名の枠なので、
  * 取次パートナー・スタッフを含めれば1000件は現実に超えうる。
  */
 async function fetchAgencies(filter: string): Promise<Agency[]> {
@@ -147,13 +154,14 @@ export async function buildOrgTree(rootCode: string): Promise<OrgNode | null> {
 }
 
 /**
- * 枠の消費数。
- * 7/9 の設計どおり「コード区分 = 00（正規代理店）」だけが枠を消費する。
- * 取次パートナー(01) とスタッフ(02) は枠を消費しない。
+ * 枠を消費するか。
+ *
+ * 2026-08-22 から「直下にいる稼働中の相手は、区分にかかわらず1人ぶん枠を使う」。
+ * 判定は lib/slots.ts の consumesSlot 1か所に集めてある。
+ * 以前はこの関数（区分00だけ）と slots.ts（区分02以外）が別の答えを出しており、
+ * 画面によって使用数が食い違っていた。
  */
-export function countsTowardSlot(a: Agency): boolean {
-  return a.codeKind === "00" && a.status !== "停止・解約";
-}
+export { consumesSlot as countsTowardSlot } from "./slots";
 
 export type SlotSummary = {
   limit: number;
@@ -170,18 +178,15 @@ export type SlotSummary = {
 export async function getSlotSummary(agency: Agency): Promise<SlotSummary> {
   const all = await listAllAgencies();
   const direct = all.filter((a) => a.parentCode === agency.code);
-  const members = direct.filter(countsTowardSlot);
-  const others = direct.filter((a) => !countsTowardSlot(a));
-  const limit = agency.slotLimit || DEFAULT_SLOT_LIMIT;
-  const used = members.length;
+  const b = breakdownSlots(agency, direct);
   return {
-    limit,
-    used,
-    remaining: Math.max(0, limit - used),
+    limit: b.limit,
+    used: b.used,
+    remaining: b.limit === 0 ? Number.POSITIVE_INFINITY : b.remaining,
     requestStatus: agency.slotRequestStatus,
-    isOver: used >= limit,
-    members,
-    others,
+    isOver: b.isFull,
+    members: b.members,
+    others: direct.filter((a) => a.status === "停止・解約"),
   };
 }
 
@@ -195,22 +200,15 @@ export async function requestSlotIncrease(recordId: string): Promise<void> {
 /**
  * 本部が増枠申請を承認する。
  *
- * どの枠を増やすかは kind で指定する。指定が無ければ販売代理店枠。
- * 以前は必ず販売代理店枠だけを書き換えていたため、
- * サロン枠や取次枠が埋まって申請しても増えなかった。
+ * 2026-08-22 に枠はスタッフ1本になったので、増やす列も1つだけ。
+ * それまでは販路種別ごとに4列あり、本部がどの枠かを選んでいた。
  */
 export async function approveSlotIncrease(
   recordId: string,
   newLimit: number,
-  kind?: string,
 ): Promise<void> {
-  const column =
-    kind === "サロン代理店" ? "limit_salon"
-    : kind === "個人販売パートナー" ? "limit_kojin"
-    : kind === "サロン提携パートナー（取次）" ? "limit_toritsugi"
-    : "limit_hanbai";
   await update(`agencies?id=eq.${encodeURIComponent(recordId)}`, {
-    [column]: newLimit,
+    limit_staff: newLimit,
     slot_request: "承認済",
   });
 }
@@ -235,8 +233,8 @@ export async function listDirectChildren(code: string): Promise<Agency[]> {
 }
 
 /**
- * App9 に入っている枠上限を、0 のものは既定値に落として返す。
- * フィールドがまだ作られていない環境でも既定値で動く。
+ * 販路種別ごとの枠上限（2026-08-22 より前の持ち方）。
+ * 枠はスタッフ1本にまとめたので、いまは本部の操作記録を読むためだけに残している。
  */
 export function slotLimitsOf(agency: Agency): Record<string, number> {
   const l = agency.slotLimits;

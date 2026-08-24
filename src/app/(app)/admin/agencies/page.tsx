@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { PASSWORD_FIELD, currentViewer } from "@/lib/auth";
 import { select, selectAll } from "@/lib/db";
-import { DEFAULT_SLOT_LIMIT, countsTowardSlot, listAllAgencies } from "@/lib/agencies";
+import { countsTowardSlot, listAllAgencies } from "@/lib/agencies";
 import {
   ALL,
   buildListHref,
@@ -695,9 +695,10 @@ function AgencyTable({
       </thead>
       <tbody>
         {rows.map((a) => {
-          const limit = a.slotLimit || DEFAULT_SLOT_LIMIT;
+          // 枠はスタッフ100名の1本（2026-08-22〜）。0 は「上限なし」。
+          const limit = a.staffLimit;
           const used = usedByParent.get(a.code) ?? 0;
-          const full = used >= limit;
+          const full = limit > 0 && used >= limit;
           return (
             <tr key={a.recordId || a.code}>
               <Td numeric className="whitespace-nowrap font-medium text-ink-100">

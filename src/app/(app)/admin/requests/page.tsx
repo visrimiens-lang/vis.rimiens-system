@@ -5,7 +5,6 @@ import { currentViewer } from "@/lib/auth";
 import {
   listAllAgencies,
   listPendingSlotRequests,
-  slotLimitsOf,
 } from "@/lib/agencies";
 import { select } from "@/lib/db";
 import { areaUsage, breakdownSlots, slotModelOf } from "@/lib/slots";
@@ -32,7 +31,7 @@ import {
   jpDate,
 } from "@/components/ui";
 import { SortableTh } from "@/components/SortableTh";
-import { DecisionForm, type DecisionKind } from "./DecisionForm";
+import { DecisionForm } from "./DecisionForm";
 
 const BASE = "/admin/requests";
 
@@ -74,7 +73,7 @@ type NearFull = {
   /** 合計での使用率 */
   ratio: number;
   /** 枠の数え方 */
-  model: "area" | "channel";
+  model: "area" | "staff";
   /** 販路種別ごとの枠のうち、いちばん埋まっているもの。エリア枠のときは無し */
   tight: TightSlot | null;
 };
@@ -89,9 +88,7 @@ type PendingRow = {
   /** 上限まで埋まっている枠の呼び方。空なら満枠なし */
   fullLabels: string[];
   /** 承認するときに選べる枠 */
-  kinds: DecisionKind[];
   /** 最初に選んでおく枠 */
-  defaultKind: string;
   /** 申請を受け付けた日（データベースの最終更新日時） */
   requestedAt: string;
   /** 枠の考え方が違う相手（総販売代理店）のときの補足 */
@@ -108,10 +105,7 @@ function peakRatio(r: NearFull): number {
  *
  * 枠の数え方は上の一覧表とそろえる。
  *   総販売代理店 … 配下は統括代理店なので、エリアごとの枠（全国60社）の合計
- *   統括代理店   … 販路種別ごとの枠の合計（販売10＋サロン30＋個人30＋取次30＝100枠）
- *
- * 販売代理店の枠（既定10）だけを分母にして配下を全部数えると、サロン代理店を
- * かかえた統括代理店が、実際は100枠中8社しか使っていないのに「満枠」と出てしまう。
+ *   統括代理店   … スタッフ枠（既定100名。2026-08-22〜）
  */
 function nearFullAgencies(
   all: Agency[],
@@ -141,21 +135,14 @@ function nearFullAgencies(
       continue;
     }
 
-    const breakdown = breakdownSlots(a, childrenOf.get(a.code) ?? [], slotLimitsOf(a));
-    let tight: TightSlot | null = null;
-    for (const line of breakdown.lines) {
-      const ratio = line.limit > 0 ? line.used / line.limit : 0;
-      if (!tight || ratio > tight.ratio) {
-        tight = { label: line.label, limit: line.limit, used: line.used, ratio };
-      }
-    }
+    const breakdown = breakdownSlots(a, childrenOf.get(a.code) ?? []);
     rows.push({
       agency: a,
-      limit: breakdown.totalLimit,
-      used: breakdown.totalUsed,
-      ratio: breakdown.totalLimit > 0 ? breakdown.totalUsed / breakdown.totalLimit : 0,
+      limit: breakdown.limit,
+      used: breakdown.used,
+      ratio: breakdown.limit > 0 ? breakdown.used / breakdown.limit : 0,
       model,
-      tight,
+      tight: null,
     });
   }
 
@@ -249,29 +236,21 @@ export default async function AdminRequestsPage({
 
   const pendingRows: PendingRow[] = pending.map((a) => {
     const children = childrenOf.get(a.code) ?? [];
-    const breakdown = breakdownSlots(a, children, slotLimitsOf(a));
-    const kinds: DecisionKind[] = breakdown.lines.map((l) => ({
-      key: l.key,
-      label: l.label,
-      limit: l.limit,
-      used: l.used,
-      isFull: l.isFull,
-    }));
-    const full = kinds.filter((k) => k.isFull);
+    const breakdown = breakdownSlots(a, children);
     const isArea = slotModelOf(a) === "area";
 
     return {
       agency: a,
       // 配下が統括代理店の相手（総販売代理店）は、枠の考え方が全国のエリア枠になる。
-      limit: isArea ? areaTotal.limit : breakdown.totalLimit,
-      used: isArea ? areaTotal.used : breakdown.totalUsed,
+      limit: isArea ? areaTotal.limit : breakdown.limit,
+      used: isArea ? areaTotal.used : breakdown.used,
       fullLabels: isArea
         ? areaTotal.remaining === 0
           ? ["エリア枠（全国）"]
           : []
-        : full.map((k) => k.label),
-      kinds,
-      defaultKind: (full[0] ?? kinds[0])?.key ?? "販売代理店",
+        : breakdown.isFull
+          ? ["スタッフ枠"]
+          : [],
       requestedAt: requestedAt.get(a.recordId) ?? "",
       note: isArea
         ? "この代理店の配下は統括代理店です。枠はエリアごと（全国60社）に決まっているため、ここで上限を変えても配下の枠は増えません。エリア枠の見直しが必要かどうか、本部でご確認ください。"
@@ -437,8 +416,8 @@ export default async function AdminRequestsPage({
                         </span>
                         <DecisionForm
                           recordId={a.recordId}
-                          kinds={r.kinds}
-                          defaultKind={r.defaultKind}
+                          limit={r.limit}
+                          used={r.used}
                           note={r.note}
                         />
                       </div>

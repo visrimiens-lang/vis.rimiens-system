@@ -51,6 +51,7 @@ export type AgencyDetail = {
   trainingStatus: string;
   trainingPassedOn: string;
   signStatus: string;
+  limitStaff: number;
   limitHanbai: number;
   limitSalon: number;
   limitKojin: number;
@@ -516,7 +517,7 @@ export function EditForm({
             label="コード区分"
             defaultValue={agency.codeKind}
             disabled={pending}
-            hint="一覧のタブの振り分けに使います。上位の枠を消費しないのはスタッフだけで、どの枠に入るかは販路種別で決まります。"
+            hint="一覧のタブの振り分けに使います。上位の枠は、区分にかかわらず1名ぶん使います。"
           >
             <option value="">未設定（どのタブにも出ません）</option>
             {CODE_KINDS.map((k) => (
@@ -670,32 +671,11 @@ export function EditForm({
 
         <Section title="配下を登録できる数（枠の上限）">
           <NumberField
-            name="limitHanbai"
-            label="販売代理店の枠"
-            defaultValue={agency.limitHanbai}
+            name="limitStaff"
+            label="スタッフの枠"
+            defaultValue={agency.limitStaff}
             disabled={pending}
-            hint="既定は10社です。0 にすると上限なしになります。"
-          />
-          <NumberField
-            name="limitSalon"
-            label="サロン代理店の枠"
-            defaultValue={agency.limitSalon}
-            disabled={pending}
-            hint="既定は30社です。0 にすると上限なしになります。"
-          />
-          <NumberField
-            name="limitKojin"
-            label="個人販売パートナーの枠"
-            defaultValue={agency.limitKojin}
-            disabled={pending}
-            hint="既定は30名です。0 にすると上限なしになります。"
-          />
-          <NumberField
-            name="limitToritsugi"
-            label="取次パートナーの枠"
-            defaultValue={agency.limitToritsugi}
-            disabled={pending}
-            hint="既定は30件です。0 にすると上限なしになります。取次パートナーもこの枠を使います。"
+            hint="既定は100名です。0 にすると上限なしになります。直下にいる稼働中の方は、区分にかかわらず1名ぶん枠を使います。"
           />
           <label className="flex items-start gap-2.5 sm:col-span-2">
             <input

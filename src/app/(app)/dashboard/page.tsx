@@ -8,7 +8,6 @@ import {
   listDescendants,
   type SlotSummary,
   listDirectChildren,
-  slotLimitsOf,
 } from "@/lib/agencies";
 import {
   areaUsage,
@@ -84,6 +83,8 @@ type Loaded = {
   stoppedCount: number;
   slot: SlotSummary;
   breakdown: SlotBreakdownData;
+  /** 枠の単位。エリア枠は「社」、スタッフ枠は「名」。 */
+  slotUnit: string;
   recent: RecentOrder[];
 };
 
@@ -96,28 +97,20 @@ async function load(code: string, month: string): Promise<Loaded | null> {
     getSlotSummary(self),
     listDirectChildren(code),
   ]);
-  // 総販売代理店の配下は統括代理店なので、100枠ではなく全国60社のエリア枠で見る。
-  let breakdown = breakdownSlots(self, direct, slotLimitsOf(self));
+  // 総販売代理店の配下は統括代理店なので、スタッフ枠ではなく全国60社のエリア枠で見る。
+  let breakdown = breakdownSlots(self, direct);
   if (slotModelOf(self) === "area") {
     const usage = areaUsage(await listAllAgencies());
     breakdown = {
-      lines: usage.rows.map((r) => ({
-        key: r.area as never,
-        label: r.area,
-        note: "統括代理店の枠",
-        limit: r.limit,
-        used: r.used,
-        remaining: r.remaining,
-        isFull: r.isFull,
-        members: r.members,
-      })),
-      totalLimit: usage.total.limit,
-      totalUsed: usage.total.used,
-      anyFull: usage.rows.some((r) => r.isFull),
-      unclassified: [],
-      staff: [],
+      limit: usage.total.limit,
+      used: usage.total.used,
+      remaining: Math.max(0, usage.total.limit - usage.total.used),
+      isFull: usage.total.used >= usage.total.limit,
+      members: usage.rows.flatMap((r) => r.members),
     };
   }
+  /** 枠の単位。エリア枠は「社」、スタッフ枠は「名」。 */
+  const slotUnit = slotModelOf(self) === "area" ? "社" : "名";
   const codes = scopeCodes(self, descendants);
 
   // 今月ぶん（数字の集計用）と、期間を絞らないぶん（直近の受注一覧用）。
@@ -171,6 +164,7 @@ async function load(code: string, month: string): Promise<Loaded | null> {
 
   return {
     breakdown,
+    slotUnit,
     self,
     summary: summarize(orders, month),
     stoppedCount: thisMonth.raw.length - live.length,
@@ -230,7 +224,7 @@ export default async function DashboardPage() {
     );
   }
 
-  const { self, summary, stoppedCount, slot, breakdown, recent } = data;
+  const { self, summary, stoppedCount, slot, breakdown, slotUnit, recent } = data;
 
   // スタッフ（コード区分 02）には報酬の金額を出さない。
   // 2026-04-23 の打ち合わせで「金額が見えるのは親アカウントだけ」と決まっている。
@@ -301,10 +295,14 @@ export default async function DashboardPage() {
         )}
         <StatTile
           label="枠の空き"
-          value={String(breakdown.totalLimit - breakdown.totalUsed)}
-          unit="社"
-          tone={breakdown.anyFull ? "warn" : "default"}
-          hint={`全${breakdown.totalLimit}枠中${breakdown.totalUsed}枠が登録済み`}
+          value={breakdown.limit <= 0 ? "—" : String(breakdown.remaining)}
+          unit={slotUnit}
+          tone={breakdown.isFull ? "warn" : "default"}
+          hint={
+            breakdown.limit <= 0
+              ? "上限は設けていません（特別枠）"
+              : `${breakdown.limit}${slotUnit}のうち ${breakdown.used}${slotUnit} が登録済み`
+          }
         />
       </div>
 
@@ -353,9 +351,11 @@ export default async function DashboardPage() {
         <div className="space-y-3 border-t border-ink-800 px-5 py-4">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-ink-300">
             <span>
-              {breakdown.anyFull
-                ? "埋まっている枠があります。"
-                : `全部で ${breakdown.totalLimit} 枠のうち ${breakdown.totalUsed} 枠を使っています。`}
+              {breakdown.limit <= 0
+                ? `いま ${breakdown.used}${slotUnit} を登録しています（上限なし）。`
+                : breakdown.isFull
+                  ? "枠がいっぱいです。"
+                  : `${breakdown.limit}${slotUnit}のうち ${breakdown.used}${slotUnit} を使っています。`}
             </span>
             {slot.requestStatus && slot.requestStatus !== "なし" ? (
               <Badge tone={slot.requestStatus === "申請中" ? "warn" : "neutral"}>
@@ -364,7 +364,7 @@ export default async function DashboardPage() {
             ) : null}
           </div>
 
-          {breakdown.anyFull ? (
+          {breakdown.isFull ? (
             slot.requestStatus === "申請中" ? (
               <Notice tone="info">
                 増枠を申請中です。本部の承認をお待ちください。

@@ -304,6 +304,8 @@ const LABELS: Record<string, string> = {
   training_status: "研修の進み方",
   training_passed_on: "研修に合格した日",
   sign_status: "電子署名",
+  limit_staff: "スタッフの枠",
+  // 旧・販路種別ごとの枠。いまは書き換えないが、過去の操作記録を読むために残す。
   limit_hanbai: "販売代理店の枠",
   limit_salon: "サロン代理店の枠",
   limit_kojin: "個人販売パートナーの枠",
@@ -379,14 +381,9 @@ export async function updateAgencyAction(
 
   const birthday = text(formData, "birthday");
   const trainingPassedOn = text(formData, "trainingPassedOn");
-  const hanbai = readLimit(formData, "limitHanbai", "販売代理店の枠");
-  if (!hanbai.ok) return { error: hanbai.error };
-  const salon = readLimit(formData, "limitSalon", "サロン代理店の枠");
-  if (!salon.ok) return { error: salon.error };
-  const kojin = readLimit(formData, "limitKojin", "個人販売パートナーの枠");
-  if (!kojin.ok) return { error: kojin.error };
-  const toritsugi = readLimit(formData, "limitToritsugi", "取次パートナーの枠");
-  if (!toritsugi.ok) return { error: toritsugi.error };
+  // 枠は「スタッフ100名」の1本（2026-08-22〜）。旧4列は書き換えない。
+  const staffSlot = readLimit(formData, "limitStaff", "スタッフの枠");
+  if (!staffSlot.ok) return { error: staffSlot.error };
 
   let current: Row | null = null;
   try {
@@ -569,10 +566,7 @@ export async function updateAgencyAction(
       SIGNS,
       s(current, "sign_status") || "未署名",
     ),
-    limit_hanbai: hanbai.value,
-    limit_salon: salon.value,
-    limit_kojin: kojin.value,
-    limit_toritsugi: toritsugi.value,
+    limit_staff: staffSlot.value,
     special_slot: formData.get("specialSlot") === "on",
     bank_name: orNull(t.bankName),
     bank_branch: orNull(t.bankBranch),
@@ -1069,9 +1063,9 @@ type SlotRoom =
  * 上位代理店に、この相手を入れる空きがあるか確かめる。
  *
  * 数え方は代理店の詳細画面に出ている枠と必ず同じにする（同じ関数を使う）。
- *   ・統括代理店（2次代理店）の配下 … 販路種別ごとの枠。合計100（10/30/30/30）
+ *   ・統括代理店（2次代理店）の配下 … スタッフ枠。既定100名（2026-08-22〜）
  *   ・総販売代理店の配下           … 統括代理店のエリア枠。全国60社
- * スタッフ（区分02）は代理店ではないので枠を使わない。
+ * 直下にいる稼働中の相手は、区分にかかわらず1人ぶん枠を使う。
  *
  * 上限に達しているときは登録を止める。本部がどうしても入れる必要があるときは、
  * 上位を「特別枠」に切り替えてもらう。そのときは超えた事実を記録に残す。
@@ -1162,38 +1156,23 @@ async function checkSlotRoom(opts: {
     return { ok: true, over: null };
   }
 
-  /* ── 統括代理店の配下：販路種別ごとの枠（合計100） ── */
+  /* ── 統括代理店の配下：スタッフ枠（既定100名） ── */
   const children = all.filter(
     (a) => a.parentCode === opts.parentCode && a.code !== opts.parentCode,
   );
-  const breakdown = breakdownSlots(parent, children, slotLimitsOf(parent));
+  const breakdown = breakdownSlots(parent, children);
   const relief = `続けて登録する場合は、${opts.parentLabel} の「内容を直す」欄で枠の上限を引き上げるか、特別枠に切り替えてから、もう一度お試しください。特別枠で超えて登録したことは操作の記録に残ります。`;
 
-  const line = breakdown.lines.find((l) => l.key === opts.channel);
-  if (line && line.isFull) {
+  if (breakdown.isFull) {
     if (!special) {
       return {
         ok: false,
-        error: `${opts.parentLabel} の「${line.label}」の枠は上限 ${line.limit} 件に達しています（いま ${line.used} 件）。${relief}`,
+        error: `${opts.parentLabel} の枠は上限 ${breakdown.limit} 名に達しています（いま ${breakdown.used} 名）。${relief}`,
       };
     }
     return {
       ok: true,
-      over: `${opts.parentLabel} の「${line.label}」の枠（上限 ${line.limit} 件）はすでにいっぱいですが、特別枠のため登録しました`,
-    };
-  }
-
-  // 販路種別が「未設定」の配下も実在する代理店なので、合計の枠は消費している。
-  if (breakdown.totalUsed >= breakdown.totalLimit) {
-    if (!special) {
-      return {
-        ok: false,
-        error: `${opts.parentLabel} の配下は合計の上限 ${breakdown.totalLimit} 件に達しています（いま ${breakdown.totalUsed} 件）。${relief}`,
-      };
-    }
-    return {
-      ok: true,
-      over: `${opts.parentLabel} の配下の合計枠（上限 ${breakdown.totalLimit} 件）はすでにいっぱいですが、特別枠のため登録しました`,
+      over: `${opts.parentLabel} の枠（上限 ${breakdown.limit} 名）はすでにいっぱいですが、特別枠のため登録しました`,
     };
   }
 

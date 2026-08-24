@@ -3,7 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import { select, selectOne, val } from "@/lib/db";
-import { listAllAgencies, slotLimitsOf } from "@/lib/agencies";
+import { listAllAgencies } from "@/lib/agencies";
 import { agencyTypeOf, belongsToOrg, codeTermOf, isOrgStyleCode } from "@/lib/labels";
 import { areaUsage, breakdownSlots, slotModelOf } from "@/lib/slots";
 import type { Agency } from "@/lib/types";
@@ -136,21 +136,13 @@ type SlotView = {
   unclassified: Agency[];
 };
 
-/** 販路種別ごとに、この代理店に入っている上限を引く。0 は「上限なし」。 */
-function storedLimitOf(agency: AgencyDetail, kind: string): number {
-  if (kind === "サロン代理店") return agency.limitSalon;
-  if (kind === "個人販売パートナー") return agency.limitKojin;
-  if (kind === "サロン提携パートナー（取次）") return agency.limitToritsugi;
-  return agency.limitHanbai;
-}
-
 /**
  * 配下の枠の使用状況をまとめる。
  *
  * 数えるのは共通の枠ルール（lib/slots.ts）にそのまま任せる。
  * ・総販売代理店の配下＝統括代理店なので「エリア枠（全国60社）」
- * ・統括代理店（2次代理店）の配下＝販路種別ごとの枠（販売10／サロン30／個人30／取次30）
- * ・枠を消費しないのはスタッフ（コード区分02）だけ。取次パートナーも取次枠を使う。
+ * ・統括代理店（2次代理店）の配下＝スタッフ枠（既定100名。2026-08-22〜）
+ * ・直下にいる稼働中の相手は、区分にかかわらず1名ぶん枠を使う。
  */
 function buildSlotView(
   me: Agency,
@@ -180,30 +172,25 @@ function buildSlotView(
     };
   }
 
-  const breakdown = breakdownSlots(me, children, slotLimitsOf(me));
-  const rows: SlotRow[] = breakdown.lines.map((line) => {
-    const stored = storedLimitOf(agency, line.key);
-    // 上限0は「上限なし」、特別枠も上限を数えない。どちらも申込の受付で止めていない。
-    const noLimit = agency.specialSlot || stored <= 0;
-    return {
-      key: line.key,
-      label: line.label,
-      note: line.note,
-      used: line.used,
-      limit: noLimit ? null : stored,
-      remaining: noLimit ? null : Math.max(0, stored - line.used),
-      isFull: !noLimit && line.used >= stored,
-      members: line.members,
-    };
-  });
-
+  const breakdown = breakdownSlots(me, children);
+  // 上限0は「上限なし」、特別枠も上限を数えない。どちらも申込の受付で止めていない。
+  const noLimit = breakdown.limit <= 0;
   return {
-    rows,
-    used: breakdown.totalUsed,
-    limit: rows.some((r) => r.limit === null)
-      ? null
-      : rows.reduce((sum, r) => sum + (r.limit ?? 0), 0),
-    unclassified: breakdown.unclassified,
+    rows: [
+      {
+        key: "staff",
+        label: "スタッフ",
+        note: "直下に登録できる人数",
+        used: breakdown.used,
+        limit: noLimit ? null : breakdown.limit,
+        remaining: noLimit ? null : breakdown.remaining,
+        isFull: breakdown.isFull,
+        members: breakdown.members,
+      },
+    ],
+    used: breakdown.used,
+    limit: noLimit ? null : breakdown.limit,
+    unclassified: [],
   };
 }
 
@@ -355,6 +342,10 @@ export default async function AgencyDetailPage({
     trainingStatus: s(row, "training_status"),
     trainingPassedOn: s(row, "training_passed_on"),
     signStatus: s(row, "sign_status"),
+    limitStaff:
+      row["limit_staff"] === null || row["limit_staff"] === undefined
+        ? 100
+        : n(row, "limit_staff"),
     limitHanbai: n(row, "limit_hanbai"),
     limitSalon: n(row, "limit_salon"),
     limitKojin: n(row, "limit_kojin"),
@@ -482,7 +473,7 @@ export default async function AgencyDetailPage({
           label="直下のスタッフ"
           value={String(staff.length)}
           unit="名"
-          hint="枠を消費しないのはスタッフだけです"
+          hint="直下にいる稼働中の方は、区分にかかわらず1名ぶん枠を使います"
         />
         <StatTile
           label="研修"
@@ -768,13 +759,7 @@ export default async function AgencyDetailPage({
                   ? "　この代理店は特別枠のため、上限では申し込みを止めません。"
                   : null}
               </p>
-              {staff.length > 0 && slotModel !== "area" ? (
-                <p className="text-xs leading-relaxed text-ink-400">
-                  このほかに直下のスタッフが {staff.length} 名います（
-                  {staff.map((a) => a.name || a.code).join("、")}）。
-                  スタッフは代理店ではないため、枠を使いません。
-                </p>
-              ) : null}
+
               {slots.unclassified.length > 0 ? (
                 <Notice tone="warn">
                   販路種別が入っていない配下が {slots.unclassified.length} 件あり、

@@ -51,6 +51,7 @@ import {
 import { agencyTypeOf, belongsToOrg, codeKindLabel, statusTone } from "@/lib/labels";
 import { SlotRequestButton } from "./SlotRequestButton";
 import { PayUnitCell } from "@/components/PayUnitCell";
+import { StaffProfileCell } from "@/components/StaffProfileCell";
 import { defaultPayUnit } from "@/lib/pay-defaults";
 
 const BASE = "/organization";
@@ -226,7 +227,7 @@ export default async function OrganizationPage({
   const accessors: Accessors<Agency> = {
     code: (a) => a.code,
     name: (a) => a.name,
-    rank: (a) => agencyTypeOf(a.rank, a.channel, a.codeKind),
+    rank: (a) => agencyTypeOf(a.rank, a.channel, a.codeKind, a.staffType),
     status: (a) => a.status,
     email: (a) => a.email,
     phone: (a) => a.phone,
@@ -310,7 +311,12 @@ export default async function OrganizationPage({
               const isSelf = agency.code === me.code;
               // 階層と区分が同じ呼び方になる相手（取次パートナー・スタッフ）は、
               // 同じ言葉を2つ並べない。
-              const rankText = agencyTypeOf(agency.rank, agency.channel, agency.codeKind);
+              const rankText = agencyTypeOf(
+                agency.rank,
+                agency.channel,
+                agency.codeKind,
+                agency.staffType,
+              );
               const kindText = codeKindLabel(agency.codeKind);
               return (
                 <li
@@ -456,6 +462,7 @@ export default async function OrganizationPage({
                       basePath={BASE}
                       params={params}
                     />
+                    <Th>所属会社・種別</Th>
                     <Th>支払額（1台・税抜）</Th>
                   </tr>
                 </thead>
@@ -485,7 +492,7 @@ export default async function OrganizationPage({
                       <Td className="whitespace-nowrap">
                         {/* 申込フォームと同じ呼び方で出す（「取次」ではなく「販売代理店」） */}
                         <Badge tone={a.rank === "総販売代理店" ? "gold" : "neutral"}>
-                          {agencyTypeOf(a.rank, a.channel, a.codeKind)}
+                          {agencyTypeOf(a.rank, a.channel, a.codeKind, a.staffType)}
                         </Badge>
                       </Td>
                       <Td>
@@ -523,6 +530,25 @@ export default async function OrganizationPage({
                         )}
                       </Td>
                       {/*
+                        スタッフの「どこの会社の人か」「販売代理店かサロンか個人か」は、
+                        申込フォームからは送られてこない（2026-08-22〜）。
+                        自分の直下のスタッフについては、ここで直接設定できるようにする。
+                      */}
+                      <Td>
+                        {a.codeKind === "02" ? (
+                          <StaffProfileCell
+                            code={a.code}
+                            name={a.name || a.code}
+                            companyName={a.companyName}
+                            staffType={a.staffType}
+                            fallbackName={a.parentName}
+                            editable={a.parentCode === me.code}
+                          />
+                        ) : (
+                          <span className="text-ink-500">—</span>
+                        )}
+                      </Td>
+                      {/*
                         自分の直下にだけ、払う額を決められるようにする。
                         間に人が挟まっている相手の取り分を飛び越えて決められないようにするため。
                         空欄なら推奨の税抜単価（3次 50,000／取次 25,000）がそのまま使われる。
@@ -545,8 +571,9 @@ export default async function OrganizationPage({
 
             <div className="border-t border-ink-800 px-5 py-3 text-xs leading-relaxed text-ink-400">
               メールアドレスを押すとメールの作成画面が、電話番号を押すと電話の発信画面が開きます。
+              「所属会社・種別」と「支払額」は、自分の直下であればこの画面で直せます（押すと入力欄が出ます）。
               {missingContact > 0
-                ? `連絡先が登録されていない配下が ${missingContact} 社あります。ポータルからは直せないため、本部にご連絡ください。`
+                ? `連絡先が登録されていない配下が ${missingContact} 社あります。連絡先はポータルからは直せないため、本部にご連絡ください。`
                 : ""}
             </div>
           </>

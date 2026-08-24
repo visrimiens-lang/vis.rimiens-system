@@ -1,0 +1,127 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { currentViewer } from "@/lib/auth";
+import { audit, selectOne, update } from "@/lib/db";
+import { STAFF_TYPES } from "@/lib/labels";
+
+/**
+ * スタッフの「所属会社名」と「種別」を決める。
+ *
+ * ■ 何のための機能か
+ *
+ * 2026-08-22 に、エリア統括代理店の下は全員スタッフとして
+ * 統括の4文字コード＋4桁（例 SASA0002）で登録する形に変わった。
+ * そのスタッフが「どこの会社の人か」「販売代理店か・サロンか・個人か」は、
+ * 申込フォーム（JotForm）からは送られてこない。
+ * エリア統括代理店が、自分の「組織と枠」の画面でここを設定する。
+ *
+ * ■ 誰が変えられるか
+ *
+ *   ・本部
+ *   ・そのスタッフの直上（所属しているエリア統括代理店）
+ *
+ * 支払額（pay-unit-actions.ts）と同じ決まりにそろえてある。
+ * 間に人が挟まっている相手を飛び越えて変えられないように、直上だけに限る。
+ *
+ * ■ ランクと販路種別は触らない
+ *
+ * 種別は staff_type という専用の列に入れる。販路種別（channel）に入れると、
+ * 受注一覧の単価が 取次店 27,500円 から 販売代理店 55,000円 に変わってしまう。
+ * 見た目の呼び名を変えるだけのつもりが金額に効くため、列を分けてある。
+ */
+
+export type StaffProfileState = { error?: string; ok?: string };
+
+type Row = Record<string, unknown>;
+const s_ = (r: Row | null, k: string): string => {
+  if (!r) return "";
+  const v = r[k];
+  return v === null || v === undefined ? "" : String(v);
+};
+
+export async function setStaffProfileAction(
+  _prev: StaffProfileState,
+  formData: FormData,
+): Promise<StaffProfileState> {
+  const viewer = await currentViewer();
+  if (!viewer) return { error: "ログインの有効期限が切れています。もう一度ログインしてください。" };
+
+  const code = String(formData.get("code") ?? "").trim();
+  if (!code) return { error: "対象のスタッフが指定されていません。" };
+
+  /*
+   * 対象はコードで引き直す。
+   * 画面から来た区分や上位コードは信用しない（8時間前の写しのことがある）。
+   */
+  const target = await selectOne<Row>(
+    `agencies?select=code,name,parent_code,code_kind,company_name,staff_type&code=eq.${encodeURIComponent(code)}`,
+  );
+  if (!target) {
+    return { error: "対象のスタッフが見つかりませんでした。画面を読み込み直してください。" };
+  }
+
+  if (s_(target, "code_kind") !== "02") {
+    return {
+      error:
+        "所属会社名と種別を設定できるのはスタッフだけです。" +
+        "会社の代理店種別は、本部の代理店詳細から変更してください。",
+    };
+  }
+
+  const isHq = viewer.kind === "hq";
+  const isParent = viewer.kind === "agency" && viewer.code === s_(target, "parent_code");
+  if (!isHq && !isParent) {
+    return {
+      error:
+        "このスタッフの所属と種別を変えられるのは、本部と所属先の代理店だけです。",
+    };
+  }
+
+  const companyName = String(formData.get("companyName") ?? "").trim().slice(0, 100);
+  const rawType = String(formData.get("staffType") ?? "").trim();
+  if (rawType && !STAFF_TYPES.includes(rawType as (typeof STAFF_TYPES)[number])) {
+    return { error: `種別は ${STAFF_TYPES.join("・")} のいずれかを選んでください。` };
+  }
+
+  const beforeCompany = s_(target, "company_name");
+  const beforeType = s_(target, "staff_type");
+  if (companyName === beforeCompany && rawType === beforeType) {
+    return { ok: "変更はありませんでした。" };
+  }
+
+  try {
+    await update(`agencies?code=eq.${encodeURIComponent(code)}`, {
+      company_name: companyName || null,
+      staff_type: rawType || null,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "不明なエラー";
+    // 列がまだ無いときは、何を流せばよいかがすぐ分かるように書く
+    if (/company_name|staff_type/.test(msg)) {
+      return {
+        error:
+          "所属会社名と種別を保存する場所がまだ用意されていません。" +
+          "supabase/migrations/2026-08-24_staff_affiliation.sql を流してから、もう一度お試しください。",
+      };
+    }
+    return { error: `保存できませんでした。${msg}` };
+  }
+
+  await audit(
+    isHq ? "VIS 本部" : viewer.code,
+    "スタッフの所属・種別の変更",
+    { type: "agency", key: code },
+    {
+      対象: `${s_(target, "name")}（${code}）`,
+      所属会社名: `${beforeCompany || "（未設定）"} → ${companyName || "（未設定）"}`,
+      種別: `${beforeType || "（未設定）"} → ${rawType || "（未設定）"}`,
+    },
+  );
+
+  revalidatePath("/organization");
+  revalidatePath("/admin/agencies");
+  revalidatePath(`/admin/agencies/${code}`);
+
+  return { ok: `${s_(target, "name")} の所属と種別を保存しました。` };
+}

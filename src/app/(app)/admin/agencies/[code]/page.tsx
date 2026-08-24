@@ -339,6 +339,8 @@ export default async function AgencyDetailPage({
     orgCode: s(row, "org_code"),
     parentCode: s(row, "parent_code"),
     parentName: s(row, "parent_name"),
+    companyName: s(row, "company_name"),
+    staffType: s(row, "staff_type"),
     email: s(row, "email"),
     phone: s(row, "phone"),
     zip: s(row, "zip"),
@@ -422,7 +424,7 @@ export default async function AgencyDetailPage({
         title={title}
         description={`${codeTermOf(agency.codeKind)} ${agency.code}${
           orgCodeOf(agency) ? `・代理店コード ${orgCodeOf(agency)}` : ""
-        }・${agencyTypeOf(agency.rank, agency.channel, agency.codeKind)}`}
+        }・${agencyTypeOf(agency.rank, agency.channel, agency.codeKind, agency.staffType)}`}
         actions={backLink}
       />
 
@@ -514,7 +516,7 @@ export default async function AgencyDetailPage({
           <Info label="代表者名">{orDash(agency.repName)}</Info>
           {/* 申込フォームと同じ呼び方で出す。データベースの持ち方（ランク＋販路種別）も併記する */}
           <Info label="代理店種別">
-            {agencyTypeOf(agency.rank, agency.channel, agency.codeKind)}
+            {agencyTypeOf(agency.rank, agency.channel, agency.codeKind, agency.staffType)}
             <div className="mt-0.5 text-xs text-ink-400">
               {orDash(agency.rank)} ／ {orDash(agency.channel)}
             </div>

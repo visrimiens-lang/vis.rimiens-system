@@ -9,7 +9,7 @@ import {
   type AgencyActionState,
 } from "@/actions/agency-actions";
 import { Notice, StatusBadge } from "@/components/ui";
-import { AGENCY_TYPES, agencyTypeOf } from "@/lib/labels";
+import { AGENCY_TYPES, STAFF_TYPES, agencyTypeOf } from "@/lib/labels";
 
 /**
  * 本部が代理店の内容を書き換える画面。
@@ -33,6 +33,10 @@ export type AgencyDetail = {
   orgCode: string;
   parentCode: string;
   parentName: string;
+  /** 所属している会社の名前。スタッフが「どこの会社の人か」を表す。 */
+  companyName: string;
+  /** スタッフの種別（販売代理店／サロン代理店／個人販売代理店）。 */
+  staffType: string;
   email: string;
   phone: string;
   zip: string;
@@ -440,6 +444,17 @@ export function EditForm({
             disabled={pending}
           />
 
+          {agency.codeKind === "02" ? (
+            <Field
+              name="companyName"
+              label="所属会社名"
+              defaultValue={agency.companyName}
+              maxLength={100}
+              disabled={pending}
+              hint="このスタッフが所属している会社の名前です。報酬をこの名前でまとめられます。個人の方は空のままで結構です。"
+            />
+          ) : null}
+
           {/*
             代理店種別を選べるのは会社（コード区分00）だけ。
             スタッフ・取次パートナーには当てはまる種別が選択肢に無く、
@@ -449,15 +464,35 @@ export function EditForm({
             欄を出さなければ、サーバー側（agency-actions.ts）は
             ランクと販路種別をいまのまま据え置く。
           */}
-          {agency.codeKind === "01" || agency.codeKind === "02" ? (
+          {agency.codeKind === "02" ? (
+            /*
+              スタッフの種別。2026-08-22 から、エリア統括の下は全員スタッフになり、
+              「販売代理店か、サロンか、個人か」はここで設定する
+              （申込フォームからは送られてこない）。
+              ランクと販路種別は触らない。触ると受注一覧の単価が動くため。
+            */
+            <SelectField
+              name="staffType"
+              label="種別"
+              defaultValue={agency.staffType}
+              disabled={pending}
+              hint="このスタッフがどの立場で販売するかです。組織図と報酬の集計に出ます。"
+            >
+              <option value="">未設定</option>
+              {STAFF_TYPES.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </SelectField>
+          ) : agency.codeKind === "01" ? (
             <div>
               <span className={labelCls}>代理店種別</span>
               <p className="mt-1.5 text-sm text-ink-200">
                 {agencyTypeOf(agency.rank, agency.channel, agency.codeKind)}
               </p>
               <p className="mt-1 text-xs text-ink-400">
-                コード区分が「{agency.codeKind === "01" ? "取次パートナー" : "スタッフ"}
-                」のため、代理店種別は変更できません。
+                コード区分が「取次パートナー」のため、代理店種別は変更できません。
               </p>
             </div>
           ) : (

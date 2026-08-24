@@ -28,6 +28,18 @@ export type Agency = {
   orgCode: string;
   parentCode: string;
   parentName: string;
+  /**
+   * 所属している会社の名前。
+   * エリア統括の下のスタッフが「どこの会社の人か」を表す（2026-08-22〜）。
+   * 会社そのものの行では空。空のときは parentName を代わりに出す。
+   */
+  companyName: string;
+  /**
+   * スタッフの種別（販売代理店／サロン代理店／個人販売代理店）。
+   * エリア統括代理店が管理画面で設定する。申込フォームからは送られてこない。
+   * 販路種別（channel）とは別物。channel を変えると報酬の単価が動くため分けてある。
+   */
+  staffType: string;
   area: string;
   email: string;
   phone: string;

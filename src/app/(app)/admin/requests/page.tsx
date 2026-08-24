@@ -383,7 +383,7 @@ export default async function AdminRequestsPage({
                       </div>
                     </Td>
                     <Td className="whitespace-nowrap">
-                      {agencyTypeOf(a.rank, a.channel, a.codeKind)}
+                      {agencyTypeOf(a.rank, a.channel, a.codeKind, a.staffType)}
                       {a.specialSlot ? (
                         <span className="ml-1.5 align-middle">
                           <Badge tone="gold">特別枠</Badge>
@@ -526,7 +526,7 @@ export default async function AdminRequestsPage({
                       </div>
                     </Td>
                     <Td className="whitespace-nowrap">
-                      {agencyTypeOf(agency.rank, agency.channel, agency.codeKind)}
+                      {agencyTypeOf(agency.rank, agency.channel, agency.codeKind, agency.staffType)}
                     </Td>
                     <Td>{agency.area || "—"}</Td>
                     <Td>{agency.parentName || agency.parentCode || "—"}</Td>

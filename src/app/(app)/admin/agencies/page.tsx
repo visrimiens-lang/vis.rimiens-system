@@ -47,6 +47,7 @@ import {
   FilterText,
   SortableTh,
 } from "@/components/SortableTh";
+import { StaffProfileCell } from "@/components/StaffProfileCell";
 import { IssuePassword } from "./IssuePassword";
 import { StopButton } from "./StopButton";
 import { ResetRequests } from "./ResetRequests";
@@ -290,7 +291,7 @@ export default async function AdminAgenciesPage({
     if (!matchesKeyword(keyword, [a.code, a.name, a.representative, a.email, a.phone]))
       return false;
     if (status !== ALL && a.status !== status) return false;
-    if (rank !== ALL && agencyTypeOf(a.rank, a.channel, a.codeKind) !== rank)
+    if (rank !== ALL && agencyTypeOf(a.rank, a.channel, a.codeKind, a.staffType) !== rank)
       return false;
     if (channel !== ALL && a.channel !== channel) return false;
     if (area !== ALL && a.area !== area) return false;
@@ -377,7 +378,7 @@ export default async function AdminAgenciesPage({
   const statusOptions = buildOptions(tabRows, (a) => a.status, STATUSES, status);
   const rankOptions = buildOptions(
     tabRows,
-    (a) => agencyTypeOf(a.rank, a.channel, a.codeKind),
+    (a) => agencyTypeOf(a.rank, a.channel, a.codeKind, a.staffType),
     AGENCY_TYPES.map((t) => t.value),
     rank,
   ).filter((o) => o.count > 0 || o.value === rank);
@@ -720,7 +721,9 @@ function AgencyTable({
                 </div>
               </Td>
               {/* 申込フォームと同じ呼び方で出す（「2次代理店」「取次店」ではなく） */}
-              <Td className="whitespace-nowrap">{agencyTypeOf(a.rank, a.channel, a.codeKind)}</Td>
+              <Td className="whitespace-nowrap">
+                {agencyTypeOf(a.rank, a.channel, a.codeKind, a.staffType)}
+              </Td>
               <Td>{channelLabel(a.channel)}</Td>
               <Td>{a.area || "—"}</Td>
               <Td>
@@ -805,7 +808,8 @@ function PeopleTable({
    * スタッフは全員が「スタッフ」で、支払先にもならない（お支払いは会社ごと）。
    * ただし、誰かに個別の支払額が入っているときは、隠すと気づけなくなるので出す。
    */
-  const showKind = new Set(rows.map((a) => agencyTypeOf(a.rank, a.channel, a.codeKind))).size > 1;
+  const showKind =
+    new Set(rows.map((a) => agencyTypeOf(a.rank, a.channel, a.codeKind, a.staffType))).size > 1;
   const showPay = !isStaff || rows.some((a) => a.payUnit !== null && a.payUnit !== undefined);
   const th = (column: string, label: string) => (
     <SortableTh column={column} label={label} sort={sort} basePath={BASE} params={params} />
@@ -819,7 +823,7 @@ function PeopleTable({
           {th("parent", "代理店コード")}
           {th("name", "氏名")}
           {showKind ? th("rank", "区分") : null}
-          <Th>所属代理店</Th>
+          <Th>{isStaff ? "所属会社・種別" : "所属代理店"}</Th>
           {isStaff ? null : th("channel", "販路種別")}
           {showPay ? <Th align="right">支払額（1台・税抜）</Th> : null}
           {th("status", "稼働ステータス")}
@@ -855,13 +859,29 @@ function PeopleTable({
             {/* 申込フォームと同じ呼び方で出す（「2次代理店」「取次店」ではなく） */}
             {showKind ? (
               <Td className="whitespace-nowrap">
-                {agencyTypeOf(a.rank, a.channel, a.codeKind)}
+                {agencyTypeOf(a.rank, a.channel, a.codeKind, a.staffType)}
               </Td>
             ) : null}
             <Td>
-              <div className="truncate text-ink-200">
-                {a.parentName || a.parentCode || "—"}
-              </div>
+              {/*
+                スタッフの「どこの会社の人か」「種別」は、申込フォームからは
+                送られてこない（2026-08-22〜）。本部もここで直接設定できるようにする。
+                所属先の代理店そのものは「代理店コード」の列に出ている。
+              */}
+              {isStaff ? (
+                <StaffProfileCell
+                  code={a.code}
+                  name={a.name || a.code}
+                  companyName={a.companyName}
+                  staffType={a.staffType}
+                  fallbackName={a.parentName}
+                  editable
+                />
+              ) : (
+                <div className="truncate text-ink-200">
+                  {a.parentName || a.parentCode || "—"}
+                </div>
+              )}
             </Td>
             {isStaff ? null : <Td>{channelLabel(a.channel)}</Td>}
             {showPay ? (

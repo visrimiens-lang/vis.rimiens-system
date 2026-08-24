@@ -28,6 +28,8 @@ function toAgency(r: Row): Agency {
     orgCode: s_(r, "org_code"),
     parentCode: s_(r, "parent_code"),
     parentName: s_(r, "parent_name"),
+    companyName: s_(r, "company_name"),
+    staffType: s_(r, "staff_type"),
     area: s_(r, "area_class") || s_(r, "area"),
     email: s_(r, "email"),
     phone: s_(r, "phone"),

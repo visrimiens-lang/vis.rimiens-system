@@ -320,13 +320,26 @@ export const AGENCY_TYPES: {
   { value: "総販売代理店", rank: "総販売代理店", channel: "未設定" },
 ];
 
-/** ランクと販路種別から、申込フォームと同じ呼び方を返す。 */
+/**
+ * スタッフの種別（販売代理店／サロン代理店／個人販売代理店）。
+ * 2026-08-22 から、エリア統括の下は全員スタッフになり、
+ * 種別はこの3つから管理画面で選ぶ。
+ */
+export const STAFF_TYPES = ["販売代理店", "サロン代理店", "個人販売代理店"] as const;
+
+/**
+ * ランクと販路種別から、申込フォームと同じ呼び方を返す。
+ *
+ * スタッフは、種別（staffType）が設定されていればそれを出す。
+ * 設定されていなければ「スタッフ」のまま。
+ */
 export function agencyTypeOf(
   rank: string | null | undefined,
   channel: string | null | undefined,
   codeKind?: string | null,
+  staffType?: string | null,
 ): string {
-  if (codeKind === "02") return "スタッフ";
+  if (codeKind === "02") return (staffType || "").trim() || "スタッフ";
   const hit = AGENCY_TYPES.find((t) => t.rank === rank && t.channel === channel);
   if (hit) return hit.value;
   // 販路種別が入っていない古いデータは、ランクの呼び方だけで返す

@@ -12,7 +12,7 @@ import {
   nextAgencyCode,
   orgOf,
 } from "@/lib/intake";
-import { agencyTypeToFields, usesPortal } from "@/lib/labels";
+import { STAFF_TYPES, agencyTypeToFields, usesPortal } from "@/lib/labels";
 import { PORTAL_URL, approvalMail, sendMail } from "@/lib/mail";
 import { OFFICIAL_LINE_URL, tossUpUrl } from "@/lib/qr";
 import { areaUsage, breakdownSlots, slotModelOf } from "@/lib/slots";
@@ -265,6 +265,7 @@ const editSchema = z.object({
     .min(1, "法人名（またはお名前）を入力してください。")
     .max(120, "法人名は120文字以内で入力してください。"),
   repName: z.string().trim().max(60, "代表者名は60文字以内で入力してください。"),
+  companyName: z.string().trim().max(100, "所属会社名は100文字以内で入力してください。"),
   email: z.string().trim().max(200, "メールアドレスは200文字以内で入力してください。"),
   phone: z.string().trim().max(30, "電話番号は30文字以内で入力してください。"),
   zip: z.string().trim().max(10, "郵便番号は10文字以内で入力してください。"),
@@ -283,6 +284,8 @@ const editSchema = z.object({
 const LABELS: Record<string, string> = {
   name: "法人名・お名前",
   rep_name: "代表者名",
+  company_name: "所属会社名",
+  staff_type: "種別",
   rank: "ランク",
   channel: "販路種別",
   code_kind: "コード区分",
@@ -355,6 +358,7 @@ export async function updateAgencyAction(
   const parsed = editSchema.safeParse({
     name: formData.get("name") ?? "",
     repName: formData.get("repName") ?? "",
+    companyName: formData.get("companyName") ?? "",
     email: formData.get("email") ?? "",
     phone: formData.get("phone") ?? "",
     zip: formData.get("zip") ?? "",
@@ -522,9 +526,22 @@ export async function updateAgencyAction(
     }
   }
 
+  /*
+   * 所属会社名と種別はスタッフ（コード区分02）だけが持つ。
+   * 会社や取次パートナーの行では欄そのものを出していないので、
+   * 送られてこなかったときは何も書き換えない（既存の値を消さない）。
+   */
+  const isStaffRow = nextKind === "02";
+  const staffType = isStaffRow
+    ? pick(text(formData, "staffType"), [...STAFF_TYPES], "")
+    : "";
+
   const patch: Record<string, unknown> = {
     name: t.name,
     rep_name: orNull(t.repName),
+    ...(isStaffRow
+      ? { company_name: orNull(t.companyName), staff_type: orNull(staffType) }
+      : {}),
     rank: nextRank,
     channel: typed
       ? typed.channel

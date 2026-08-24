@@ -440,19 +440,41 @@ export function EditForm({
             disabled={pending}
           />
 
-          <SelectField
-            name="agencyType"
-            label="代理店種別"
-            defaultValue={agencyTypeOf(agency.rank, agency.channel)}
-            disabled={pending}
-            hint="申込フォームの選択肢と同じです。報酬の単価と、上位の枠の数え方がこれで決まります。"
-          >
-            {AGENCY_TYPES.map((v) => (
-              <option key={v.value} value={v.value}>
-                {v.value}
-              </option>
-            ))}
-          </SelectField>
+          {/*
+            代理店種別を選べるのは会社（コード区分00）だけ。
+            スタッフ・取次パートナーには当てはまる種別が選択肢に無く、
+            欄を出すと defaultValue がどれにも一致しないまま
+            先頭の「エリア統括代理店」が選ばれた状態で保存され、
+            ランクが 取次店 → 2次代理店 に化けて報酬まで立ってしまう。
+            欄を出さなければ、サーバー側（agency-actions.ts）は
+            ランクと販路種別をいまのまま据え置く。
+          */}
+          {agency.codeKind === "01" || agency.codeKind === "02" ? (
+            <div>
+              <span className={labelCls}>代理店種別</span>
+              <p className="mt-1.5 text-sm text-ink-200">
+                {agencyTypeOf(agency.rank, agency.channel, agency.codeKind)}
+              </p>
+              <p className="mt-1 text-xs text-ink-400">
+                コード区分が「{agency.codeKind === "01" ? "取次パートナー" : "スタッフ"}
+                」のため、代理店種別は変更できません。
+              </p>
+            </div>
+          ) : (
+            <SelectField
+              name="agencyType"
+              label="代理店種別"
+              defaultValue={agencyTypeOf(agency.rank, agency.channel, agency.codeKind)}
+              disabled={pending}
+              hint="申込フォームの選択肢と同じです。報酬の単価と、上位の枠の数え方がこれで決まります。"
+            >
+              {AGENCY_TYPES.map((v) => (
+                <option key={v.value} value={v.value}>
+                  {v.value}
+                </option>
+              ))}
+            </SelectField>
+          )}
 
           <SelectField
             name="codeKind"

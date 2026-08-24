@@ -85,7 +85,11 @@ function SlotStateNotice({ slots }: { slots: SlotSummary }) {
   if (slots.requestStatus === "承認済") {
     return (
       <Notice tone="info">
-        増枠が承認されています。上限は {slots.limit} 社に設定済みです。空き枠にそのまま登録を進められます。
+        増枠が承認されています。
+        {slots.limit > 0
+          ? `上限は ${slots.limit} 名に設定済みです。`
+          : "上限は設けていません（特別枠）。"}
+        空き枠にそのまま登録を進められます。
       </Notice>
     );
   }
@@ -304,7 +308,8 @@ export default async function OrganizationPage({
         ) : (
           <ul className="px-5 py-4">
             {rows.map(({ agency, depth }) => {
-              const consumes = countsTowardSlot(agency);
+              // 枠を使うのは自分の直下だけ（その下の配下は上位の枠を使う）
+              const consumes = agency.parentCode === me.code && countsTowardSlot(agency);
               const isSelf = agency.code === me.code;
               // 階層と区分が同じ呼び方になる相手（取次パートナー・スタッフ）は、
               // 同じ言葉を2つ並べない。
@@ -354,11 +359,11 @@ export default async function OrganizationPage({
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-ink-800 px-5 py-3 text-xs text-ink-400">
           <span className="flex items-center gap-2">
             <span className="inline-block h-3.5 w-0.5 shrink-0 bg-gold-500/70" />
-            枠を消費する{codeKindLabel("00")}（コード区分 00）
+            自分の直下（1名ぶん枠を使います）
           </span>
           <span className="flex items-center gap-2">
             <span className="inline-block h-3.5 w-0.5 shrink-0 bg-ink-800" />
-            {codeKindLabel("01")}・{codeKindLabel("02")}（枠は消費しません）
+            その下の配下・停止解約（枠には数えません）
           </span>
         </div>
       </Card>

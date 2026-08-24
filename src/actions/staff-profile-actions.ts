@@ -53,10 +53,26 @@ export async function setStaffProfileAction(
   /*
    * 対象はコードで引き直す。
    * 画面から来た区分や上位コードは信用しない（8時間前の写しのことがある）。
+   *
+   * 列がまだ無い環境ではこの SELECT 自体が落ちるので、ここも try で受ける。
+   * 受けないと画面に何も出ないまま操作が終わり、原因が分からなくなる。
    */
-  const target = await selectOne<Row>(
-    `agencies?select=code,name,parent_code,code_kind,company_name,staff_type&code=eq.${encodeURIComponent(code)}`,
-  );
+  let target: Row | null = null;
+  try {
+    target = await selectOne<Row>(
+      `agencies?select=code,name,parent_code,code_kind,company_name,staff_type&code=eq.${encodeURIComponent(code)}`,
+    );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "不明なエラー";
+    if (/company_name|staff_type/.test(msg)) {
+      return {
+        error:
+          "所属会社名と種別を保存する場所がまだ用意されていません。" +
+          "supabase/migrations/2026-08-24_staff_affiliation.sql を流してから、もう一度お試しください。",
+      };
+    }
+    return { error: `対象のスタッフを読み取れませんでした。${msg}` };
+  }
   if (!target) {
     return { error: "対象のスタッフが見つかりませんでした。画面を読み込み直してください。" };
   }

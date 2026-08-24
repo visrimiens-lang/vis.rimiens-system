@@ -201,7 +201,9 @@ function toAdminOrder(r: Row): AdminOrder {
     secondaryCode: str(r, "niji_code"),
     referrerCode: referrer,
     trackingNo: str(r, "tracking_no"),
-    ownerCode: referrer || agencyCode,
+    // 担当の決め方は lib/orders.ts の ownerCode とそろえる。
+    // 画面によって同じ受注の担当が違う値になると、突き合わせができない。
+    ownerCode: referrer || str(r, "staff_code") || agencyCode,
     zeroCode: str(r, "zeroth_code"),
     staffCode: str(r, "staff_code"),
     reviewResult,

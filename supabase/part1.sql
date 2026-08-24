@@ -50,6 +50,14 @@ create table if not exists public.agencies (
   limit_salon       integer not null default 30,   -- サロン代理店枠
   limit_kojin       integer not null default 30,   -- 個人販売パートナー枠
   limit_toritsugi   integer not null default 30,   -- 取次パートナー枠
+  pay_unit integer,
+  pay_unit_note text,
+  org_code text,
+  -- 2026-08-22 から枠は「スタッフ100名」の1本。上の4列は過去の記録用に残している
+  limit_staff integer not null default 100,
+  -- スタッフが所属している会社の名前と種別（エリア統括が管理画面で設定する）
+  company_name text,
+  staff_type text check (staff_type is null or staff_type in ('販売代理店', 'サロン代理店', '個人販売代理店')),
   special_slot      boolean not null default false, -- 特別枠（上限の対象外）
   slot_request      text not null default 'なし'
                     check (slot_request in ('なし','申請中','承認済','却下')),

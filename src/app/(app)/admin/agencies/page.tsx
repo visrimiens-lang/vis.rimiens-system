@@ -695,10 +695,11 @@ function AgencyTable({
       </thead>
       <tbody>
         {rows.map((a) => {
-          // 枠はスタッフ100名の1本（2026-08-22〜）。0 は「上限なし」。
-          const limit = a.staffLimit;
+          // 枠はスタッフ100名の1本（2026-08-22〜）。0 と特別枠は「上限なし」。
+          const unlimited = a.staffLimit <= 0 || a.specialSlot;
+          const limit = unlimited ? 0 : a.staffLimit;
           const used = usedByParent.get(a.code) ?? 0;
-          const full = limit > 0 && used >= limit;
+          const full = !unlimited && used >= limit;
           return (
             <tr key={a.recordId || a.code}>
               <Td numeric className="whitespace-nowrap font-medium text-ink-100">
@@ -735,7 +736,7 @@ function AgencyTable({
                 align="right"
                 className={cn("whitespace-nowrap", full && "text-warn-500 font-medium")}
               >
-                {used} / {limit}
+                {unlimited ? used : `${used} / ${limit}`}
                 {full ? <span className="ml-1.5 text-xs">上限</span> : null}
                 {a.specialSlot ? (
                   <span className="ml-1.5 align-middle">

@@ -1079,7 +1079,6 @@ async function checkSlotRoom(opts: {
   channel: string;
   areaClass: string;
 }): Promise<SlotRoom> {
-  if (opts.kind === "02") return { ok: true, over: null };
 
   let all: Agency[] = [];
   try {

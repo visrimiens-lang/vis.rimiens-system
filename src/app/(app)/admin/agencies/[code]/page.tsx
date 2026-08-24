@@ -465,8 +465,8 @@ export default async function AgencyDetailPage({
                 : agency.specialSlot
                   ? "特別枠のため上限は数えません"
                   : anySlotFull
-                    ? "埋まっている販路種別があります"
-                    : "販路種別ごとに数えています"
+                    ? "枠がいっぱいです"
+                    : "直下にいる稼働中の方を数えています"
           }
         />
         <StatTile
@@ -617,18 +617,17 @@ export default async function AgencyDetailPage({
             )}
           </Info>
           <Info label="枠の上限">
-            <span className="tabnum">
-              販売 {limitText(agency.limitHanbai)} ／ サロン{" "}
-              {limitText(agency.limitSalon)} ／ 個人 {limitText(agency.limitKojin)} ／ 取次{" "}
-              {limitText(agency.limitToritsugi)}
-            </span>
+            <span className="tabnum">スタッフ {limitText(agency.limitStaff)} 名</span>
             {agency.specialSlot ? (
               <span className="ml-2 align-middle">
                 <Badge tone="gold">特別枠</Badge>
               </span>
             ) : null}
             <span className="mt-1 block text-xs text-ink-400">
-              0 は「上限なし」の扱いで、その販路種別の申し込みを止めません。
+              0 は「上限なし」の扱いで、申し込みを止めません。
+              （2026-08-22 より前は 販売{limitText(agency.limitHanbai)}／サロン
+              {limitText(agency.limitSalon)}／個人{limitText(agency.limitKojin)}／取次
+              {limitText(agency.limitToritsugi)} の4本でした）
             </span>
           </Info>
         </InfoGrid>
@@ -754,7 +753,7 @@ export default async function AgencyDetailPage({
               <p className="text-xs leading-relaxed text-ink-400">
                 {slotModel === "area"
                   ? "総販売代理店の配下は統括代理店（2次代理店）です。1社ずつではなく、全国60社のエリア枠で数えます。エリア区分が「本部」の統括代理店は数えていません。"
-                  : "どの枠に入るかは販路種別で決まります（コード区分ではありません）。スタッフ以外は枠を消費します（取次パートナーも取次枠を1件使います）。停止・解約になった配下は数えていません。"}
+                  : "直下にいる方は、コード区分にかかわらず1名ぶん枠を使います。停止・解約になった方は数えていません。"}
                 {agency.specialSlot
                   ? "　この代理店は特別枠のため、上限では申し込みを止めません。"
                   : null}

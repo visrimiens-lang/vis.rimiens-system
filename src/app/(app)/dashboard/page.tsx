@@ -85,6 +85,8 @@ type Loaded = {
   breakdown: SlotBreakdownData;
   /** 枠の単位。エリア枠は「社」、スタッフ枠は「名」。 */
   slotUnit: string;
+  /** 枠のカードを出すか（配下を持てない相手には出さない）。 */
+  showSlots: boolean;
   recent: RecentOrder[];
 };
 
@@ -111,6 +113,11 @@ async function load(code: string, month: string): Promise<Loaded | null> {
   }
   /** 枠の単位。エリア枠は「社」、スタッフ枠は「名」。 */
   const slotUnit = slotModelOf(self) === "area" ? "社" : "名";
+  /*
+   * 取次パートナー・スタッフ・取次店ランクの3次代理店は配下を持てない。
+   * 枠の話そのものが当てはまらないので、枠のカードも数字も出さない。
+   */
+  const showSlots = slotModelOf(self) !== "none";
   const codes = scopeCodes(self, descendants);
 
   // 今月ぶん（数字の集計用）と、期間を絞らないぶん（直近の受注一覧用）。
@@ -165,6 +172,7 @@ async function load(code: string, month: string): Promise<Loaded | null> {
   return {
     breakdown,
     slotUnit,
+    showSlots,
     self,
     summary: summarize(orders, month),
     stoppedCount: thisMonth.raw.length - live.length,
@@ -224,7 +232,7 @@ export default async function DashboardPage() {
     );
   }
 
-  const { self, summary, stoppedCount, slot, breakdown, slotUnit, recent } = data;
+  const { self, summary, stoppedCount, slot, breakdown, slotUnit, showSlots, recent } = data;
 
   // スタッフ（コード区分 02）には報酬の金額を出さない。
   // 2026-04-23 の打ち合わせで「金額が見えるのは親アカウントだけ」と決まっている。
@@ -293,17 +301,19 @@ export default async function DashboardPage() {
             hint="発送が終わった受注の件数"
           />
         )}
-        <StatTile
-          label="枠の空き"
-          value={breakdown.limit <= 0 ? "—" : String(breakdown.remaining)}
-          unit={slotUnit}
-          tone={breakdown.isFull ? "warn" : "default"}
-          hint={
-            breakdown.limit <= 0
-              ? "上限は設けていません（特別枠）"
-              : `${breakdown.limit}${slotUnit}のうち ${breakdown.used}${slotUnit} が登録済み`
-          }
-        />
+        {showSlots ? (
+          <StatTile
+            label="枠の空き"
+            value={breakdown.limit <= 0 ? "—" : String(breakdown.remaining)}
+            unit={slotUnit}
+            tone={breakdown.isFull ? "warn" : "default"}
+            hint={
+              breakdown.limit <= 0
+                ? "上限は設けていません（特別枠）"
+                : `${breakdown.limit}${slotUnit}のうち ${breakdown.used}${slotUnit} が登録済み`
+            }
+          />
+        ) : null}
       </div>
 
       {showReward ? (
@@ -334,59 +344,62 @@ export default async function DashboardPage() {
         </Notice>
       ) : null}
 
-      {/* 2. 枠の状況 */}
-      <Card
-        title={slotModelOf(self) === "area" ? "エリア枠（統括代理店）" : "配下の枠"}
-        action={
-          <Link
-            href="/organization"
-            className="text-xs text-ink-300 transition hover:text-gold-300"
-          >
-            組織を見る →
-          </Link>
-        }
-      >
-        <SlotBreakdown data={breakdown} />
+      {/* 2. 枠の状況。配下を持てない相手（取次パートナー・スタッフ・3次代理店）には出さない */}
+      {showSlots ? (
+        <Card
+          title={slotModelOf(self) === "area" ? "エリア枠（統括代理店）" : "配下の枠"}
+          action={
+            <Link
+              href="/organization"
+              className="text-xs text-ink-300 transition hover:text-gold-300"
+            >
+              組織を見る →
+            </Link>
+          }
+        >
+          <SlotBreakdown data={breakdown} />
 
-        <div className="space-y-3 border-t border-ink-800 px-5 py-4">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-ink-300">
-            <span>
-              {breakdown.limit <= 0
-                ? `いま ${breakdown.used}${slotUnit} を登録しています（上限なし）。`
-                : breakdown.isFull
-                  ? "枠がいっぱいです。"
-                  : `${breakdown.limit}${slotUnit}のうち ${breakdown.used}${slotUnit} を使っています。`}
-            </span>
-            {slot.requestStatus && slot.requestStatus !== "なし" ? (
-              <Badge tone={slot.requestStatus === "申請中" ? "warn" : "neutral"}>
-                増枠申請：{slot.requestStatus}
-              </Badge>
+          <div className="space-y-3 border-t border-ink-800 px-5 py-4">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-ink-300">
+              <span>
+                {breakdown.limit <= 0
+                  ? `いま ${breakdown.used}${slotUnit} を登録しています（上限なし）。`
+                  : breakdown.isFull
+                    ? "枠がいっぱいです。"
+                    : `${breakdown.limit}${slotUnit}のうち ${breakdown.used}${slotUnit} を使っています。`}
+              </span>
+              {slot.requestStatus && slot.requestStatus !== "なし" ? (
+                <Badge tone={slot.requestStatus === "申請中" ? "warn" : "neutral"}>
+                  増枠申請：{slot.requestStatus}
+                </Badge>
+              ) : null}
+            </div>
+
+            {breakdown.isFull ? (
+              slot.requestStatus === "申請中" ? (
+                <Notice tone="info">
+                  増枠を申請中です。本部の承認をお待ちください。
+                </Notice>
+              ) : (
+                <div className="flex flex-wrap items-center gap-3">
+                  <Link
+                    href="/organization"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-gold-500/40 bg-gold-500/10 px-3.5 py-2 text-sm font-medium text-gold-300 transition hover:bg-gold-500/20"
+                  >
+                    増枠を申請する
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+                  <span className="text-xs text-ink-400">
+                    新しく登録するには、先に本部の承認が必要です。
+                  </span>
+                </div>
+              )
             ) : null}
           </div>
 
-          {breakdown.isFull ? (
-            slot.requestStatus === "申請中" ? (
-              <Notice tone="info">
-                増枠を申請中です。本部の承認をお待ちください。
-              </Notice>
-            ) : (
-              <div className="flex flex-wrap items-center gap-3">
-                <Link
-                  href="/organization"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-gold-500/40 bg-gold-500/10 px-3.5 py-2 text-sm font-medium text-gold-300 transition hover:bg-gold-500/20"
-                >
-                  増枠を申請する
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </Link>
-                <span className="text-xs text-ink-400">
-                  新しく登録するには、先に本部の承認が必要です。
-                </span>
-              </div>
-            )
-          ) : null}
-        </div>
+        </Card>
 
-      </Card>
+      ) : null}
 
       {/* 3. 直近の受注 */}
       <Card

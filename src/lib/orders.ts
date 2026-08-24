@@ -35,7 +35,20 @@ function toOrder(r: Row): Order {
     secondaryCode: s_(r, "niji_code"),
     referrerCode: referrer,
     trackingNo: s_(r, "tracking_no"),
-    ownerCode: referrer || agencyCode,
+    staffCode: s_(r, "staff_code"),
+    /*
+     * この受注を「誰の担当ぶん」として数えるか。
+     *
+     * 取次の紹介 → 紹介した取次店
+     * スタッフが売った → そのスタッフ本人
+     * それ以外 → 売った代理店
+     *
+     * スタッフ本人を見るようにしたのは 2026-08-22 から。
+     * エリア統括の下が全員スタッフになり、売ると agency_code が
+     * 統括のコードに揃ってしまうため、本人を見ないと担当ごとに割れない
+     * （統括の明細が「SASA 1行」に潰れる）。
+     */
+    ownerCode: referrer || s_(r, "staff_code") || agencyCode,
   };
 }
 

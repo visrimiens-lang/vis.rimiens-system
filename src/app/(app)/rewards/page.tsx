@@ -85,6 +85,8 @@ function sumUnits(rows: OrderWithReward[]): number {
 type OwnerGroup = {
   code: string;
   name: string;
+  /** 所属している会社の名前。会社ごとの小計をまとめるために使う。 */
+  company: string;
   units: number;
   reward: number | null;
   /**
@@ -102,6 +104,7 @@ type OwnerGroup = {
 function groupByOwner(
   rows: OrderWithReward[],
   names: Map<string, string>,
+  companies: Map<string, string>,
   payTo: Map<string, { unit: number | null; custom: boolean }>,
   selfCode: string,
 ): OwnerGroup[] {
@@ -121,6 +124,7 @@ function groupByOwner(
       return {
         code,
         name: names.get(code) ?? "—",
+        company: companies.get(code) ?? "",
         units,
         reward: sumReward(list),
         payUnit,
@@ -129,6 +133,43 @@ function groupByOwner(
       };
     })
     .sort((a, b) => b.units - a.units || a.code.localeCompare(b.code));
+}
+
+/** 担当ひとりぶんの行。会社ごとの小計の下にぶら下がる。 */
+function MemberRow({ g, showReward }: { g: OwnerGroup; showReward: boolean }) {
+  return (
+    <tr>
+      <Td numeric className="pl-8 text-ink-300">
+        {g.code}
+      </Td>
+      <Td>{g.name}</Td>
+      <Td numeric align="right">
+        {g.units.toLocaleString("ja-JP")}
+      </Td>
+      {showReward ? (
+        <Td numeric align="right" className="text-ink-50">
+          {yen(g.reward)}
+        </Td>
+      ) : null}
+      {showReward ? (
+        <Td numeric align="right">
+          {g.payUnit === null ? (
+            <span className="text-ink-500">—</span>
+          ) : (
+            <>
+              {yen(g.payUnit)}
+              {g.payCustom ? <span className="ml-1 text-xs text-gold-500">個別</span> : null}
+            </>
+          )}
+        </Td>
+      ) : null}
+      {showReward ? (
+        <Td numeric align="right" className="text-ink-50">
+          {g.payout === null ? <span className="text-ink-500">—</span> : yen(g.payout)}
+        </Td>
+      ) : null}
+    </tr>
+  );
 }
 
 export default async function RewardsPage({
@@ -148,6 +189,8 @@ export default async function RewardsPage({
 
   let rows: OrderWithReward[] = [];
   let names = new Map<string, string>();
+  /** 担当コード → 所属会社名。会社ごとにまとめて見るために使う（2026-08-22〜）。 */
+  let companies = new Map<string, string>();
   let payTo = new Map<string, { unit: number | null; custom: boolean }>();
   /** 報酬の単価を引くときのランク（データベースの値）。表示には rankLabel() を通す。 */
   let rewardRank = "";
@@ -167,6 +210,16 @@ export default async function RewardsPage({
     } else {
       const descendants = await listDescendants(self.code);
       names = new Map([self, ...descendants].map((a) => [a.code, a.name]));
+      /*
+       * スタッフは「どこの会社の人か」を持っている（company_name）。
+       * 会社そのものの行や、所属が未設定のスタッフは自分の名前でまとめる。
+       */
+      companies = new Map(
+        [self, ...descendants].map((a) => [
+          a.code,
+          (a.codeKind === "02" ? a.companyName || a.parentName : a.name) || a.name,
+        ]),
+      );
       // 配下ごとの「1台あたりに払う額」。個別設定（組織図で変更）が最優先。
       payTo = new Map(
         descendants.map((d) => [
@@ -223,7 +276,46 @@ export default async function RewardsPage({
   const rewardTotal = showReward && rewardAvailable ? sumReward(rows) : null;
   const hasMissingUnit =
     showReward && (!rewardAvailable || rows.some((r) => r.unitReward === null));
-  const groups = groupByOwner(rows, names, payTo, viewer.code);
+  const groups = groupByOwner(rows, names, companies, payTo, viewer.code);
+
+  /*
+   * 会社ごとの小計を挟んだ並びを作る（2026-08-22〜）。
+   * エリア統括の下が全員スタッフになったので、
+   * 「株式会社樹の分」でまとめて見られないと支払通知が作れない。
+   * 単価は人ごとに違うため、小計には台数・報酬額・お支払額だけを出す。
+   */
+  const companyRows: (
+    | { kind: "company"; company: string; count: number; units: number; reward: number | null; payout: number | null }
+    | { kind: "member"; g: OwnerGroup }
+  )[] = [];
+  {
+    const byCompany = new Map<string, OwnerGroup[]>();
+    for (const g of groups) {
+      const key = g.company || g.name || g.code;
+      const list = byCompany.get(key) ?? [];
+      list.push(g);
+      byCompany.set(key, list);
+    }
+    for (const [company, list] of byCompany) {
+      const units = list.reduce((s, g) => s + g.units, 0);
+      const rewardVals = list.map((g) => g.reward).filter((v): v is number => v !== null);
+      const payoutVals = list.map((g) => g.payout).filter((v): v is number => v !== null);
+      // 会社に1人しかいないときは、小計を挟まずその人の行だけ出す
+      if (list.length === 1) {
+        companyRows.push({ kind: "member", g: list[0] });
+        continue;
+      }
+      companyRows.push({
+        kind: "company",
+        company,
+        count: list.length,
+        units,
+        reward: rewardVals.length > 0 ? rewardVals.reduce((s, v) => s + v, 0) : null,
+        payout: payoutVals.length > 0 ? payoutVals.reduce((s, v) => s + v, 0) : null,
+      });
+      for (const g of list) companyRows.push({ kind: "member", g });
+    }
+  }
   const payoutTotal = groups.reduce((t, g) => t + (g.payout ?? 0), 0);
   const hasPayout = groups.some((g) => g.payout !== null);
   const rewardRankText = rankLabel(rewardRank);
@@ -482,7 +574,7 @@ export default async function RewardsPage({
           <Table>
             <thead>
               <tr>
-                <Th>代理店コード</Th>
+                <Th>会社・担当コード</Th>
                 <Th>名前</Th>
                 <Th align="right">台数</Th>
                 {showReward ? <Th align="right">報酬額</Th> : null}
@@ -492,43 +584,43 @@ export default async function RewardsPage({
               </tr>
             </thead>
             <tbody>
-              {groups.map((g) => (
-                <tr key={g.code}>
-                  <Td numeric>{g.code}</Td>
-                  <Td>{g.name}</Td>
-                  <Td numeric align="right">
-                    {g.units.toLocaleString("ja-JP")}
-                  </Td>
-                  {showReward ? (
-                    <Td numeric align="right" className="text-ink-50">
-                      {yen(g.reward)}
+              {companyRows.map((row) =>
+                row.kind === "company" ? (
+                  /*
+                    会社ごとの小計。2026-08-22 から、エリア統括の下は全員スタッフになり、
+                    「株式会社樹の分をまとめて」という見方が要る（庄司さんの依頼）。
+                    単価とお支払額は人ごとに違うので、小計には出さない。
+                  */
+                  <tr key={`c:${row.company}`} className="bg-ink-900/60">
+                    <Td className="font-semibold text-ink-100" >
+                      {row.company || "（所属未設定）"}
                     </Td>
-                  ) : null}
-                  {showReward ? (
-                    <Td numeric align="right">
-                      {g.payUnit === null ? (
-                        <span className="text-ink-500">—</span>
-                      ) : (
-                        <>
-                          {yen(g.payUnit)}
-                          {g.payCustom ? (
-                            <span className="ml-1 text-xs text-gold-500">個別</span>
-                          ) : null}
-                        </>
-                      )}
+                    <Td>
+                      <span className="text-xs text-ink-400">{row.count} 名分</span>
                     </Td>
-                  ) : null}
-                  {showReward ? (
-                    <Td numeric align="right" className="text-ink-50">
-                      {g.payout === null ? (
-                        <span className="text-ink-500">—</span>
-                      ) : (
-                        yen(g.payout)
-                      )}
+                    <Td numeric align="right" className="font-semibold text-ink-100">
+                      {row.units.toLocaleString("ja-JP")}
                     </Td>
-                  ) : null}
-                </tr>
-              ))}
+                    {showReward ? (
+                      <Td numeric align="right" className="font-semibold text-gold-400">
+                        {yen(row.reward)}
+                      </Td>
+                    ) : null}
+                    {showReward ? <Td>{null}</Td> : null}
+                    {showReward ? (
+                      <Td numeric align="right" className="font-semibold text-ink-100">
+                        {row.payout === null ? (
+                          <span className="text-ink-500">—</span>
+                        ) : (
+                          yen(row.payout)
+                        )}
+                      </Td>
+                    ) : null}
+                  </tr>
+                ) : (
+                  <MemberRow key={row.g.code} g={row.g} showReward={showReward} />
+                ),
+              )}
             </tbody>
             <tfoot>
               <tr>

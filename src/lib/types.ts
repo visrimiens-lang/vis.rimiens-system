@@ -93,8 +93,10 @@ export type Order = {
   agencyCode: string;
   secondaryCode: string;
   referrerCode: string;
+  /** 売ったスタッフ本人のコード。スタッフ以外が売ったときは空。 */
+  staffCode: string;
   trackingNo: string;
-  /** 表示上の「担当」= 取次紹介コード があればそれ、無ければ代理店コード */
+  /** 表示上の「担当」= 取次紹介コード → スタッフ本人 → 代理店コード の順で決まる */
   ownerCode: string;
 };
 

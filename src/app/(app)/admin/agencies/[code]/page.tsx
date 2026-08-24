@@ -453,7 +453,7 @@ export default async function AgencyDetailPage({
                 ? String(slots.used)
                 : `${slots.used} / ${slots.limit}`
           }
-          unit={!slots ? undefined : slotModel === "area" ? "社" : "件"}
+          unit={!slots ? undefined : slotModel === "area" ? "社" : "名"}
           tone={anySlotFull ? "warn" : "default"}
           hint={
             !slots

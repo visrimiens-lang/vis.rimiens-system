@@ -391,7 +391,7 @@ export default async function AgencyDetailPage({
   const slotModel = me ? slotModelOf(me) : "none";
   const slots = me ? buildSlotView(me, agency, children, everyone) : null;
   const anySlotFull = slots ? slots.rows.some((r) => r.isFull) : false;
-  // スタッフ（コード区分02）だけが枠を消費しない
+  // 直下のスタッフの人数（統計タイルに出す。枠の数え方とは別）
   const staff = children.filter(
     (a) => a.codeKind === "02" && a.status !== "停止・解約",
   );

@@ -321,19 +321,27 @@ export function acquisitionMail(opts: {
   productName: string;
   /** 宛先がスタッフ（コード区分 02）か。true のとき報酬の記述を出さない。 */
   isStaff?: boolean;
+  /**
+   * マイページ（ポータル）を使う相手か。
+   * 使わない相手（スタッフ・3次の会社・個人販売代理店）に
+   * 「マイページでご確認いただけます」と書くと、ログイン手段が無いのに
+   * 案内された形になり、問い合わせを招く（2026-08-21 決定と食い違う）。
+   */
+  usesPortal?: boolean;
 }): { subject: string; body: string } {
   const isStaff = opts.isStaff === true;
+  const usesPortal = opts.usesPortal === true;
   // スタッフは個人あて、会社・取次パートナーは組織あて。
   const honorific = isStaff ? "様" : "御中";
   const guide = isStaff
-    ? `配送の状況とご自身の売上は、マイページの「売上・報酬」から
+    ? `報酬の金額は所属先の代理店にお問い合わせください。`
+    : usesPortal
+      ? `配送の状況と報酬の見込みは、マイページの「売上・報酬」から
 ご確認いただけます。
 
-報酬の金額は所属先の代理店にお問い合わせください。`
-    : `配送の状況と報酬の見込みは、マイページの「売上・報酬」から
-ご確認いただけます。
-
-報酬は配送完了をもって確定いたします。`;
+報酬は配送完了をもって確定いたします。`
+      : `報酬は配送完了をもって確定いたします。
+詳細は本部までお問い合わせください。`;
 
   return {
     subject: "【VIS】ご成約のお知らせ",

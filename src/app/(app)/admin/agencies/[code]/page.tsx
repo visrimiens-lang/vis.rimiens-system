@@ -328,6 +328,10 @@ export default async function AgencyDetailPage({
     parentName: s(row, "parent_name"),
     companyName: s(row, "company_name"),
     staffType: s(row, "staff_type"),
+    nameKana: s(row, "name_kana"),
+    contactName: s(row, "contact_name"),
+    invoiceStatus: s(row, "invoice_status"),
+    invoiceNo: s(row, "invoice_no"),
     email: s(row, "email"),
     phone: s(row, "phone"),
     zip: s(row, "zip"),
@@ -503,8 +507,28 @@ export default async function AgencyDetailPage({
               <span className="tabnum">{orgCodeOf(agency)}</span>
             </Info>
           ) : null}
-          <Info label="法人名・お名前">{orDash(agency.name)}</Info>
-          <Info label="代表者名">{orDash(agency.repName)}</Info>
+          <Info label="法人名・お名前">
+            {orDash(agency.name)}
+            {agency.nameKana ? (
+              <span className="mt-0.5 block text-xs text-ink-400">{agency.nameKana}</span>
+            ) : null}
+          </Info>
+          <Info label="代表者名">
+            {orDash(agency.repName)}
+            {agency.contactName && agency.contactName !== agency.repName ? (
+              <span className="mt-0.5 block text-xs text-ink-400">
+                ご担当：{agency.contactName}
+              </span>
+            ) : null}
+          </Info>
+          <Info label="インボイス">
+            {agency.invoiceStatus || "—"}
+            {agency.invoiceNo ? (
+              <span className="mt-0.5 block text-xs tabnum text-ink-400">
+                {agency.invoiceNo}
+              </span>
+            ) : null}
+          </Info>
           {/* 申込フォームと同じ呼び方で出す。データベースの持ち方（ランク＋販路種別）も併記する */}
           <Info label="代理店種別">
             {agencyTypeOf(agency.rank, agency.channel, agency.codeKind, agency.staffType)}

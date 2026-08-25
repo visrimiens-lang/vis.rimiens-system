@@ -113,6 +113,13 @@ export function areaUsage(all: Agency[]): {
   rows: AreaUsage[];
   total: { limit: number; used: number; remaining: number };
   excluded: Agency[];
+  /**
+   * エリアが入っていない統括代理店。どの行にも数えられていない。
+   * 2026-08-22 に申込フォームからエリア欄が消えたため、
+   * 本部が設定するまでここに出る。放っておくと全国60社の合計が
+   * 実数より少なく見え、上限を超えても気づけない。
+   */
+  unassigned: Agency[];
 } {
   const targets = all.filter(
     (a) => a.rank === "2次代理店" && isActive(a) && a.area !== "本部",
@@ -120,6 +127,8 @@ export function areaUsage(all: Agency[]): {
   const excluded = all.filter(
     (a) => a.rank === "2次代理店" && isActive(a) && a.area === "本部",
   );
+  const known = new Set(AREA_QUOTA.map((q) => q.area));
+  const unassigned = targets.filter((a) => !known.has(a.area));
 
   const rows = AREA_QUOTA.map(({ area, limit }) => {
     const members = targets.filter((a) => a.area === area);
@@ -135,6 +144,7 @@ export function areaUsage(all: Agency[]): {
 
   const used = rows.reduce((s, r) => s + r.used, 0);
   return {
+    unassigned,
     rows,
     total: { limit: AREA_TOTAL, used, remaining: Math.max(0, AREA_TOTAL - used) },
     excluded,

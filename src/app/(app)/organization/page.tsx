@@ -103,7 +103,7 @@ function SlotStateNotice({ slots }: { slots: SlotSummary }) {
   if (slots.isOver) {
     return (
       <Notice tone="warn">
-        枠がすべて埋まっています。新しく{codeKindLabel("00")}（コード区分00）を登録するには、増枠のお申し込みが必要です。
+        枠がすべて埋まっています。新しく配下を登録するには、増枠のお申し込みが必要です。
       </Notice>
     );
   }
@@ -632,7 +632,7 @@ export default async function OrganizationPage({
         <div className="border-t border-ink-800 px-5 py-3 text-xs leading-relaxed text-ink-400">
           「直下」はあなたが直接登録した先、「配下すべて」はその先の階層も含めた数です。
           {suspendedDirect > 0
-            ? `直下の${codeKindLabel("00")}（コード区分00）のうち ${suspendedDirect} 社は停止・解約のため、枠には数えていません。`
+            ? `直下のうち ${suspendedDirect} 件は停止・解約のため、枠には数えていません。`
             : ""}
         </div>
       </Card>

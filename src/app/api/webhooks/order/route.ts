@@ -101,10 +101,13 @@ type StaffCheck = { code: string; note: string };
  */
 const CLAIM_WINDOW_HOURS = 72;
 
-async function refFromClaim(email: string, phone: string): Promise<string> {
+async function refFromClaim(
+  email: string,
+  phone: string,
+): Promise<{ ref: string; claimId: unknown }> {
   const mail = (email || "").trim().toLowerCase();
   const tel = normalizePhone(phone || "");
-  if (!mail && !tel) return "";
+  if (!mail && !tel) return { ref: "", claimId: null };
 
   const since = new Date(Date.now() - CLAIM_WINDOW_HOURS * 3600 * 1000).toISOString();
   const filter = mail
@@ -116,18 +119,26 @@ async function refFromClaim(email: string, phone: string): Promise<string> {
       `ref_claims?select=id,ref&${filter}&used_by=is.null` +
         `&created_at=gte.${encodeURIComponent(since)}&order=created_at.desc&limit=1`,
     );
-    if (rows.length === 0) return "";
-    const ref = String(rows[0]["ref"] ?? "");
-    // 使った控えには印を付けて、次の受注で使い回さないようにする
-    try {
-      await update(`ref_claims?id=eq.${rows[0]["id"]}`, { used_by: -1 });
-    } catch {
-      // 印が付かなくても付け先は決まっているので進める
-    }
-    return ref;
+    if (rows.length === 0) return { ref: "", claimId: null };
+    /*
+     * ここでは「使用済み」の印を付けない。付けるのは受注の登録が成功したあと。
+     * 先に印を付けると、登録が一時障害で失敗して再送されたとき、
+     * 控えがもう拾えず、再送分が帰属なし（報酬0件）で登録されてしまう。
+     */
+    return { ref: String(rows[0]["ref"] ?? ""), claimId: rows[0]["id"] };
   } catch {
     // 控えの表がまだ無いときも、決済の取り込みは止めない
-    return "";
+    return { ref: "", claimId: null };
+  }
+}
+
+/** 受注の登録が成功したあとに、使った控えへ印を付ける。 */
+async function markClaimUsed(claimId: unknown, orderId: string): Promise<void> {
+  if (claimId === null || claimId === undefined) return;
+  try {
+    await update(`ref_claims?id=eq.${claimId}`, { used_by: Number(orderId) || -1 });
+  } catch {
+    // 印が付かなくても受注は成立している
   }
 }
 
@@ -267,7 +278,10 @@ export async function POST(req: NextRequest) {
    */
   const agencyFromWebhook =
     pickExact(data, "ref", "ref_code", "partner", "代理店コード", "agency_code") || "";
-  const agencyCode = agencyFromWebhook || (await refFromClaim(email, phone));
+  const claim = agencyFromWebhook
+    ? { ref: "", claimId: null }
+    : await refFromClaim(email, phone);
+  const agencyCode = agencyFromWebhook || claim.ref;
 
   try {
     const r = await registerOrder({
@@ -285,6 +299,9 @@ export async function POST(req: NextRequest) {
       staffCode: staff.code || undefined,
       stripePaymentId: paymentId ?? undefined,
     });
+
+    // 受注が登録できたので、使った控えに印を付ける（失敗時は付けず、再送で拾い直せる）
+    if (r.ok) await markClaimUsed(claim.claimId, r.code || "");
 
     // 担当者コードに引っかかりがあれば、受信箱に残して本部に確認してもらう。
     // 受注は登録できているので、その旨も一緒に書いておく。

@@ -35,7 +35,7 @@ export default async function AreaQuotaPage() {
     );
   }
 
-  const { rows, total, excluded } = areaUsage(all);
+  const { rows, total, excluded, unassigned } = areaUsage(all);
 
   return (
     <div className="space-y-6">
@@ -145,6 +145,15 @@ export default async function AreaQuotaPage() {
           </tbody>
         </Table>
       </Card>
+
+      {unassigned.length > 0 ? (
+        <Notice tone="warn">
+          エリアが入っていない統括代理店が {unassigned.length} 社あります（
+          {unassigned.map((a) => `${a.name || a.code}`).join("・")}）。
+          どのエリアの枠にも数えられていないため、下の合計は実数より少なく出ています。
+          代理店詳細の「内容を直す」でエリア区分を設定してください。
+        </Notice>
+      ) : null}
 
       {excluded.length > 0 ? (
         <Card title="枠から除外している統括代理店">

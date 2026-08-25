@@ -110,7 +110,9 @@ export async function POST(req: NextRequest) {
 
   const submissionId =
     pick(data, "submissionID", "submission_id", "submissionId") || null;
-  const formId = pick(data, "formID", "form_id") || null;
+  // pick は formID をメタ項目として飛ばすので、ここだけは直接読む
+  const formId =
+    String(data["formID"] ?? data["form_id"] ?? "").trim() || null;
 
   // まず丸ごと保存する
   const box = await receive("jotform", submissionId, formId, data);
@@ -123,11 +125,12 @@ export async function POST(req: NextRequest) {
       const r = await registerDemoMachine({
         serialNo: pick(data, "製品番号", "シリアル", "serial"),
         model: pick(data, "機種", "model") || undefined,
-        acquiredKind: pick(data, "取得区分", "acquiredKind") || undefined,
-        acquiredOn: pick(data, "取得日", "acquiredOn") || undefined,
+        // フォーム(261833737598069)の実ラベルは「購入区分」「購入日」「主な利用用途」
+        acquiredKind: pick(data, "取得区分", "購入区分", "acquiredKind") || undefined,
+        acquiredOn: pick(data, "取得日", "購入日", "acquiredOn") || undefined,
         holderCode: pick(data, "代理店コード", "保有代理店コード", "code") || undefined,
         holderName: pick(data, "保有代理店名", "代理店名") || undefined,
-        purpose: pick(data, "貸与目的", "目的", "purpose") || undefined,
+        purpose: pick(data, "貸与目的", "主な利用用途", "目的", "purpose") || undefined,
         note: pick(data, "備考", "note") || undefined,
       });
       await markProcessed(box.id, r.ok ? undefined : r.message);
@@ -147,7 +150,8 @@ export async function POST(req: NextRequest) {
 
     if (kind === "license-test" || kind === "test") {
       const r = await notifyLicenseTest({
-        name: pick(data, "お名前", "氏名", "name"),
+        // フォーム(262028411895055)の実ラベルは「名前」（固有名 input4）
+        name: pick(data, "お名前", "氏名", "名前", "input4", "name"),
         agencyCode: pick(data, "代理店コード", "スタッフコード", "code") || undefined,
         score: pick(data, "点数", "得点", "score") || undefined,
         detail: pick(data, "回答", "detail") || undefined,
@@ -181,6 +185,11 @@ export async function POST(req: NextRequest) {
         "fullname20", "お名前", "氏名", "input3", "name",
       ),
       repName: pick(data, "代表者", "代表者名", "representative"),
+      nameKana: pick(data, "会社名（フリガナ）", "フリガナ", "kana", "ka"),
+      contactName: pick(data, "担当者氏名", "担当者"),
+      corporateNo: pick(data, "法人番号"),
+      invoiceStatus: pick(data, "インボイス登録", "input46"),
+      invoiceNo: pick(data, "インボイス登録番号"),
       email: pick(data, "input32", "メール", "email", "mail"),
       // 「電話番号」(input50) を先に見る。サロン代理店の申込では
       // 「店舗電話番号」(input51) が先に並ぶため、名前の一部一致だと店舗番号を拾ってしまう。

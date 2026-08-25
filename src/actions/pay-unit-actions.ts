@@ -116,7 +116,9 @@ export async function setPayUnitAction(
       変更前: before ? `${Number(before).toLocaleString("ja-JP")}円` : "既定（推奨の税抜単価）",
       変更後: value === null ? "既定（推奨の税抜単価）" : `${value.toLocaleString("ja-JP")}円`,
       理由: note || "（未記入）",
-      補足: "すでに計上した報酬は変わらない。次の受注から効く。",
+      補足:
+        "本部の報酬台帳はさかのぼって変わらない。" +
+        "売上・報酬画面のお支払額の表示は、過去の月もいまの額で計算し直される。",
     },
   );
 

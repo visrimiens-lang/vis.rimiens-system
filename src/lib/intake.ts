@@ -155,6 +155,22 @@ export function hasOrgCodeColumn(): Promise<boolean> {
   return orgCodeColumn;
 }
 
+let extraColumns: Promise<boolean> | null = null;
+
+/**
+ * フリガナ・担当者・インボイスの列（2026-08-25 追加）があるか。
+ * SQLを流す前の環境で INSERT に載せると、申込の登録ごと落ちるため、
+ * org_code と同じく「列があるときだけ書く」。
+ */
+export function hasExtraColumns(): Promise<boolean> {
+  if (!extraColumns) {
+    extraColumns = select<Row>("agencies?select=name_kana&limit=1")
+      .then(() => true)
+      .catch(() => false);
+  }
+  return extraColumns;
+}
+
 /**
  * その代理店が属する組織の英字を返す。
  *
@@ -419,6 +435,12 @@ export async function markProcessed(id: number, error?: string): Promise<void> {
 /* ═══════════════════════ 代理店の登録 ═══════════════════════ */
 
 export type AgencyApplication = {
+  /** 会社名フリガナ・担当者・法人番号・インボイス。無いフォームもあるので任意 */
+  nameKana?: string;
+  contactName?: string;
+  corporateNo?: string;
+  invoiceStatus?: string;
+  invoiceNo?: string;
   /** どのフォームから来たか */
   formKind: "代理店システム登録" | "取次パートナー登録" | "スタッフ登録";
   name: string;
@@ -554,8 +576,14 @@ async function findSamePerson(name: string, email: string): Promise<Row | null> 
   const nm = (name || "").replace(/[\s\u3000]/g, "");
   const mail = (email || "").trim().toLowerCase();
   if (!nm || !mail) return null;
+  /*
+   * QRの列も一緒に引く。ensureQrAndGuide がこの行で凍結（QR停止中）を
+   * 見分けるため。列が足りないと停止の目印が読めず、
+   * 本部が止めたQRを再登録が黙って復活させてしまう。
+   */
   const rows = await select<Row>(
-    `agencies?select=code,name,status,code_kind&email=eq.${encodeURIComponent(mail)}`,
+    `agencies?select=code,name,status,code_kind,qr1_url,qr2_url,qr2_status,qr2_rejected_note` +
+      `&email=eq.${encodeURIComponent(mail)}`,
   );
   return (
     rows.find(
@@ -610,7 +638,10 @@ async function ensureQrAndGuide(row: Row): Promise<string> {
       lineQrUrl: kindOfRow === KIND_REFERRER ? OFFICIAL_LINE_URL : undefined,
       tossFormUrl: kindOfRow === KIND_REFERRER ? tossUpUrl(code) || undefined : undefined,
     });
-    await sendMail(to, mail.subject, mail.body);
+    const sent = await sendMail(to, mail.subject, mail.body);
+    if (!sent.ok) {
+      return "（ご案内のメールは送れませんでした。代理店管理から送り直してください）";
+    }
     await update(`agencies?code=eq.${encodeURIComponent(code)}`, {
       guide_mailed_at: new Date().toISOString(),
     });
@@ -834,6 +865,15 @@ export async function registerAgency(app: AgencyApplication): Promise<IntakeResu
       code,
       name,
       rep_name: app.repName || null,
+      ...((await hasExtraColumns())
+        ? {
+            name_kana: (app.nameKana || "").trim() || null,
+            contact_name: (app.contactName || "").trim() || null,
+            corporate_no: (app.corporateNo || "").trim() || null,
+            invoice_status: (app.invoiceStatus || "").trim() || null,
+            invoice_no: (app.invoiceNo || "").trim() || null,
+          }
+        : {}),
       rank,
       channel,
       code_kind: kind,
@@ -944,10 +984,19 @@ export async function registerAgency(app: AgencyApplication): Promise<IntakeResu
         lineQrUrl: kind === KIND_REFERRER ? OFFICIAL_LINE_URL : undefined,
         tossFormUrl: kind === KIND_REFERRER ? tossUpUrl(code) || undefined : undefined,
       });
-      await sendMail(app.email, mail.subject, mail.body);
-      await update(`agencies?code=eq.${encodeURIComponent(code)}`, {
-        guide_mailed_at: new Date().toISOString(),
-      });
+      const sent = await sendMail(app.email, mail.subject, mail.body);
+      /*
+       * 送信の記録は、実際に送れたときだけ残す。
+       * sendMail は失敗しても例外を投げず {ok:false} を返すので、
+       * 戻り値を見ずに記録すると、SMTP障害の間に届いた登録が
+       * 「送信済み」の顔をしたまま残り、送り直しの導線でも
+       * 「すでにお送りしています」と誤って案内されてしまう。
+       */
+      if (sent.ok) {
+        await update(`agencies?code=eq.${encodeURIComponent(code)}`, {
+          guide_mailed_at: new Date().toISOString(),
+        });
+      }
     } catch {
       // 送れなくても登録は成立させる
     }
@@ -1253,6 +1302,8 @@ function normalizePaymentMethod(raw: string): { value: string | null; raw: strin
 export async function registerOrder(app: OrderApplication): Promise<IntakeResult> {
   const name = (app.customerName || "").trim();
   if (!name) return { ok: false, message: "注文者名が入っていません。" };
+  /** 二重の疑いなど、本部に見てもらいたい注記。受信箱に残す。 */
+  let doubtNote = "";
 
   if (app.stripePaymentId) {
     const dup = await selectOne<Row>(
@@ -1272,10 +1323,17 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
      * 通知の二度届きとみなして、前の受注をそのまま返す。
      * 番号がある通常のときは、この判定は通らない（上の分岐で終わる）。
      */
+    /*
+     * 5分以内の同じ内容は、通知の二度届きとみなして前の受注を返す。
+     * 名前と金額だけで見ると同姓同名の別人まで巻き込むので、
+     * メールアドレスが分かるときはそれも一致条件に足す。
+     */
+    const mail5 = (app.email || "").trim().toLowerCase();
     const since = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     const recent = await selectOne<Row>(
       `orders?select=id,amount&customer_name=eq.${encodeURIComponent(name)}` +
         `&amount=eq.${Number(app.amount ?? 0)}` +
+        (mail5 ? `&email=eq.${encodeURIComponent(mail5)}` : "") +
         `&created_at=gte.${encodeURIComponent(since)}&order=id.desc`,
     );
     if (recent) {
@@ -1289,6 +1347,29 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
         code: String(recent["id"]),
         message: "この注文は登録済みです（同じ内容が続けて届いたため）。",
       };
+    }
+    /*
+     * 5分を超えて24時間以内に、同じ連絡先・同じ金額の受注がある場合。
+     *
+     * UTAGEの再送（タイムアウト・手動再実行）なら二重登録、
+     * 同じ方の正当な2台目の購入なら正しい受注で、機械では見分けられない。
+     * 以前はそのまま2件目を登録して黙っていたため、二重なら報酬も
+     * 満額もう1件分（139,700円）立ってしまう状態だった。
+     * 登録は止めずに行い、受信箱に残して本部に見分けてもらう。
+     */
+    if (mail5) {
+      const day = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+      const sameDay = await selectOne<Row>(
+        `orders?select=id&email=eq.${encodeURIComponent(mail5)}` +
+          `&amount=eq.${Number(app.amount ?? 0)}` +
+          `&created_at=gte.${encodeURIComponent(day)}&order=id.desc`,
+      );
+      if (sameDay) {
+        doubtNote =
+          `同じ連絡先・同額の受注（#${s_(sameDay, "id")}）が24時間以内にもうあります。` +
+          "通知の二重届きなら、この受注をキャンセルにしてください（報酬も取り消されます）。" +
+          "2台目のご購入なら、このままで結構です。";
+      }
     }
   }
 
@@ -1474,9 +1555,11 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
   return {
     ok: true,
     code: String(order["id"]),
-    message: `${name} 様のご注文を登録しました。${trouble ? ` ${trouble}` : ""}`,
+    message: `${name} 様のご注文を登録しました。${trouble ? ` ${trouble}` : ""}${
+      doubtNote ? ` ${doubtNote}` : ""
+    }`,
     // 受け口はこれを見て、受信箱に「取り込めていない」として残す
-    needsReview: trouble ? true : undefined,
+    needsReview: trouble || doubtNote ? true : undefined,
   };
 }
 
@@ -1512,7 +1595,15 @@ export async function registerDemoMachine(app: DemoApplication): Promise<IntakeR
     holderName = s_(owner, "name");
   }
 
-  const kinds = ["個人購入", "デモ機購入", "無料貸与"];
+  // フォーム(261833737598069)の選択肢は「スターターセットとして購入」
+  // 「個人購入製品をデモ機として登録」。旧kintoneの3値も受けられるよう残す。
+  const kinds = [
+    "個人購入",
+    "デモ機購入",
+    "無料貸与",
+    "スターターセットとして購入",
+    "個人購入製品をデモ機として登録",
+  ];
   await insert("demo_machines", [
     {
       serial_no: serial,
@@ -1623,7 +1714,7 @@ export async function notifyAcquisition(orderId: string): Promise<void> {
   const sentTo = new Set<string>();
   for (const code of codes) {
     const agency = await selectOne<Row>(
-      `agencies?select=name,email,code_kind&code=eq.${encodeURIComponent(code)}`,
+      `agencies?select=name,email,code_kind,rank&code=eq.${encodeURIComponent(code)}`,
     );
     const to = s_(agency, "email").trim().toLowerCase();
     if (!to || sentTo.has(to)) continue;
@@ -1637,6 +1728,8 @@ export async function notifyAcquisition(orderId: string): Promise<void> {
     const mail = acquisitionMail({
       agencyName: s_(agency, "name"),
       isStaff: s_(agency, "code_kind") === KIND_STAFF,
+      // マイページを使うのはエリア統括・総販売代理店だけ（2026-08-21 決定）
+      usesPortal: usesPortal(s_(agency, "rank"), s_(agency, "code_kind")),
       ...detail,
     });
     await sendMail(s_(agency, "email"), mail.subject, mail.body);

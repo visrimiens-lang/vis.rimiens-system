@@ -10,7 +10,13 @@ const initial: FormState = {};
 export function IssuePassword({
   agencies,
 }: {
-  agencies: { code: string; name: string; hasPassword: boolean }[];
+  agencies: {
+    code: string;
+    name: string;
+    hasPassword: boolean;
+    /** マイページを使う相手か（エリア統括・総販売代理店）。それ以外は原則発行不要 */
+    usesPortal: boolean;
+  }[];
 }) {
   const [state, run, pending] = useActionState(issuePasswordAction, initial);
   const [selected, setSelected] = useState("");
@@ -23,6 +29,10 @@ export function IssuePassword({
         代理店がポータルにログインするためのパスワードを発行します。
         発行したパスワードは<strong className="text-ink-100">この画面に1度だけ</strong>
         表示されます。電話や本人のメールなど、確実に本人へ届く方法でお伝えください。
+      </p>
+      <p className="text-xs leading-relaxed text-ink-400">
+        マイページを使うのは<strong className="text-ink-200">エリア統括代理店と総販売代理店だけ</strong>です。
+        「マイページ対象外」と付いている相手への発行は、原則不要です。
       </p>
 
       <form action={run} className="flex flex-wrap items-end gap-3">
@@ -40,6 +50,7 @@ export function IssuePassword({
               <option key={a.code} value={a.code}>
                 {a.code}　{a.name}
                 {a.hasPassword ? "（発行済み）" : ""}
+                {a.usesPortal ? "" : "（マイページ対象外）"}
               </option>
             ))}
           </select>
@@ -54,6 +65,13 @@ export function IssuePassword({
           {pending ? "発行中…" : "パスワードを発行"}
         </button>
       </form>
+
+      {target && !target.usesPortal && !state.password ? (
+        <Notice tone="warn">
+          {target.name} はマイページを使わない代理店種別です（マイページはエリア統括代理店と
+          総販売代理店だけ）。本部が個別に認めた場合を除き、発行は不要です。
+        </Notice>
+      ) : null}
 
       {target?.hasPassword && !state.password ? (
         <Notice tone="warn">

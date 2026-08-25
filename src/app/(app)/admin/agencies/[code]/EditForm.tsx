@@ -35,6 +35,10 @@ export type AgencyDetail = {
   parentName: string;
   /** 所属している会社の名前。スタッフが「どこの会社の人か」を表す。 */
   companyName: string;
+  nameKana: string;
+  contactName: string;
+  invoiceStatus: string;
+  invoiceNo: string;
   /** スタッフの種別（販売代理店／サロン代理店／個人販売代理店）。 */
   staffType: string;
   email: string;

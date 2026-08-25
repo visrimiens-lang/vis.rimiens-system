@@ -22,6 +22,7 @@ import {
   belongsToOrg,
   channelLabel,
   statusTone,
+  usesPortal,
 } from "@/lib/labels";
 import { PayUnitCell } from "@/components/PayUnitCell";
 import { defaultPayUnit } from "@/lib/pay-defaults";
@@ -390,13 +391,24 @@ export default async function AdminAgenciesPage({
   // ログイン情報を発行できる相手（解約済みは除く）
   // 発行状況が確認できないときは「発行済み」と印を付けられない。
   // 代わりに、発行の欄そのものに注意書きを出す。
+  /*
+   * マイページを使うのはエリア統括代理店と総販売代理店だけ（2026-08-21 決定）。
+   * それ以外にも発行はできる（本部が個別に認める場合）が、
+   * 選択肢に印を付けて、うっかり発行しないようにする。対象を先に並べる。
+   */
   const loginTargets = all
     .filter((a) => a.status !== "停止・解約" && a.code)
     .map((a) => ({
       code: a.code,
       name: a.name || "（名称未登録）",
       hasPassword: withPassword ? withPassword.has(a.code) : false,
-    }));
+      usesPortal: usesPortal(a.rank, a.codeKind),
+    }))
+    .sort((x, y) =>
+      x.usesPortal !== y.usesPortal
+        ? x.usesPortal ? -1 : 1
+        : x.code.localeCompare(y.code),
+    );
 
   return (
     <div className="space-y-6">

@@ -46,10 +46,17 @@ const s_ = (r: Row | null, k: string): string => {
 /** フォーム名から申込の種類を見分ける。 */
 function kindOfForm(payload: Record<string, unknown>): string {
   const title = String(payload["formTitle"] ?? "");
+  /*
+   * 判定の順番に意味がある。
+   * トスアップの実タイトルは「VIS トスアップフォーム（取次店用）」で、
+   * 「取次店」を先に見ると取次パートナー登録に誤判定され、
+   * 再取り込みが「自社コードが（未入力）」という筋違いのエラーで止まる。
+   * ライセンステストも「ライセンス」を含むため、認定登録より先に見る。
+   */
+  if (/トスアップ|ご紹介|紹介フォーム/.test(title)) return "lead";
+  if (/ライセンステスト|テスト提出|採点/.test(title)) return "license-test";
   if (/取次パートナー|取次店/.test(title)) return "referrer";
   if (/スタッフ|ライセンス認定|販売ライセンス/.test(title)) return "staff";
-  if (/ライセンステスト|テスト提出|採点/.test(title)) return "license-test";
-  if (/トスアップ|ご紹介|紹介フォーム/.test(title)) return "lead";
   if (/デモ機|デモ端末/.test(title)) return "demo";
   if (/事前登録|体験/.test(title)) return "pre-register";
   if (/代理店/.test(title)) return "agency";
@@ -149,11 +156,11 @@ export async function reprocessInboxAction(
       result = await registerDemoMachine({
         serialNo: pick("製品番号", "シリアル", "serial"),
         model: pick("機種", "model") || undefined,
-        acquiredKind: pick("取得区分", "acquiredKind") || undefined,
-        acquiredOn: pick("取得日", "acquiredOn") || undefined,
+        acquiredKind: pick("取得区分", "購入区分", "acquiredKind") || undefined,
+        acquiredOn: pick("取得日", "購入日", "acquiredOn") || undefined,
         holderCode: pick("代理店コード", "保有代理店コード", "code") || undefined,
         holderName: pick("保有代理店名", "代理店名") || undefined,
-        purpose: pick("貸与目的", "目的", "purpose") || undefined,
+        purpose: pick("貸与目的", "主な利用用途", "目的", "purpose") || undefined,
         note: pick("備考", "note") || undefined,
       });
     } else if (kind === "pre-register" || kind === "prelead") {
@@ -165,7 +172,7 @@ export async function reprocessInboxAction(
       });
     } else if (kind === "license-test" || kind === "test") {
       result = await notifyLicenseTest({
-        name: pick("お名前", "氏名", "name"),
+        name: pick("お名前", "氏名", "名前", "input4", "name"),
         agencyCode: pick("代理店コード", "スタッフコード", "code") || undefined,
         score: pick("点数", "得点", "score") || undefined,
         detail: pick("回答", "detail") || undefined,
@@ -189,6 +196,11 @@ export async function reprocessInboxAction(
           "fullname20", "お名前", "氏名", "input3", "name",
         ),
         repName: pick("代表者", "代表者名", "representative"),
+        nameKana: pick("会社名（フリガナ）", "フリガナ", "kana", "ka"),
+        contactName: pick("担当者氏名", "担当者"),
+        corporateNo: pick("法人番号"),
+        invoiceStatus: pick("インボイス登録", "input46"),
+        invoiceNo: pick("インボイス登録番号"),
         email: pick("input32", "メール", "email", "mail"),
         phone: pick("input50", "input33", "携帯電話", "電話番号", "電話", "phone", "tel"),
         zip: pick("郵便番号", "zip", "postal"),

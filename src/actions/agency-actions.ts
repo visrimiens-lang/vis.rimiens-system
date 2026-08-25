@@ -562,6 +562,38 @@ export async function updateAgencyAction(
     ? pick(text(formData, "staffType"), [...STAFF_TYPES], "")
     : "";
 
+  const nextAreaClass = pick(text(formData, "areaClass"), AREA_CLASSES, "");
+  /*
+   * エリアを設定・変更するときは、そのエリアの枠（全国60社）の空きを見る。
+   *
+   * 2026-08-22 に申込フォームからエリア欄が消え、統括はエリア未設定で
+   * 登録されるようになった。エリアを決めるのはこの画面だけなので、
+   * ここで見ないと関東15社の上限を誰も守れない。
+   * すでにそのエリアに入っている行の保存（エリア変更なし）は止めない。
+   */
+  if (
+    nextAreaClass &&
+    nextAreaClass !== s(current, "area_class") &&
+    s(current, "rank") === "2次代理店" &&
+    current["special_slot"] !== true
+  ) {
+    try {
+      const { areaUsage } = await import("@/lib/slots");
+      const { listAllAgencies } = await import("@/lib/agencies");
+      const usage = areaUsage(await listAllAgencies());
+      const row = usage.rows.find((r) => r.area === nextAreaClass);
+      if (row && row.isFull) {
+        return {
+          error:
+            `${nextAreaClass}の統括代理店は上限（${row.limit}社）に達しています。` +
+            "空きが出るまで設定できません。どうしても入れる場合は、先にこの代理店を特別枠にしてください。",
+        };
+      }
+    } catch {
+      // 枠が数えられないときは保存を止めない（数えられない理由は別の画面で分かる）
+    }
+  }
+
   const patch: Record<string, unknown> = {
     name: t.name,
     rep_name: orNull(t.repName),
@@ -583,7 +615,7 @@ export async function updateAgencyAction(
     branch_name: orNull(t.branchName),
     birthday: orNull(birthday),
     area: orNull(t.area),
-    area_class: orNull(pick(text(formData, "areaClass"), AREA_CLASSES, "")),
+    area_class: orNull(nextAreaClass),
     training_status: pick(
       text(formData, "trainingStatus"),
       TRAININGS,
@@ -746,13 +778,20 @@ function mailPlanOf(codeKind: string, channel: string): MailPlan {
   if (codeKind === "02") {
     return { kind: "スタッフ", label: "スタッフ", withQr: true };
   }
-  if (channel === PERSONAL_CHANNEL) {
-    // 文面はスタッフと同じ（「様」＋ご本人のQR）だが、記録には販路種別のまま残す。
-    return { kind: "スタッフ", label: "個人販売パートナー", withQr: true };
-  }
-  // 区分が入っていない古いデータは会社あつかい。
-  // 会社の文面にはQRが入らないので、取り違えても個人向けのQRは送られない。
-  return { kind: "会社", label: "会社", withQr: false };
+  /*
+   * 会社（個人販売代理店を含む）。
+   *
+   * 登録時（intake.ts）は個人販売代理店も「会社」の文面で送るので、
+   * 再送もそれにそろえる。以前ここで個人だけスタッフ文面にしていたため、
+   * 同じ人が登録時は「代理店コード」・再送では「スタッフコード」と
+   * 別の呼ばれ方のメールを受け取っていた。
+   *
+   * QRも載せる。2026-08-21 から登録時に全員へ QR1・QR2 を発行して
+   * メールに載せる決まりになった（マイページを使う統括・総販の文面には
+   * もともとQRの欄が無いので、渡しても出ない）。
+   */
+  const label = channel === PERSONAL_CHANNEL ? "個人販売パートナー" : "会社";
+  return { kind: "会社", label, withQr: true };
 }
 
 /** 日時を画面に出せる形にする。読めない値はそのまま返す。 */

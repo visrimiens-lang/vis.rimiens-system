@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { currentViewer } from "@/lib/auth";
 import { audit, selectOne, update } from "@/lib/db";
 import { normalizeCode, resolveAttribution } from "@/lib/intake";
-import { accrueRewards } from "@/lib/rewards";
+import { accrueRewards, reverseRewards } from "@/lib/rewards";
 
 /**
  * 受注に「どの代理店の売上か」を入れ直して、報酬を立て直す。
@@ -88,7 +88,14 @@ export async function setOrderAttributionAction(
       zeroth_code: at.zerothCode || null,
     });
 
-    // 前に立てた報酬を消してから、いまの帰属で立て直す
+    /*
+     * 前に立てた報酬が生きたまま残っていれば、先に取り消してから立て直す。
+     * 取り消さずに立て直そうとすると accrueRewards が 0 を返すだけで、
+     * 帰属の列は新しい代理店に変わったのに報酬は前の代理店のまま残り、
+     * 支払先がずれる。以前は「商品マスタをご確認ください」という
+     * 筋違いの案内が出て、ずれたまま気づけない状態だった。
+     */
+    await reverseRewards(id, "帰属の入れ直しのため");
     const count = await accrueRewards(Number(id), { redo: true });
 
     await audit(viewer.label || "本部", "受注の帰属を直す", { type: "order", key: id }, {

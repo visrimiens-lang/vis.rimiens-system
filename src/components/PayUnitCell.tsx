@@ -113,7 +113,8 @@ export function PayUnitCell({
         </button>
       </div>
       <p className="text-xs text-ink-500">
-        空にすると既定に戻ります。すでに計上した報酬は変わりません。
+        空にすると既定に戻ります。本部の報酬台帳はさかのぼって変わりませんが、
+        「売上・報酬」のお支払額の表示は、過去の月もいまの額で計算し直されます。
       </p>
       {state.error ? (
         <p className="break-words text-xs text-bad-100">{state.error}</p>

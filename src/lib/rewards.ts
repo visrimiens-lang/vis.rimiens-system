@@ -301,11 +301,15 @@ export async function accrueRewards(
     if (unit <= 0) continue;
 
     const kind = s_(a, "code") === s_(order, "referrer_code") ? "紹介報酬" : "販売報酬";
-    // 同じ段（ランク）の販売報酬がもう立っていれば飛ばす（上の説明を参照）
-    if (kind === "販売報酬") {
-      if (seenRank.has(rank)) continue;
-      seenRank.add(rank);
-    }
+    /*
+     * 同じ段（ランク）の報酬がもう立っていれば飛ばす（上の説明を参照）。
+     * 紹介報酬も同じガードを通す。紹介元がたまたま総販売代理店や
+     * 2次代理店のコードだったとき、販売報酬と紹介報酬の2行が立って
+     * 77,000円・62,700円が二重に計上されるのを防ぐ。
+     * （本来の紹介報酬＝取次店は amountColumn が null なので、そもそもここに来ない）
+     */
+    if (seenRank.has(rank)) continue;
+    seenRank.add(rank);
 
     rows.push({
       order_id: order["id"],

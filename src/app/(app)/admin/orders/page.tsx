@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import { listAllAgencies } from "@/lib/agencies";
 import { select } from "@/lib/db";
-import { rankLabel } from "@/lib/labels";
+import { agencyTypeOf, companyNameOf, rankLabel } from "@/lib/labels";
 import { PRODUCT_COLUMNS, buildProductMatcher } from "@/lib/product-match";
 import { currentMonth, recentMonths, unitRewardFor } from "@/lib/orders";
 import {
@@ -468,6 +468,25 @@ export default async function AdminOrdersPage({
   }
 
   const nameByCode = new Map(agencies.map((a) => [a.code, a.name]));
+  const agencyByCode = new Map(agencies.map((a) => [a.code, a]));
+
+  /**
+   * 担当スタッフの下に出す「どこの会社の、どの立場の人か」。
+   * 会社名と種別は代理店側の「スタッフ一覧」で設定したものをそのまま出す。
+   * コードは隣の「担当コード」の欄に出ているので、ここでは繰り返さない。
+   */
+  const affiliationOf = (code: string): string => {
+    const person = agencyByCode.get(code);
+    if (!person) return "代理店マスタに該当なし";
+    return (
+      [
+        companyNameOf(person),
+        agencyTypeOf(person.rank, person.channel, person.codeKind, person.staffType),
+      ]
+        .filter(Boolean)
+        .join("・") || "所属が未設定です"
+    );
+  };
 
   /* --- 絞り込みの選択肢は、期間で絞ったあとの受注から作る --- */
   const codeCounts = new Map<string, number>();
@@ -537,7 +556,7 @@ export default async function AdminOrdersPage({
     amount: (o) => o.amount,
     payment: (o) => o.paymentMethod,
     payee: (o) => payeeCodeOf(o),
-    staff: (o) => o.staffCode,
+    staff: (o) => nameByCode.get(o.staffCode) || o.staffCode,
     owner: (o) => o.ownerCode,
     ship: (o) => shipViewOf(o),
     tracking: (o) => o.trackingNo,
@@ -995,9 +1014,11 @@ export default async function AdminOrdersPage({
                     <Td>
                       {o.staffCode ? (
                         <div className="min-w-0">
-                          <div className="tabnum truncate text-ink-100">{o.staffCode}</div>
+                          <div className="truncate text-ink-100">
+                            {nameByCode.get(o.staffCode) || "（名称未登録）"}
+                          </div>
                           <div className="truncate text-xs text-ink-400">
-                            {nameByCode.get(o.staffCode) ?? "代理店マスタに該当なし"}
+                            {affiliationOf(o.staffCode)}
                           </div>
                         </div>
                       ) : (

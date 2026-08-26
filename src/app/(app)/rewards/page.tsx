@@ -27,6 +27,8 @@ import {
   yen,
 } from "@/components/ui";
 import {
+  ALL,
+  buildListHref,
   parseSort,
   readParam,
   sortRows,
@@ -34,9 +36,10 @@ import {
   type SearchParams,
   type SortState,
 } from "@/lib/list-params";
-import { SortableTh } from "@/components/SortableTh";
+import { SortableTh , FilterBar, FilterSelect, FilterActions} from "@/components/SortableTh";
 import { rankLabel, companyKey} from "@/lib/labels";
 import { MonthSelect } from "./MonthSelect";
+import { PrintButton } from "./PrintButton";
 
 const BASE = "/rewards";
 
@@ -195,6 +198,13 @@ export default async function RewardsPage({
   const params: SearchParams = await searchParams;
   const monthParam = readParam(params, "month");
   const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(monthParam) ? monthParam : currentMonth();
+  /*
+   * 会社・担当での絞り込み（2026-08-26 追加）。
+   * 絞ると台数・売上・報酬・お支払額の合計もその範囲で計算し直す。
+   * 支払通知を「この会社の分だけ」で作れるようにするため。
+   */
+  const companyParam = readParam(params, "company") || ALL;
+  const ownerParam = readParam(params, "owner") || ALL;
   const months = recentMonths(12);
   const monthOptions = months.includes(month) ? months : [month, ...months];
 
@@ -213,6 +223,8 @@ export default async function RewardsPage({
   // スタッフ（コード区分 02）には報酬の金額を出さない。
   // 2026-04-23 の打ち合わせで「金額が見えるのは親アカウントだけ」と決まっている。
   let isStaff = false;
+  /** 自分の会社名。印刷したときの見出しに出す。 */
+  let selfName = "";
   /** キャンセル・審査否決のため集計から外した件数。 */
   let stoppedCount = 0;
 
@@ -221,6 +233,7 @@ export default async function RewardsPage({
     if (!self) {
       errorMessage = `代理店コード ${viewer.code} の登録が見つかりませんでした。本部にお問い合わせください。`;
     } else {
+      selfName = self.name || self.code;
       const descendants = await listDescendants(self.code);
       names = new Map([self, ...descendants].map((a) => [a.code, a.name]));
       /*
@@ -310,14 +323,35 @@ export default async function RewardsPage({
     unit: (r) => r.unitReward,
     reward: (r) => r.reward,
   };
-  const detail = sortRows(rows, sort.column, sort.desc, accessors);
+  /*
+   * 絞り込みの選択肢は「絞る前の全行」から作る。
+   * 絞ったあとの行から作ると、一度選んだ相手しか選択肢に残らなくなる。
+   */
+  const companyOptionValues = [
+    ...new Set(rows.map((r) => companies.get(r.ownerCode) || "").filter(Boolean)),
+  ].sort((a, b) => a.localeCompare(b, "ja"));
+  const ownerOptionValues = [
+    ...new Set(rows.map((r) => r.ownerCode).filter(Boolean)),
+  ].sort((a, b) => a.localeCompare(b));
 
-  const units = sumUnits(rows);
-  const salesTotal = rows.reduce((s, r) => s + r.amount, 0);
-  const rewardTotal = showReward && rewardAvailable ? sumReward(rows) : null;
+  /** 絞り込んだあとの行。ここから下の集計はすべてこの行を使う。 */
+  const shown = rows.filter((r) => {
+    if (companyParam !== ALL && (companies.get(r.ownerCode) || "") !== companyParam) {
+      return false;
+    }
+    if (ownerParam !== ALL && r.ownerCode !== ownerParam) return false;
+    return true;
+  });
+  const isFiltered = companyParam !== ALL || ownerParam !== ALL;
+
+  const detail = sortRows(shown, sort.column, sort.desc, accessors);
+
+  const units = sumUnits(shown);
+  const salesTotal = shown.reduce((s, r) => s + r.amount, 0);
+  const rewardTotal = showReward && rewardAvailable ? sumReward(shown) : null;
   const hasMissingUnit =
-    showReward && (!rewardAvailable || rows.some((r) => r.unitReward === null));
-  const groups = groupByOwner(rows, names, companies, payTo, payeeOf, viewer.code);
+    showReward && (!rewardAvailable || shown.some((r) => r.unitReward === null));
+  const groups = groupByOwner(shown, names, companies, payTo, payeeOf, viewer.code);
 
   /*
    * 会社ごとの小計を挟んだ並びを作る（2026-08-22〜）。
@@ -411,7 +445,12 @@ export default async function RewardsPage({
             ? `出荷が完了した受注だけを集計しています。${jpMonthLabel(month)}に出荷が完了した分が対象です。`
             : `ご自身が売った件数と売上金額です。${jpMonthLabel(month)}に出荷が完了した分が対象です。`
         }
-        actions={<MonthSelect months={monthOptions} value={month} />}
+        actions={
+          <div className="flex flex-wrap items-center gap-3">
+            <PrintButton />
+            <MonthSelect months={monthOptions} value={month} />
+          </div>
+        }
       />
 
       <Notice tone="info">
@@ -453,12 +492,82 @@ export default async function RewardsPage({
         </Notice>
       ) : null}
 
+      {/*
+        紙・PDFにしたときだけ出る見出し。
+        画面には出さない（画面には同じ内容がページ上部にあるため）。
+        これが無いと、印刷した紙が「誰の・いつの・どの範囲の集計か」分からない。
+      */}
+      <div className="print-only" style={{ marginBottom: "8mm" }}>
+        <div style={{ fontSize: "14pt", fontWeight: 700 }}>
+          売上・報酬のご案内（{jpMonthLabel(month)}）
+        </div>
+        <div style={{ fontSize: "10pt", marginTop: "2mm" }}>
+          {selfName}（{viewer.code}）　／　出荷完了日が{jpMonthLabel(month)}の分
+          {companyParam !== ALL ? `　／　会社：${companyParam}` : ""}
+          {ownerParam !== ALL ? `　／　担当：${ownerParam}` : ""}
+        </div>
+        <div style={{ fontSize: "9pt", marginTop: "1mm", color: "#555" }}>
+          出力日：{new Date().toLocaleDateString("ja-JP")}
+        </div>
+      </div>
+
+      {/*
+        会社・担当での絞り込み。絞ると下の合計もその範囲で計算し直す。
+        「この会社の分だけ」で支払通知を作れるようにするため。
+      */}
+      {companyOptionValues.length > 0 || ownerOptionValues.length > 0 ? (
+        <Card>
+          <FilterBar action={BASE} hidden={{ month, sort: sort.column, dir: sort.desc ? "desc" : "asc" }}>
+            {companyOptionValues.length > 0 ? (
+              <FilterSelect
+                name="company"
+                label="会社で絞る"
+                value={companyParam}
+                options={companyOptionValues.map((v) => ({
+                  value: v,
+                  label: v,
+                  count: rows.filter((r) => (companies.get(r.ownerCode) || "") === v).length,
+                }))}
+                allLabel={`すべての会社（${rows.length}）`}
+                width="w-64"
+              />
+            ) : null}
+            <FilterSelect
+              name="owner"
+              label="担当で絞る"
+              value={ownerParam}
+              options={ownerOptionValues.map((v) => ({
+                value: v,
+                label: `${v}${names.get(v) ? `　${names.get(v)}` : ""}`,
+                count: rows.filter((r) => r.ownerCode === v).length,
+              }))}
+              allLabel={`すべての担当（${rows.length}）`}
+              width="w-64"
+            />
+            <FilterActions
+              clearHref={buildListHref(BASE, params, { company: "", owner: "" })}
+              filtered={isFiltered}
+            />
+          </FilterBar>
+        </Card>
+      ) : null}
+
+      {isFiltered ? (
+        <Notice tone="info">
+          絞り込み中です（{companyParam !== ALL ? `会社：${companyParam}` : ""}
+          {companyParam !== ALL && ownerParam !== ALL ? " ／ " : ""}
+          {ownerParam !== ALL ? `担当：${ownerParam}` : ""}）。
+          下の台数・売上{showReward ? "・報酬・お支払額" : ""}は、この範囲だけの合計です。
+          全{rows.length}件のうち {shown.length} 件を表示しています。
+        </Notice>
+      ) : null}
+
       <div className="grid gap-4 sm:grid-cols-3">
         <StatTile
           label="出荷完了台数"
           value={units.toLocaleString("ja-JP")}
           unit="台"
-          hint={`受注 ${rows.length.toLocaleString("ja-JP")} 件分`}
+          hint={`受注 ${shown.length.toLocaleString("ja-JP")} 件分`}
         />
         <StatTile label="売上合計" value={yen(salesTotal)} hint="出荷完了分の販売金額" />
         {showReward ? (

@@ -70,3 +70,78 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ───────────────────────────────────────────────
+   印刷（PDFで保存）のときの体裁
+   売上・報酬の画面を、そのまま支払通知として渡せるようにする。
+   画面は暗い配色だが、紙では白地に黒字にする（インクと読みやすさのため）。
+   ─────────────────────────────────────────────── */
+/* 紙・PDFのときだけ出すもの。画面では隠す */
+.print-only {
+  display: none;
+}
+
+@media print {
+  .print-only {
+    display: block !important;
+  }
+
+  /* 画面でしか意味のないものは出さない */
+  aside,
+  nav,
+  .no-print,
+  form[data-filter],
+  button {
+    display: none !important;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  /* 暗い配色の下地・枠線を紙向けに置き換える */
+  * {
+    background-color: transparent !important;
+    color: #000 !important;
+    border-color: #bbb !important;
+    box-shadow: none !important;
+  }
+
+  main {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: none !important;
+  }
+
+  /* 表は途中で切らない。見出しはページをまたいでも繰り返す */
+  table {
+    page-break-inside: auto;
+    width: 100% !important;
+    border-collapse: collapse;
+  }
+  thead {
+    display: table-header-group;
+  }
+  tr {
+    page-break-inside: avoid;
+  }
+  th,
+  td {
+    border-bottom: 1px solid #ccc !important;
+    padding: 4px 6px !important;
+    font-size: 10pt !important;
+  }
+
+  /* カードごとに区切る */
+  section,
+  [class*="rounded-"] {
+    break-inside: avoid;
+  }
+
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+}

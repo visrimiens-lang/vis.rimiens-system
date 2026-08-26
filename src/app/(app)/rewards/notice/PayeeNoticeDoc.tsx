@@ -23,8 +23,11 @@ export type NoticeLine = {
 };
 
 export type NoticeDoc = {
-  /** 支払う相手（宛先） */
-  to: { name: string; invoiceNo: string; bank: string; branch: string; type: string; no: string; holder: string };
+  /**
+   * 支払う相手（宛先）。
+   * 登録番号と振込口座は載せない（2026-08-26・お互い分かっているため）。
+   */
+  to: { name: string };
   /**
    * 支払う側（発行元＝ログインしている代理店）。
    * 登録番号は宛先の側に載せるので、ここには持たない。
@@ -77,17 +80,6 @@ export function PayeeNoticeDoc({ doc }: { doc: NoticeDoc }) {
         <div className="notice-head">
           <div className="notice-to">
             <div className="notice-to-name">{doc.to.name}　御中</div>
-            <div className="notice-small">登録番号　{doc.to.invoiceNo || "—"}</div>
-            <div className="notice-block">
-              <div className="notice-small">振込口座</div>
-              <div className="notice-small">
-                {doc.to.bank || "—"}　{doc.to.branch ? `${doc.to.branch}支店` : ""}
-              </div>
-              <div className="notice-small">
-                {doc.to.type || ""}　{doc.to.no || "—"}
-              </div>
-              <div className="notice-small">{doc.to.holder || ""}</div>
-            </div>
           </div>
 
           <div className="notice-from">

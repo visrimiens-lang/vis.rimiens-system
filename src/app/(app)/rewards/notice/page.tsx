@@ -178,31 +178,15 @@ export default async function PayeeNoticePage({
   }
   const lines = [...bucket.values()].sort((a, b) => a.item.localeCompare(b.item, "ja"));
 
-  /*
-   * 宛先。会社でまとめるときは、その会社の誰かに入っているものを使う。
-   *
-   * 登録番号と振込口座は別々に探す。同じ1人からまとめて取ると、
-   * 会社の行に登録番号があって口座はスタッフに入っている、という
-   * よくある入り方のときに、片方が空欄で出てしまう。
-   */
-  const bankHead = target.find((d) => d.bankName) ?? target[0];
-  const invoiceHead = target.find((d) => d.invoiceNo) ?? target[0];
+  /* 宛名。控えにある名前から出す（URLに書かれた文字はそのまま使わない）。 */
   const toName = owner
-    ? bankHead?.name || owner
+    ? target[0]?.name || owner
     : target[0]
       ? companyNameOf(target[0])
       : company;
 
   const doc: NoticeDoc = {
-    to: {
-      name: toName,
-      invoiceNo: invoiceHead?.invoiceNo ?? "",
-      bank: bankHead?.bankName ?? "",
-      branch: bankHead?.bankBranch ?? "",
-      type: bankHead?.accountType ?? "",
-      no: bankHead?.accountNo ?? "",
-      holder: bankHead?.accountHolder ?? "",
-    },
+    to: { name: toName },
     from: {
       name: self.name || self.code,
       zip: self.zip ?? "",

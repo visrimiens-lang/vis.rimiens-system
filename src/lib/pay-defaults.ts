@@ -22,19 +22,22 @@ import type { Agency } from "./types";
  * 数字はここにだけ置く。ばらばらに持つと画面ごとに額が食い違う。
  */
 export function defaultPayUnit(
-  a: Pick<Agency, "rank" | "channel" | "codeKind">,
+  a: Pick<Agency, "rank" | "channel" | "codeKind" | "staffType">,
 ): number | null {
   /*
-   * スタッフ（区分02）には既定の支払額を出さない。
+   * スタッフ（区分02）の既定は、その人の種別で決まる（2026-08-26 決定）。
    *
-   * 2026-08-22 から、エリア統括の下は全員スタッフになり、
-   * 統括がスタッフに直接支払う形もありうる。ただし額は人ごと・種別ごとに
-   * 違うため、ここで勝手に決めた額を出すと「払う約束をした」ように見える。
-   * 支払う場合は「組織と枠」でその方の額を入れてもらう。
-   * 入っていないときは、売上・報酬の画面が「支払額を出せない担当がいます」と
-   * 知らせるので、払い漏れには気づける。
+   *   取次店   … 25,000円（紹介だけで販売はしないため）
+   *   それ以外 … 50,000円（販売代理店・サロン代理店・個人販売代理店）
+   *
+   * 種別がまだ設定されていない人にも 50,000円 を出す。
+   * ここを null にすると、売上・報酬のお支払額が「—」のままになり、
+   * 支払通知が作れない（それに気づかず払い漏れる）ため。
+   * 種別ごとに違う額にしたい場合は「組織と枠」で個別の額を入れれば上書きされる。
    */
-  if (a.codeKind === "02") return null;
+  if (a.codeKind === "02") {
+    return a.staffType === "取次店" ? 25000 : 50000;
+  }
 
   // 3次（販売代理店）は「ランク＝取次店 ＋ 販路種別＝販売代理店」で表す（lib/orders.ts と同じ）
   const rank = a.rank === "取次店" && a.channel === "販売代理店" ? "販売代理店" : a.rank;
@@ -45,7 +48,7 @@ export function defaultPayUnit(
 
 /** 実際に使われる1台あたりの支払額（税抜き）。個別の額が最優先。 */
 export function effectivePayUnit(
-  a: Pick<Agency, "rank" | "channel" | "codeKind" | "payUnit">,
+  a: Pick<Agency, "rank" | "channel" | "codeKind" | "payUnit" | "staffType">,
 ): number | null {
   return a.payUnit ?? defaultPayUnit(a);
 }

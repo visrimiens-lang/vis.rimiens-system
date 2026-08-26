@@ -57,7 +57,7 @@ create table if not exists public.agencies (
   limit_staff integer not null default 100,
   -- スタッフが所属している会社の名前と種別（エリア統括が管理画面で設定する）
   company_name text,
-  staff_type text check (staff_type is null or staff_type in ('販売代理店', 'サロン代理店', '個人販売代理店')),
+  staff_type text check (staff_type is null or staff_type in ('販売代理店', 'サロン代理店', '個人販売代理店', '取次店')),
   special_slot      boolean not null default false, -- 特別枠（上限の対象外）
   slot_request      text not null default 'なし'
                     check (slot_request in ('なし','申請中','承認済','却下')),

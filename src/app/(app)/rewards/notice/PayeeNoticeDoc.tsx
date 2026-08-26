@@ -1,5 +1,3 @@
-import { jpDate } from "@/components/ui";
-
 /**
  * 御支払通知書。
  *
@@ -39,15 +37,35 @@ export type NoticeDoc = {
 };
 
 const TAX_RATE = 0.1;
+
+/**
+ * 書類に載せる日付。"2026-08-26" → "2026年8月26日"。
+ * 画面用の jpDate は「8/26」と年を落とすので、書面には使えない。
+ */
+function docDate(v: string): string {
+  const d = v.slice(0, 10).split("-");
+  if (d.length !== 3) return v;
+  return `${d[0]}年${Number(d[1])}月${Number(d[2])}日`;
+}
 /** 罫線を引く最低行数。少ない件数でも様式が崩れないように空行で埋める。 */
 const MIN_ROWS = 12;
 
-const yen = (n: number): string => n.toLocaleString("ja-JP");
+const yen = (n: number | null): string => (n === null ? "—" : n.toLocaleString("ja-JP"));
 
 export function PayeeNoticeDoc({ doc }: { doc: NoticeDoc }) {
-  const subtotal = doc.lines.reduce((s, l) => s + (l.amount ?? 0), 0);
-  const tax = Math.floor(subtotal * TAX_RATE);
-  const total = subtotal + tax;
+  /*
+   * 支払額が決まっていない品目が1つでもあれば、合計を数字で出さない。
+   *
+   * 以前は null を 0 として足していた。数量は実数のまま出るので、
+   * 「3台ぶんお支払いします」と読めるのに金額にはその3台が入っていない、
+   * という書面が相手に渡ってしまう。売上・報酬の画面はすでに
+   * 「1人でも単価が分からなければ合計を出さない」に直してあるので、
+   * 実際に相手へ渡るこちらも同じ決まりに揃える。
+   */
+  const hasMissing = doc.lines.some((l) => l.amount === null);
+  const subtotal = hasMissing ? null : doc.lines.reduce((s, l) => s + (l.amount ?? 0), 0);
+  const tax = subtotal === null ? null : Math.floor(subtotal * TAX_RATE);
+  const total = subtotal === null || tax === null ? null : subtotal + tax;
   const blanks = Math.max(0, MIN_ROWS - doc.lines.length);
 
   return (
@@ -81,7 +99,7 @@ export function PayeeNoticeDoc({ doc }: { doc: NoticeDoc }) {
         </div>
 
         <div className="notice-dates">
-          <div>発行日：　{jpDate(doc.issuedOn) || doc.issuedOn}</div>
+          <div>発行日：　{docDate(doc.issuedOn)}</div>
           <div>振込日：　—</div>
         </div>
 
@@ -94,7 +112,9 @@ export function PayeeNoticeDoc({ doc }: { doc: NoticeDoc }) {
 
         <div className="notice-total-line">
           <span className="notice-total-label">御支払金額</span>
-          <span className="notice-total-value">¥{yen(total)}</span>
+          <span className="notice-total-value">
+            {total === null ? "—" : `¥${yen(total)}`}
+          </span>
         </div>
       </div>
 
@@ -128,6 +148,12 @@ export function PayeeNoticeDoc({ doc }: { doc: NoticeDoc }) {
       </table>
 
       <div className="notice-foot">
+        {/* この断りは書面の中に置く。画面だけの注意書きは紙に出ないため */}
+        {hasMissing ? (
+          <div className="notice-warn">
+            ※ 支払額が決まっていない品目があるため、金額は確定していません。
+          </div>
+        ) : null}
         <table className="notice-sum">
           <tbody>
             <tr>

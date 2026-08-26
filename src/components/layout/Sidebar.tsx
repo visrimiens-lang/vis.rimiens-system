@@ -47,7 +47,7 @@ type Item = { href: string; label: string; icon: React.ComponentType<{ className
 const AGENCY_ITEMS: Item[] = [
   { href: "/dashboard", label: "ダッシュボード", icon: LayoutDashboard },
   { href: "/customers", label: "顧客一覧", icon: Users },
-  { href: "/organization", label: "組織と枠", icon: Network },
+  { href: "/organization", label: "スタッフ一覧", icon: Network },
   { href: "/leads", label: "トスアップ", icon: ClipboardList },
   { href: "/rewards", label: "売上・報酬", icon: Wallet },
   { href: "/demo-machines", label: "デモ機", icon: Monitor },

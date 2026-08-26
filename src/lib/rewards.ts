@@ -1,5 +1,6 @@
 import "server-only";
 import { audit, insert, inList, select, selectAll, selectOne, update } from "./db";
+import { todayInJapan } from "./jst";
 import { AMOUNT_COLUMNS, PRODUCT_COLUMNS, buildProductMatcher, type MatchHow } from "./product-match";
 
 /**
@@ -113,7 +114,7 @@ export function rewardStanding(rows: Row[]): RewardStanding {
 
 /** 対象月を 'YYYY-MM' で返す。 */
 function monthOf(date: string): string {
-  return (date || new Date().toISOString().slice(0, 10)).slice(0, 7);
+  return (date || todayInJapan()).slice(0, 7);
 }
 
 /**
@@ -343,7 +344,7 @@ export async function accrueRewards(
  * 2026-08-07 会議「報酬確定を配送完了ベースにする」。
  */
 export async function confirmRewards(orderId: string | number): Promise<number> {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayInJapan();
   const rows = await update<Row>(
     `rewards?order_id=eq.${encodeURIComponent(String(orderId))}&status=eq.${encodeURIComponent("未確定")}`,
     { status: "確定", confirmed_on: today },
@@ -444,7 +445,7 @@ export async function reverseRewardsDetailed(
   const unpaidIds = unpaid.map(idOf);
   const paidAmount = paid.reduce((total, r) => total + n_(r, "amount"), 0);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayInJapan();
 
   // すでに振り込んだぶんだけ、同額のマイナスを立てる（赤伝票）。
   if (paid.length > 0) {

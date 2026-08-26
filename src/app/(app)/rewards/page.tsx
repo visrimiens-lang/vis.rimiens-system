@@ -601,7 +601,7 @@ export default async function RewardsPage({
         <Notice tone="warn">
           支払額を出せない担当が {missingPayUnit.length} 名います（
           {missingPayUnit.map((g) => g.name || g.code).join("、")}）。
-          「組織と枠」でその方の支払額（1台あたり・税抜）を入れると、お支払額と合計が出ます。
+          「スタッフ一覧」でその方の支払額（1台あたり・税抜）を入れると、お支払額と合計が出ます。
           入るまで、お支払額の合計は出しません。
         </Notice>
       ) : null}

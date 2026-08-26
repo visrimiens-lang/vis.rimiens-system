@@ -105,7 +105,13 @@ export function FilterBar({
   children: ReactNode;
 }) {
   return (
-    <form method="get" action={action} className="flex flex-wrap items-end gap-4 px-5 py-4">
+    /* data-filter は印刷のときに丸ごと隠すための目印（globals.css の @media print） */
+    <form
+      method="get"
+      action={action}
+      data-filter=""
+      className="flex flex-wrap items-end gap-4 px-5 py-4"
+    >
       {Object.entries(hidden).map(([name, value]) =>
         value ? <input key={name} type="hidden" name={name} value={value} /> : null,
       )}

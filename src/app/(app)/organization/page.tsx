@@ -2,7 +2,6 @@ import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import {
   buildOrgTree,
-  countsTowardSlot,
   findAgencyByCode,
   getSlotSummary,
   listDirectChildren,
@@ -24,7 +23,6 @@ import {
   EmptyState,
   Notice,
   PageHeader,
-  StatusBadge,
   Table,
   Td,
   Th,
@@ -53,7 +51,6 @@ import {
 import {
   agencyTypeOf,
   belongsToOrg,
-  codeKindLabel,
   companyKey,
   companyNameOf,
   statusTone,
@@ -113,7 +110,7 @@ function SlotStateNotice({ slots }: { slots: SlotSummary }) {
   if (slots.isOver) {
     return (
       <Notice tone="warn">
-        枠がすべて埋まっています。新しく配下を登録するには、増枠のお申し込みが必要です。
+        枠がすべて埋まっています。新しくスタッフを登録するには、増枠のお申し込みが必要です。
       </Notice>
     );
   }
@@ -146,8 +143,8 @@ export default async function OrganizationPage({
 
   const header = (
     <PageHeader
-      title="組織と枠"
-      description="配下の並びと、枠の空き状況をまとめています。枠はスタッフ100名です。配下の連絡先（メールアドレス・電話番号）もこの画面で確認でき、所属会社と種別はこの画面で設定します。"
+      title="スタッフ一覧"
+      description="スタッフの一覧と、枠の空き状況をまとめています。枠はスタッフ100名です。スタッフの連絡先（メールアドレス・電話番号）もこの画面で確認でき、所属会社と種別はこの画面で設定します。"
     />
   );
 
@@ -171,14 +168,14 @@ export default async function OrganizationPage({
       tree = t1;
       const model = slotModelOf(me);
       if (model === "area") {
-        // 総販売代理店の配下は統括代理店。全国60社のエリア枠で見る。
+        // 総販売代理店の下にいるのは統括代理店。全国60社のエリア枠で見る。
         const usage = areaUsage(await listAllAgencies());
         areaRows = usage.rows;
         areaTotal = usage.total;
       } else if (model === "staff") {
         breakdown = breakdownSlots(me, direct);
       }
-      // model === "none"（取次パートナー・スタッフ）は配下を持たないため枠を出さない
+      // model === "none"（取次パートナー・スタッフ）は下に人を持たないため枠を出さない
     }
   } catch (e) {
     loadError =
@@ -214,7 +211,7 @@ export default async function OrganizationPage({
   const rows = tree ? flatten(tree) : [{ agency: me, depth: 0 }];
   const descendants = rows.slice(1).map((r) => r.agency);
 
-  /* --- 配下の一覧（連絡先つき） --- */
+  /* --- スタッフ一覧（連絡先つき） --- */
 
   /*
    * 絞り込みに使う値。
@@ -225,7 +222,7 @@ export default async function OrganizationPage({
   const typeOf = (a: Agency) => agencyTypeOf(a.rank, a.channel, a.codeKind, a.staffType);
 
   /*
-   * 選択肢は、いま配下にいる顔ぶれから作る。
+   * 選択肢は、いまいる顔ぶれから作る。
    * 選ばれている値は件数が0でも残る（自分で外せなくなるため・buildOptions の決まり）。
    */
   const companyOptions = buildOptions(descendants, companyOf, [], companyParam);
@@ -262,10 +259,10 @@ export default async function OrganizationPage({
     <div className="space-y-6">
       {header}
 
-      {/* 枠。取次パートナーとスタッフは配下を持たないので出さない */}
+      {/* 枠。取次パートナーとスタッフは下に人を持たないので出さない */}
       {breakdown || areaRows ? (
       <Card
-        title={areaRows ? "エリア枠（統括代理店）" : "配下の枠"}
+        title={areaRows ? "エリア枠（統括代理店）" : "スタッフの枠"}
         action={
           me.specialSlot ? <Badge tone="gold">特別枠</Badge> : <Badge>通常枠</Badge>
         }
@@ -280,7 +277,7 @@ export default async function OrganizationPage({
                 <span className="text-lg text-ink-500"> / {areaTotal.limit}</span>
               </div>
               <div className="mt-1 text-sm leading-relaxed text-ink-300">
-                配下は統括代理店なので、枠はエリアごとに決まっています。全国で {areaTotal.limit} 社までです。
+                この枠の相手は統括代理店なので、枠はエリアごとに決まっています。全国で {areaTotal.limit} 社までです。
               </div>
             </div>
             <div className="divide-y divide-ink-850">
@@ -316,82 +313,12 @@ export default async function OrganizationPage({
       </Card>
       ) : null}
 
-      {/* 組織図 */}
-      <Card title="組織図">
-        {rows.length <= 1 ? (
-          <EmptyState
-            title="まだ配下の登録がありません。"
-            description="あなたの紹介URL（QR1）から代理店の登録申請が届き、本部で承認されると、ここに組織図が表示されます。"
-          />
-        ) : (
-          <ul className="px-5 py-4">
-            {rows.map(({ agency, depth }) => {
-              // 枠を使うのは自分の直下だけ（その下の配下は上位の枠を使う）
-              const consumes = agency.parentCode === me.code && countsTowardSlot(agency);
-              const isSelf = agency.code === me.code;
-              // 階層と区分が同じ呼び方になる相手（取次パートナー・スタッフ）は、
-              // 同じ言葉を2つ並べない。
-              const rankText = agencyTypeOf(
-                agency.rank,
-                agency.channel,
-                agency.codeKind,
-                agency.staffType,
-              );
-              const kindText = codeKindLabel(agency.codeKind);
-              return (
-                <li
-                  key={agency.code || agency.recordId}
-                  style={{ marginLeft: Math.min(depth, 6) * 20 }}
-                  className={cn(
-                    "flex flex-wrap items-center gap-x-3 gap-y-1.5 border-l-2 py-2 pl-3",
-                    consumes ? "border-gold-500/70" : "border-ink-800",
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "text-sm",
-                      consumes ? "font-medium text-ink-50" : "text-ink-300",
-                    )}
-                  >
-                    {agency.name || "（名称未登録）"}
-                  </span>
-                  <span className="tabnum text-xs text-ink-400">
-                    {agency.code || "—"}
-                  </span>
-                  {isSelf ? <Badge tone="gold">あなた</Badge> : null}
-                  {agency.rank ? (
-                    <Badge tone={agency.rank === "総販売代理店" ? "gold" : "neutral"}>
-                      {rankText}
-                    </Badge>
-                  ) : null}
-                  <StatusBadge status={agency.status} />
-                  {kindText !== rankText ? (
-                    <span className="text-xs text-ink-400">{kindText}</span>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-ink-800 px-5 py-3 text-xs text-ink-400">
-          <span className="flex items-center gap-2">
-            <span className="inline-block h-3.5 w-0.5 shrink-0 bg-gold-500/70" />
-            自分の直下（1名ぶん枠を使います）
-          </span>
-          <span className="flex items-center gap-2">
-            <span className="inline-block h-3.5 w-0.5 shrink-0 bg-ink-800" />
-            その下の配下・停止解約（枠には数えません）
-          </span>
-        </div>
-      </Card>
-
-      {/* 配下の一覧（連絡先） */}
-      <Card title={`配下の一覧　${contactRows.length} 社`}>
+      {/* スタッフ一覧（連絡先） */}
+      <Card title={`スタッフ一覧　${contactRows.length} 名`}>
         {descendants.length === 0 ? (
           <EmptyState
-            title="まだ配下の登録がありません。"
-            description="配下が登録されると、連絡先（メールアドレス・電話番号）をここで確認できます。"
+            title="まだスタッフの登録がありません。"
+            description="スタッフが登録されると、連絡先（メールアドレス・電話番号）をここで確認できます。"
           />
         ) : (
           <>
@@ -437,7 +364,7 @@ export default async function OrganizationPage({
                 <FilterSummary
                   total={descendants.length}
                   shown={contactRows.length}
-                  unit="社"
+                  unit="名"
                   clearHref={clearHref}
                 />
               </div>
@@ -445,8 +372,8 @@ export default async function OrganizationPage({
 
             {contactRows.length === 0 ? (
               <EmptyState
-                title="条件に合う配下がありません"
-                description="名前・代理店コード・メールアドレス・電話番号の一部で探せます。会社と種別でも絞れます。条件を外すと配下すべてが表示されます。"
+                title="条件に合うスタッフがいません"
+                description="名前・コード・メールアドレス・電話番号の一部で探せます。会社と種別でも絞れます。条件を外すとスタッフ全員が表示されます。"
               />
             ) : (
               <Table>
@@ -583,10 +510,10 @@ export default async function OrganizationPage({
                             staffType={a.staffType}
                             fallbackName={a.parentName}
                             /*
-                              所属会社名と種別は、配下であれば直せる。
-                              旧方式で登録された会社（株式会社樹など）の配下スタッフは
+                              所属会社名と種別は、自分より下にいる相手であれば直せる。
+                              旧方式で登録された会社の下にいるスタッフは
                               統括から見ると孫にあたるため、直下に限ると誰も直せなくなる。
-                              金額に関わらない情報なので、配下すべてに開く。
+                              金額に関わらない情報なので、下にいる相手すべてに開く。
                             */
                             editable
                           />
@@ -619,7 +546,7 @@ export default async function OrganizationPage({
               メールアドレスを押すとメールの作成画面が、電話番号を押すと電話の発信画面が開きます。
               「所属会社・種別」と「支払額」は、自分の直下であればこの画面で直せます（押すと入力欄が出ます）。
               {missingContact > 0
-                ? `連絡先が登録されていない配下が ${missingContact} 社あります。連絡先はポータルからは直せないため、本部にご連絡ください。`
+                ? `連絡先が登録されていない方が ${missingContact} 名います。連絡先はポータルからは直せないため、本部にご連絡ください。`
                 : ""}
             </div>
           </>

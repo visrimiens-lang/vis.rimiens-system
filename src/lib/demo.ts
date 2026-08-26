@@ -1,5 +1,6 @@
 import "server-only";
 import { select } from "./db";
+import { todayInJapan } from "./jst";
 
 /**
  * デモ機（App13「VIS端末・デモ機管理」）の読み取り。
@@ -99,14 +100,7 @@ export async function listDemoMachines(codes: string[]): Promise<DemoMachine[]> 
 }
 
 /** 今日の日付を日本時間の "YYYY-MM-DD" で返す。返却予定日の判定に使う。 */
-export function todayInJapan(now: Date = new Date()): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Tokyo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(now);
-}
+export { todayInJapan };
 
 /** 手元を離れている（返却済・廃棄）扱いかどうか。 */
 function isClosed(m: DemoMachine): boolean {

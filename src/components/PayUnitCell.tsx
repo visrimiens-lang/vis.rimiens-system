@@ -53,10 +53,11 @@ export function PayUnitCell({
 
   if (!open) {
     return (
+      /* print-keep：紙では押せないが、金額そのものは残す（globals.css の @media print） */
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="text-left"
+        className="print-keep text-left"
         title="押すと変えられます"
       >
         <div

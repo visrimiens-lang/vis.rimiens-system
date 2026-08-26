@@ -1,5 +1,6 @@
 import "server-only";
 import { audit, insert, select, selectOne, update } from "./db";
+import { todayInJapan } from "./jst";
 import { usesPortal } from "./labels";
 import { OFFICIAL_LINE_URL, QR2_APPROVED, buildQrUrl, tossUpUrl } from "./qr";
 import { AREA_QUOTA, DEFAULT_STAFF_LIMIT } from "./slots";
@@ -1487,7 +1488,7 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
       `leads?id=eq.${encodeURIComponent(matchedLeadId)}&status=neq.${encodeURIComponent("成約")}`,
       {
         status: "成約",
-        closed_on: new Date().toISOString().slice(0, 10),
+        closed_on: todayInJapan(),
         order_id: order["id"],
       },
     );

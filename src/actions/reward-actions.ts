@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import { bankReady as bankReadyShared } from "@/lib/bank";
 import { audit, selectOne, update } from "@/lib/db";
+import { todayInJapan } from "@/lib/jst";
 
 /**
  * 報酬の支払い（本部だけが行う）。
@@ -61,11 +62,6 @@ const n_ = (r: Row | null, k: string): number => {
 
 function text(formData: FormData, key: string): string {
   return String(formData.get(key) ?? "").trim();
-}
-
-/** 日本時間での今日。サーバーが世界標準時で動いていても前日にならないようにする。 */
-function todayInJapan(): string {
-  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 /* ══════════════════ 画面から届いた値の検分 ══════════════════ */

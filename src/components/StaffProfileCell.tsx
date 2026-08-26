@@ -53,10 +53,11 @@ export function StaffProfileCell({
 
   if (!open) {
     return (
+      /* print-keep：紙では押せないが、所属会社と種別は残す（globals.css の @media print） */
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="text-left underline decoration-dotted underline-offset-4"
+        className="print-keep text-left underline decoration-dotted underline-offset-4"
         title="押すと変えられます"
       >
         {body}

@@ -100,6 +100,16 @@ body {
     display: none !important;
   }
 
+  /*
+   * 中身が「操作」ではなく「データ」のボタンは、紙ではただの文字として残す。
+   * 組織と枠の「所属会社・種別」と「支払額」は、押すと直せる作りなので
+   * ボタンでできている。これを消すと、紙では欄が空になってしまう。
+   */
+  .print-keep {
+    display: block !important;
+    text-decoration: none !important;
+  }
+
   html,
   body {
     background: #fff !important;
@@ -119,6 +129,17 @@ body {
     padding: 0 !important;
     margin: 0 !important;
     max-width: none !important;
+  }
+
+  /*
+   * 画面では表を横スクロールさせているが、紙ではスクロールできない。
+   * そのままだと右側の列が切り落とされるので、全部出して文字を詰める。
+   */
+  .scroll-x {
+    overflow: visible !important;
+  }
+  .scroll-x > table {
+    min-width: 0 !important;
   }
 
   /* 表は途中で切らない。見出しはページをまたいでも繰り返す */
@@ -270,6 +291,12 @@ body {
 .notice-foot {
   margin-top: 4mm;
 }
+/* 金額が確定していないときの断り。書面の中に置くので紙にも残る */
+.notice-warn {
+  font-size: 8.5pt;
+  font-weight: 700;
+  margin-bottom: 2mm;
+}
 .notice-sum {
   margin-left: auto;
   border-collapse: collapse;
@@ -339,6 +366,17 @@ body {
   .notice-sum tr.grand th,
   .notice-sum tr.grand td {
     border-bottom: 2px solid #333 !important;
+  }
+  /*
+   * 上の共通ルールに table { width: 100% } があるため、
+   * 何もしないと集計表が紙いっぱいに広がって様式が崩れる。
+   */
+  .notice-sum {
+    width: 70mm !important;
+    margin-left: auto !important;
+  }
+  .notice-table {
+    width: 100% !important;
   }
 
   /*

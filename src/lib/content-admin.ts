@@ -152,13 +152,8 @@ function byId(id: string): string {
   return `${TABLE}?id=eq.${clean}`;
 }
 
-/**
- * 日本時間の今日を "YYYY-MM-DD" で返す。
- * 公開日の初期値に使う。サーバーの時計が UTC でも日付がずれないよう 9 時間ぶん足す。
- */
-export function todayInJapan(): string {
-  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
+/** 日本時間の今日を "YYYY-MM-DD" で返す。公開日の初期値に使う。 */
+export { todayInJapan } from "./jst";
 
 /* ---------- 操作 ---------- */
 

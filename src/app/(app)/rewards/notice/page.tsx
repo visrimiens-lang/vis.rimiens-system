@@ -4,7 +4,8 @@ import { currentViewer } from "@/lib/auth";
 import { findAgencyByCode, listDescendants } from "@/lib/agencies";
 import { attachRewards, listOrders, scopeCodes } from "@/lib/orders";
 import { effectivePayUnit } from "@/lib/pay-defaults";
-import { companyKey } from "@/lib/labels";
+import { companyKey, companyNameOf } from "@/lib/labels";
+import { todayInJapan } from "@/lib/jst";
 import { readParam, type SearchParams } from "@/lib/list-params";
 import { Card, Notice, jpMonthLabel } from "@/components/ui";
 import { PayeeNoticeDoc, type NoticeDoc, type NoticeLine } from "./PayeeNoticeDoc";
@@ -178,21 +179,29 @@ export default async function PayeeNoticePage({
   const lines = [...bucket.values()].sort((a, b) => a.item.localeCompare(b.item, "ja"));
 
   /*
-   * 宛先。会社でまとめるときは、振込先はその会社の誰かに入っているものを使う
-   * （個別に入っていなければ空欄で出し、手で書き足してもらう）。
+   * 宛先。会社でまとめるときは、その会社の誰かに入っているものを使う。
+   *
+   * 登録番号と振込口座は別々に探す。同じ1人からまとめて取ると、
+   * 会社の行に登録番号があって口座はスタッフに入っている、という
+   * よくある入り方のときに、片方が空欄で出てしまう。
    */
-  const head = target.find((d) => d.bankName) ?? target[0];
-  const toName = owner ? head?.name || owner : company;
+  const bankHead = target.find((d) => d.bankName) ?? target[0];
+  const invoiceHead = target.find((d) => d.invoiceNo) ?? target[0];
+  const toName = owner
+    ? bankHead?.name || owner
+    : target[0]
+      ? companyNameOf(target[0])
+      : company;
 
   const doc: NoticeDoc = {
     to: {
       name: toName,
-      invoiceNo: head?.invoiceNo ?? "",
-      bank: head?.bankName ?? "",
-      branch: head?.bankBranch ?? "",
-      type: head?.accountType ?? "",
-      no: head?.accountNo ?? "",
-      holder: head?.accountHolder ?? "",
+      invoiceNo: invoiceHead?.invoiceNo ?? "",
+      bank: bankHead?.bankName ?? "",
+      branch: bankHead?.bankBranch ?? "",
+      type: bankHead?.accountType ?? "",
+      no: bankHead?.accountNo ?? "",
+      holder: bankHead?.accountHolder ?? "",
     },
     from: {
       name: self.name || self.code,
@@ -201,9 +210,48 @@ export default async function PayeeNoticePage({
       tel: self.phone ?? "",
     },
     subject: `${jpMonthLabel(month)}度 販売委託手数料`,
-    issuedOn: new Date().toISOString().slice(0, 10),
+    issuedOn: todayInJapan(),
     lines,
   };
+
+  const backLink = (
+    <div className="no-print flex flex-wrap items-center justify-between gap-3">
+      <Link href={back} className="text-sm text-ink-300 underline underline-offset-4">
+        ← 売上・報酬に戻る
+      </Link>
+    </div>
+  );
+
+  /*
+   * 相手が見つからない、またはその月の売上が無いときは、書面自体を出さない。
+   * 出してしまうと「御支払金額 ¥0」の通知書や、URLに書いただけの
+   * 存在しない宛名の通知書がそのまま印刷できてしまう。
+   */
+  if (target.length === 0) {
+    return (
+      <div className="space-y-4">
+        {backLink}
+        <Notice tone="bad">
+          「{owner || company}」にあたる配下が見つかりませんでした。
+          売上・報酬の画面から選び直してください。
+        </Notice>
+      </div>
+    );
+  }
+
+  if (lines.length === 0) {
+    return (
+      <div className="space-y-4">
+        {backLink}
+        <Notice tone="warn">
+          {jpMonthLabel(month)}に、{toName} の出荷完了した受注がありません。
+          月を変えるか、絞り込みを見直してください。
+        </Notice>
+      </div>
+    );
+  }
+
+  const missing = lines.filter((l) => l.amount === null);
 
   return (
     <div className="space-y-4">
@@ -214,18 +262,12 @@ export default async function PayeeNoticePage({
         <PrintButton />
       </div>
 
-      {lines.length === 0 ? (
-        <Notice tone="warn">
-          {jpMonthLabel(month)}に、この相手の出荷完了した受注がありません。
-          月を変えるか、絞り込みを見直してください。
-        </Notice>
-      ) : null}
-
-      {lines.some((l) => l.amount === null) ? (
+      {missing.length > 0 ? (
         <div className="no-print">
           <Notice tone="warn">
-            支払単価が決まっていない行があります。「組織と枠」でその方の支払額を入れると、
-            金額が入った状態で出せます。
+            支払額が決まっていない方がいるため、合計を出せません（
+            {missing.map((l) => l.item.replace("販売委託手数料　", "")).join("／")}）。
+            「スタッフ一覧」でその方の支払額を入れると、金額の入った通知書になります。
           </Notice>
         </div>
       ) : null}

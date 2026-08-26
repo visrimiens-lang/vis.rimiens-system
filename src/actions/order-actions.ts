@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { currentViewer } from "@/lib/auth";
 import { audit, select, selectOne, update } from "@/lib/db";
+import { todayInJapan } from "@/lib/jst";
 import {
   confirmRewards,
   onReviewResultChanged,
@@ -117,11 +118,6 @@ function toHalfWidth(v: string): string {
   return v.replace(/[Ａ-Ｚａ-ｚ０-９]/g, (c) =>
     String.fromCharCode(c.charCodeAt(0) - 0xfee0),
   );
-}
-
-/** 日本時間での今日。サーバーが世界標準時で動いていても前日にならないようにする。 */
-function todayInJapan(): string {
-  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 function failed(prefix: string, e: unknown): OrderActionState {

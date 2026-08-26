@@ -22,6 +22,7 @@ import {
   ShoppingCart,
   UserRound,
   Users,
+  Truck,
   Wallet,
   X,
 } from "lucide-react";
@@ -59,6 +60,8 @@ const AGENCY_ITEMS: Item[] = [
 
 const HQ_ITEMS: Item[] = [
   { href: "/admin/orders", label: "受注一覧", icon: ShoppingCart },
+  // 毎日の発送作業の入口。受注一覧のすぐ下に置く。
+  { href: "/admin/shipping", label: "送り状発行", icon: Truck },
   // 取り込みに失敗した申込に気づける唯一の場所。上のほうに置く。
   { href: "/admin/inbox", label: "受信箱", icon: Inbox },
   { href: "/admin/rewards", label: "報酬の支払", icon: Wallet },

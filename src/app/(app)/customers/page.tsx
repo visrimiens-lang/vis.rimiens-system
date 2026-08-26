@@ -53,7 +53,7 @@ import {
   FilterText,
   SortableTh,
 } from "@/components/SortableTh";
-import { codeKindLabel } from "@/lib/labels";
+import { agencyTypeOf, companyNameOf } from "@/lib/labels";
 import { AutoRefresh } from "@/components/AutoRefresh";
 
 export const metadata = { title: "顧客一覧｜VIS 代理店ポータル" };
@@ -152,7 +152,7 @@ type OrderView = OrderWithReward & {
   staffCode: string;
   /** 担当スタッフの名前。分からないときは空。 */
   staffName: string;
-  /** 担当スタッフの補足（スタッフ / 取次パートナー / 未登録の理由）。 */
+  /** 担当スタッフの所属（「会社名・種別」）。分からないときは、その理由。 */
   staffNote: string;
   /** キャンセル・審査否決で止まっているか。 */
   stopped: boolean;
@@ -248,6 +248,16 @@ export default async function CustomersPage({
 
       const memberByCode = new Map(members.map((m) => [m.code, m]));
 
+      /*
+       * 担当スタッフの下に出す「どこの会社の、どの立場の人か」。
+       * 会社名と種別は「スタッフ一覧」で設定したものをそのまま出す。
+       * コードは隣の「担当コード」の欄に出ているので、ここでは繰り返さない。
+       */
+      const affiliationOf = (p: Agency) =>
+        [companyNameOf(p), agencyTypeOf(p.rank, p.channel, p.codeKind, p.staffType)]
+          .filter(Boolean)
+          .join("・");
+
       /** 誰が売ったか。受注のスタッフ欄が空のときは担当コードから補う。 */
       const staffOf = (o: OrderWithReward) => {
         const code = staffByOrder.get(o.recordId) ?? "";
@@ -256,9 +266,7 @@ export default async function CustomersPage({
           return {
             staffCode: code,
             staffName: person?.name ?? "",
-            staffNote: person
-              ? codeKindLabel(person.codeKind)
-              : "代理店一覧に該当なし",
+            staffNote: person ? affiliationOf(person) : "代理店一覧に該当なし",
           };
         }
         // 取次紹介コードが入っている受注は、その取次パートナー本人が売った扱い。
@@ -267,7 +275,7 @@ export default async function CustomersPage({
           return {
             staffCode: owner.code,
             staffName: owner.name,
-            staffNote: codeKindLabel(owner.codeKind),
+            staffNote: affiliationOf(owner),
           };
         }
         return {
@@ -514,16 +522,16 @@ export default async function CustomersPage({
           hint="お客様のお支払額の合計（中止分を除く）"
         />
         <StatTile
-          label="発送まで進んだ受注"
-          value={String(shippedCount)}
+          label="配達完了の受注"
+          value={String(deliveredCount)}
           unit="件"
           tone={stoppedCount > 0 ? "warn" : "default"}
           hint={
             stoppedCount > 0
               ? `中止になった受注が ${stoppedCount} 件あります`
-              : deliveredCount > 0
-                ? "出荷済・配達完了の合計"
-                : "出荷済まで進んだ受注の合計"
+              : shippedCount > deliveredCount
+                ? `配達完了の合計（ほかに発送済が ${shippedCount - deliveredCount} 件）`
+                : "配達完了の合計"
           }
         />
       </div>
@@ -705,8 +713,7 @@ export default async function CustomersPage({
                             {o.staffName || "（名称未登録）"}
                           </div>
                           <div className="mt-1 text-xs text-ink-400">
-                            <span className="tabnum">{o.staffCode || "コードなし"}</span>
-                            {o.staffNote ? `・${o.staffNote}` : ""}
+                            {o.staffNote || "所属が未設定です"}
                           </div>
                         </>
                       ) : (
@@ -766,7 +773,7 @@ export default async function CustomersPage({
                 <Td> </Td>
                 <Td> </Td>
                 <Td className="text-xs text-ink-400">
-                  発送まで進んだ受注 {shippedCount}件
+                  配達完了 {deliveredCount}件
                 </Td>
                 <Td className="text-xs text-ink-400">
                   {stoppedCount > 0 ? `中止 ${stoppedCount}件は合計に含めていません` : " "}

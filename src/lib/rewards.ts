@@ -342,16 +342,38 @@ export async function accrueRewards(
 /**
  * 配送完了で報酬を確定させる。
  * 2026-08-07 会議「報酬確定を配送完了ベースにする」。
+ *
+ * 対象月（rewards.month）も、ここで配達完了の月に付け替える。
+ *
+ * 報酬は受注が入った時点で立つので、そのときの month は受注日の月しか入れられない
+ * （配達完了日はまだ決まっていない）。そのままにすると、月末に受注して翌月に届いた分が
+ * 本部の支払管理では受注月、代理店の売上・報酬では配達完了月に載り、
+ * 同じ受注が2つの月にまたがって見える。締めのときに突き合わせられないので、
+ * 確定した時点で配達完了の月にそろえる（2026-08-26）。
+ *
+ * 配達完了日が取れないときは、月は動かさない（受注月のまま残す）。
  */
 export async function confirmRewards(orderId: string | number): Promise<number> {
   const today = todayInJapan();
+
+  let month = "";
+  try {
+    const order = await selectOne<Row>(
+      `orders?select=delivered_on&id=eq.${encodeURIComponent(String(orderId))}`,
+    );
+    month = s_(order, "delivered_on").slice(0, 7);
+  } catch {
+    // 読めなくても確定そのものは進める。月は受注月のまま。
+  }
+
   const rows = await update<Row>(
     `rewards?order_id=eq.${encodeURIComponent(String(orderId))}&status=eq.${encodeURIComponent("未確定")}`,
-    { status: "確定", confirmed_on: today },
+    { status: "確定", confirmed_on: today, ...(month ? { month } : {}) },
   );
   if (rows.length > 0) {
     await audit("system", "報酬確定", { type: "order", key: String(orderId) }, {
       件数: rows.length,
+      対象月: month || "（受注月のまま）",
     });
   }
   return rows.length;

@@ -149,7 +149,7 @@ export function Badge({
 /** 出荷状況などのステータス文字列を、意味に応じた色のバッジにする。 */
 export function StatusBadge({ status }: { status: string }) {
   if (!status) return <span className="text-ink-400">—</span>;
-  const good = ["出荷済", "承認", "承認済", "稼働中", "合格", "支払済", "照合済"];
+  const good = ["配達完了", "出荷済", "承認", "承認済", "稼働中", "合格", "支払済", "照合済"];
   const warn = ["出荷手配中", "出荷待ち", "申請中", "電話確認待ち", "未支払", "受講中", "要確認"];
   const bad = ["キャンセル", "否決", "停止・解約", "不合格", "却下", "差戻し"];
   const tone = good.includes(status)

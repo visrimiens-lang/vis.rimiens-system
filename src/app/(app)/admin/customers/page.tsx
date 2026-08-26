@@ -288,12 +288,15 @@ export default async function AdminCustomersPage({
   const paymentOptions = buildOptions(customers, (c) => c.paymentStatus, [], payment);
   const shipOptions = buildOptions(customers, (c) => c.shipStatus, [], ship);
 
-  // 「お届け前」は本部が住所直しなどで手を打つ相手の数。
-  // 表の「進み具合」で『中止』と出ている方（キャンセル・審査NG）は、もう手を打つ相手ではないので数えない。
-  // progressValue() は中止を -1 で返すので、0 以上だけを残す。
-  const beforeShipping = found.filter(
-    (c) => c.shipStatus !== "出荷済" && progressValue(c) >= 0,
-  ).length;
+  /*
+   * 「お届け前」は本部が住所直しなどで手を打つ相手の数。
+   * 判定は配達完了日で行う。出荷状況だけを見ていたころは、発送しただけで
+   * 「お届け済み」として数から外れていた（代理店側の画面は配達完了を軸に
+   * しているので、同じお客様が本部と代理店で違って見えていた・2026-08-26）。
+   * 表の「進み具合」で『中止』と出ている方（キャンセル・審査NG）は
+   * もう手を打つ相手ではないので数えない。progressValue() は中止を -1 で返す。
+   */
+  const beforeShipping = found.filter((c) => !c.deliveredOn && progressValue(c) >= 0).length;
   const truncated = customers.length >= LIMIT;
   const current = TABS.find((t) => t.key === kind)!;
 
@@ -328,8 +331,8 @@ export default async function AdminCustomersPage({
           tone={beforeShipping > 0 ? "warn" : "default"}
           hint={
             beforeShipping > 0
-              ? "まだ出荷済になっていない方。住所の直しはお早めに"
-              : "出荷が済んでいない方はいません"
+              ? "まだお手元に届いていない方。住所の直しはお早めに"
+              : "お届けが済んでいない方はいません"
           }
         />
       </div>

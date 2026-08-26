@@ -554,6 +554,16 @@ export default async function AdminOrdersPage({
   const unitTotal = liveRows.reduce((s, o) => s + (o.quantity || 1), 0);
   const salesTotal = liveRows.reduce((s, o) => s + o.amount, 0);
   const shippedCount = liveRows.filter((o) => o.shippingStatus === "出荷済").length;
+  /*
+   * お客様のお手元に届いた件数。
+   * 代理店側の画面（顧客一覧・売上・報酬）は配達完了を軸にしているので、
+   * 本部の画面でも同じものが読めるようにする（2026-08-26）。
+   */
+  const deliveredCount = liveRows.filter((o) => o.deliveredAt).length;
+  const shippedNotDelivered = liveRows.filter(
+    (o) => o.shippingStatus === "出荷済" && !o.deliveredAt,
+  ).length;
+  const notShipped = orderCount - shippedCount - deliveredCount + shippedNotDelivered;
   const payableTotal = sumPayable(liveRows);
   const voidedCount = voidedRows.length;
   const voidedSales = voidedRows.reduce((s, o) => s + o.amount, 0);
@@ -689,13 +699,14 @@ export default async function AdminOrdersPage({
           hint="お客様のお支払額の合計（キャンセル・否決を除く）"
         />
         <StatTile
-          label="出荷済"
-          value={shippedCount.toLocaleString("ja-JP")}
+          label="配達完了"
+          value={deliveredCount.toLocaleString("ja-JP")}
           unit="件"
           hint={
             orderCount > 0
-              ? `未出荷 ${(orderCount - shippedCount).toLocaleString("ja-JP")} 件`
-              : "出荷が終わった受注の数"
+              ? `発送済でまだ未着 ${shippedNotDelivered.toLocaleString("ja-JP")} 件・` +
+                `未出荷 ${Math.max(0, notShipped).toLocaleString("ja-JP")} 件`
+              : "お客様のお手元に届いた受注の数"
           }
         />
         <StatTile
@@ -979,7 +990,13 @@ export default async function AdminOrdersPage({
                       {o.ownerCode || <span className="text-ink-400">—</span>}
                     </Td>
                     <Td>
-                      <StatusBadge status={o.shippingStatus} />
+                      {/* 届いていれば「配達完了」。代理店側の画面と同じ呼び方にそろえる */}
+                      <StatusBadge status={o.deliveredAt ? "配達完了" : o.shippingStatus} />
+                      {o.deliveredAt ? (
+                        <div className="tabnum mt-1 text-xs text-ink-400">
+                          {jpDate(o.deliveredAt)} 着
+                        </div>
+                      ) : null}
                       {o.reviewResult === "否決" ? (
                         <div className="mt-1">
                           <Badge tone="bad">審査否決</Badge>

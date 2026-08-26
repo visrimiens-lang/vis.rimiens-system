@@ -72,6 +72,40 @@ import { payMonthAction, payOneAction, undoPayAction } from "@/actions/reward-ac
 
 const BASE = "/admin/rewards";
 
+/*
+ * 支払元のタブ。
+ *
+ * 報酬は「各階層が下位に支払う」形になっている
+ * （2026-06-27 設計書_VIS統合設計 5.1 カスケード構造）。
+ *   目トレ  → Rimiens（総販売代理店） 77,000円/台
+ *   Rimiens → 2次代理店               62,700円/台
+ *   2次     → 3次・取次               55,000／27,500円（統括の画面で扱う）
+ * 上の段が受け取った額から、下の段へ渡していく。
+ *
+ * 報酬台帳には階層ぶんの行がすべて立つので、支払元で分けずに合計すると、
+ * 本部が払わない2次のぶんまで「これから振り込む額」に入り、
+ * 二重払いのもとになる（2026-08-26 に実際そうなっていた）。
+ */
+const PAYER_TABS = [
+  {
+    key: "hq",
+    label: "目トレ → Rimiens",
+    ranks: ["総販売代理店"],
+    note: "本部がお支払いする分です。締めの振込額はこちらをご覧ください。",
+    cycle: "翌月15日",
+  },
+  {
+    key: "rim",
+    label: "Rimiens → 2次代理店",
+    ranks: ["2次代理店"],
+    note: "Rimiens がお支払いする分です。本部からは振り込みません（確認用）。",
+    cycle: "翌月25日",
+  },
+] as const;
+
+const PAYER_KEYS = PAYER_TABS.map((t) => t.key);
+const ALL_TAB_RANKS: string[] = PAYER_TABS.flatMap((t) => [...t.ranks]);
+
 export const metadata = { title: "報酬の支払管理（本部）｜VIS 代理店ポータル" };
 
 /**
@@ -587,6 +621,7 @@ export default async function AdminRewardsPage({
 }: {
   searchParams: Promise<{
     month?: string;
+    payer?: string;
     status?: string;
     keyword?: string;
     open?: string;
@@ -624,6 +659,13 @@ export default async function AdminRewardsPage({
   const months = recentMonths(12);
   // 直近12か月に無い月（もっと前をさかのぼったとき）でも、選び直せるように残す。
   const monthChoices = months.includes(month) ? months : [month, ...months];
+  /* いま見ている支払元。指定が無ければ本部のぶん（目トレ → Rimiens）。 */
+  const payerKey = (() => {
+    const v = readParam(params, "payer");
+    return (PAYER_KEYS as readonly string[]).includes(v) ? v : PAYER_TABS[0].key;
+  })();
+  const payerTab = PAYER_TABS.find((x) => x.key === payerKey) ?? PAYER_TABS[0];
+
   const selectedStatus = readChoice(params, "status", REWARD_STATUSES);
   const keyword = readParam(params, "keyword");
   const openCodeRaw = readParam(params, "open");
@@ -666,7 +708,7 @@ export default async function AdminRewardsPage({
   const header = (
     <PageHeader
       title="報酬の支払管理"
-      description="月次の締めに使う画面です。対象月の報酬を代理店ごとにまとめ、確定した報酬を支払済にして、いつ振り込んだかを記録します。配送が完了していない「未確定」の報酬は支払えません。"
+      description="月次の締めに使う画面です。報酬は各階層が下位に支払う決まりなので、支払元ごとにタブを分けています。既定は本部がお支払いする分（目トレ → Rimiens）です。配送が完了していない「未確定」の報酬は支払えません。"
       actions={
         // flex-wrap: スマホで1行に収まらないときは折り返す（画面からはみ出させない）
         <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -699,6 +741,25 @@ export default async function AdminRewardsPage({
   }
 
   const agencyByCode = new Map(agencies.map((a) => [a.code, a]));
+
+  /*
+   * 支払元で分ける。ここから下（合計・振込先の警告・表・下書き）は
+   * すべて、いま選んでいるタブのぶんだけを見る。
+   */
+  const allMonthLines = monthLines;
+  monthLines = allMonthLines.filter((l) =>
+    (payerTab.ranks as readonly string[]).includes(l.agencyRank),
+  );
+  /* どのタブにも入らない行。放っておくと金額が画面から消えるので、必ず知らせる。 */
+  const strayLines = allMonthLines.filter((l) => !ALL_TAB_RANKS.includes(l.agencyRank));
+
+  /* タブの見出しに出す金額。切り替えなくても、両方の額が分かるようにする。 */
+  const tabTotals = PAYER_TABS.map((tab) => ({
+    ...tab,
+    totals: totalsOf(
+      allMonthLines.filter((l) => (tab.ranks as readonly string[]).includes(l.agencyRank)),
+    ),
+  }));
 
   /* --- 絞り込み --- */
   const shownLines = monthLines.filter((l) => {
@@ -1069,6 +1130,61 @@ export default async function AdminRewardsPage({
         />
       ) : null}
 
+      {/*
+        支払元の切り替え。
+        報酬は階層ごとに立つので、支払元で分けないと本部が払わない額まで
+        合計に入ってしまう。既定は本部のぶん（目トレ → Rimiens）。
+      */}
+      <div className="flex flex-wrap gap-2">
+        {tabTotals.map((tab) => {
+          const on = tab.key === payerKey;
+          return (
+            <Link
+              key={tab.key}
+              href={linkTo({ payer: tab.key, open: "", adj: "" })}
+              aria-current={on ? "page" : undefined}
+              className={cn(
+                "min-w-[15rem] flex-1 rounded-xl border px-4 py-3 transition",
+                on
+                  ? "border-gold-500 bg-gold-500/10"
+                  : "border-ink-800 bg-ink-900 hover:border-ink-600",
+              )}
+            >
+              <div
+                className={cn(
+                  "text-sm font-semibold",
+                  on ? "text-gold-300" : "text-ink-200",
+                )}
+              >
+                {tab.label}
+              </div>
+              <div className="tabnum mt-1 text-xl font-semibold text-ink-50">
+                {yen(tab.totals.awaiting)}
+              </div>
+              <div className="mt-0.5 text-xs text-ink-400">
+                支払い待ち・{tab.cycle}払い
+              </div>
+            </Link>
+          );
+        })}
+      </div>
+
+      <Notice tone={payerKey === "hq" ? "info" : "warn"}>
+        {payerTab.note}
+        {payerKey === "hq"
+          ? "報酬は各階層が下位に支払う決まりです（目トレ → Rimiens → 2次代理店 → 3次・取次）。"
+          : "この画面で支払済にすると、本部が振り込んだ記録として残ります。Rimiens の振込を代わりに記録する場合だけお使いください。"}
+      </Notice>
+
+      {strayLines.length > 0 ? (
+        <Notice tone="bad">
+          どちらのタブにも入らない報酬が {strayLines.length.toLocaleString("ja-JP")} 件
+          （{yen(strayLines.reduce((s, l) => s + l.amount, 0))}）あります。
+          ランクが「{[...new Set(strayLines.map((l) => l.agencyRank || "（未設定）"))].join("・")}」
+          になっています。上の合計には入っていないので、担当者にご連絡ください。
+        </Notice>
+      ) : null}
+
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatTile
           label="未確定合計"
@@ -1089,7 +1205,11 @@ export default async function AdminRewardsPage({
           label="支払い待ち"
           value={yen(totals.awaiting)}
           tone="gold"
-          hint="確定 − 支払済。これから振り込む額です"
+          hint={
+            payerKey === "hq"
+              ? "確定 − 支払済。本部がこれから振り込む額です"
+              : "確定 − 支払済。Rimiens が2次代理店へ振り込む額です"
+          }
         />
       </div>
 
@@ -1143,7 +1263,7 @@ export default async function AdminRewardsPage({
 
       {/* ── 代理店ごとのまとめ ── */}
       <Card
-        title={`代理店ごとの報酬（${jpMonthLabel(month)}）`}
+        title={`${payerTab.label}（${jpMonthLabel(month)}）`}
         action={
           <span className="text-xs text-ink-400">
             {rows.length.toLocaleString("ja-JP")} 社・見出しを押すと並び替えられます
@@ -1154,12 +1274,12 @@ export default async function AdminRewardsPage({
           <EmptyState
             title={
               monthLines.length === 0
-                ? "この月の報酬はまだありません"
+                ? `${payerTab.label} の報酬は、この月にはまだありません`
                 : "条件に合うものがありません"
             }
             description={
               monthLines.length === 0
-                ? "報酬は、受注が入った時点で「未確定」として立ち、商品の配送が完了すると「確定」に変わります。前の月を見るときは、右上の「← 前の月」をお使いください。"
+                ? "報酬は、受注が入った時点で「未確定」として立ち、商品の配送が完了すると「確定」に変わります。前の月を見るときは右上の「← 前の月」を、別の支払元を見るときは上のタブをお使いください。"
                 : `${jpMonthLabel(month)}には、${[
                     selectedStatus === ALL ? null : `状態「${selectedStatus}」`,
                     keyword ? `キーワード「${keyword}」` : null,

@@ -268,7 +268,10 @@ create table if not exists public.demo_machines (
   id                bigint generated always as identity primary key,
   serial_no         text unique,
   model             text default 'VIS本体',
-  acquired_kind     text check (acquired_kind is null or acquired_kind in ('個人購入','デモ機購入','無料貸与')),
+  -- 申込フォームの選択肢をそのまま残す。前の3つは kintone 時代のもの
+  acquired_kind     text check (acquired_kind is null or acquired_kind in
+                    ('個人購入','デモ機購入','無料貸与',
+                     'スターターセットとして購入','個人購入製品をデモ機として登録')),
   acquired_on       date,
   state             text not null default '在庫'
                     check (state in ('在庫','設置済','貸出中','返却済','故障・修理','廃棄')),

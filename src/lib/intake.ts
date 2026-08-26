@@ -1520,9 +1520,22 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
     const { accrueRewards } = await import("./rewards");
     const n = await accrueRewards(String(order["id"]));
     if (n === 0) {
-      trouble =
-        "報酬が1件も計上されませんでした。商品名が商品マスタと一致しているか、" +
-        "代理店コードが入っているかをご確認ください。";
+      /*
+       * どちらが原因かは、ここで分かる。
+       * 「両方をご確認ください」とだけ返していたので、本部が毎回2つとも
+       * 調べ直すことになっていた（実際は代理店コードが空なだけ、という
+       * 受注が7件たまっていた・2026-08-26）。
+       */
+      const noOwner = ![agencyCode, nijiCode, referrerCode, staffCode].some((c) =>
+        (c || "").trim(),
+      );
+      trouble = noOwner
+        ? "報酬が1件も計上されませんでした。この受注には代理店コードが入っていません" +
+          "（お客様が代理店の紹介URLを通らずにお申し込みになった場合に起こります）。" +
+          "受注一覧からこの受注を開き、担当の代理店を割り当ててください。"
+        : "報酬が1件も計上されませんでした。商品名が商品マスタに見つかりません。" +
+          `（受注の商品名：${app.productName || "（空）"}）` +
+          "商品マスタに登録するか、受注の商品名をご確認ください。";
       await audit("intake", "報酬が計上されなかった受注", { type: "order", key: String(order["id"]) }, {
         顧客: name,
         商品名: app.productName || null,

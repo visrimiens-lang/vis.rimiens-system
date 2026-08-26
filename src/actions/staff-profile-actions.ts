@@ -36,6 +36,12 @@ import { STAFF_TYPES } from "@/lib/labels";
 
 export type StaffProfileState = { error?: string; ok?: string };
 
+/**
+ * 種別ごとの既定の支払額（lib/pay-defaults.ts と同じ値）。
+ * この額が入っているときは「既定のまま」とみなし、種別を変えたら合わせて変える。
+ */
+const DEFAULT_AMOUNTS = [25000, 50000];
+
 type Row = Record<string, unknown>;
 const s_ = (r: Row | null, k: string): string => {
   if (!r) return "";
@@ -63,7 +69,8 @@ export async function setStaffProfileAction(
   let target: Row | null = null;
   try {
     target = await selectOne<Row>(
-      `agencies?select=code,name,parent_code,code_kind,company_name,staff_type&code=eq.${encodeURIComponent(code)}`,
+      `agencies?select=code,name,parent_code,code_kind,company_name,staff_type,pay_unit` +
+        `&code=eq.${encodeURIComponent(code)}`,
     );
   } catch (e) {
     const msg = e instanceof Error ? e.message : "不明なエラー";
@@ -129,10 +136,30 @@ export async function setStaffProfileAction(
     return { ok: "変更はありませんでした。" };
   }
 
+  /*
+   * 種別を変えたら、支払額も新しい種別の既定に合わせる。
+   *
+   *   取次店   … 25,000円
+   *   それ以外 … 50,000円
+   *
+   * 個別の額を null に戻すことで、以後は種別に自動で追随する。
+   * ただし、既定とは違う額（例：30,000円）が入っているときは触らない。
+   * その額は誰かが意図して決めたものなので、種別を直したついでに
+   * 勝手に書き換えると、約束した金額が黙って変わってしまう。
+   */
+  const typeChanged = rawType !== beforeType;
+  const currentUnit = target["pay_unit"];
+  const isDefaultAmount =
+    currentUnit === null ||
+    currentUnit === undefined ||
+    DEFAULT_AMOUNTS.includes(Number(currentUnit));
+  const resetPayUnit = typeChanged && isDefaultAmount;
+
   try {
     await update(`agencies?code=eq.${encodeURIComponent(code)}`, {
       company_name: companyName || null,
       staff_type: rawType || null,
+      ...(resetPayUnit ? { pay_unit: null, pay_unit_note: null } : {}),
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "不明なエラー";
@@ -162,5 +189,12 @@ export async function setStaffProfileAction(
   revalidatePath("/admin/agencies");
   revalidatePath(`/admin/agencies/${code}`);
 
-  return { ok: `${s_(target, "name")} の所属と種別を保存しました。` };
+  const newAmount = rawType === "取次店" ? 25000 : 50000;
+  return {
+    ok:
+      `${s_(target, "name")} の所属と種別を保存しました。` +
+      (resetPayUnit
+        ? `支払額も既定の ${newAmount.toLocaleString("ja-JP")} 円に合わせました。`
+        : ""),
+  };
 }

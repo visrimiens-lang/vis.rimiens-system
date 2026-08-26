@@ -598,7 +598,24 @@ export async function updateAgencyAction(
     name: t.name,
     rep_name: orNull(t.repName),
     ...(isStaffRow
-      ? { company_name: orNull(t.companyName), staff_type: orNull(staffType) }
+      ? {
+          company_name: orNull(t.companyName),
+          staff_type: orNull(staffType),
+          /*
+           * 種別を変えたら、支払額も新しい種別の既定に合わせる
+           *（取次店 25,000円／それ以外 50,000円）。
+           * null に戻すことで、以後は種別に自動で追随する。
+           * 既定とは違う額が入っているときは触らない（意図して決めた額のため）。
+           */
+          ...(staffType !== s(current, "staff_type") &&
+          [null, undefined, 25000, 50000].includes(
+            current["pay_unit"] === null || current["pay_unit"] === undefined
+              ? null
+              : Number(current["pay_unit"]),
+          )
+            ? { pay_unit: null, pay_unit_note: null }
+            : {}),
+        }
       : {}),
     rank: nextRank,
     channel: typed

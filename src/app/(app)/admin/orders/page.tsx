@@ -83,8 +83,28 @@ export const metadata = { title: "受注一覧（本部）｜VIS 代理店ポー
  */
 const LIMIT = 1000;
 
-/** App10「出荷状況」の選択肢。受注が1件も無い状態でも絞り込めるように持っておく。 */
-const SHIPPING_STATUSES = ["出荷待ち", "出荷手配中", "出荷済", "キャンセル"];
+/**
+ * 出荷状況の選択肢。受注が1件も無い状態でも絞り込めるように持っておく。
+ *
+ * 「配達完了」だけは受注の ship_status には無い（配達完了日が入っているかで決まる）。
+ * 画面ではひとつながりの段階として見せたいので、ここに並べて shipViewOf() で判定する。
+ * 並びは進み具合の順。
+ */
+const SHIPPING_STATUSES = ["出荷待ち", "出荷手配中", "出荷済", "配達完了", "キャンセル"];
+
+/**
+ * この受注を、画面ではどの段階として見せるか。
+ *
+ * 届いていれば「配達完了」。
+ * 「出荷済」は発送したがまだ届いていないもの、という意味になる。
+ * こうしないと、絞り込みの「出荷済」に届いた分まで入り、
+ * 上のタイル（配達完了 N件・発送済でまだ未着 N件）と数が合わない。
+ */
+function shipViewOf(o: { shippingStatus: string; deliveredAt: string }): string {
+  if (o.shippingStatus === "キャンセル") return "キャンセル";
+  if (o.deliveredAt) return "配達完了";
+  return o.shippingStatus;
+}
 
 /**
  * 決済方法と照合ステータスも、受注が無い状態で選べるように並べておく。
@@ -475,7 +495,7 @@ export default async function AdminOrdersPage({
   }));
   const shipOptions = buildOptions(
     periodOrders,
-    (o) => o.shippingStatus,
+    shipViewOf,
     SHIPPING_STATUSES,
     selectedShip,
   );
@@ -495,12 +515,13 @@ export default async function AdminOrdersPage({
   /* --- 絞り込み --- */
   const filteredRows = periodOrders.filter((o) => {
     if (selectedCode !== ALL && !codesOf(o).includes(selectedCode)) return false;
-    if (selectedShip !== ALL && o.shippingStatus !== selectedShip) return false;
+    if (selectedShip !== ALL && shipViewOf(o) !== selectedShip) return false;
     if (selectedPay !== ALL && o.paymentMethod !== selectedPay) return false;
     if (selectedMatch !== ALL && o.matchStatus !== selectedMatch) return false;
     // 未出荷・送り状番号なしは「これから手を動かすもの」なので、
     // 取り消された受注は最初から外す。
-    if (todo === TODO_UNSHIPPED && (o.voided || o.shippingStatus === "出荷済")) return false;
+    if (todo === TODO_UNSHIPPED && (o.voided || ["出荷済", "配達完了"].includes(shipViewOf(o))))
+      return false;
     if (todo === TODO_NO_TRACKING && (o.voided || o.trackingNo)) return false;
     if (todo === TODO_VOIDED && !o.voided) return false;
     if (!matchesKeyword(keyword, [o.customerName, o.trackingNo])) return false;
@@ -518,7 +539,7 @@ export default async function AdminOrdersPage({
     payee: (o) => payeeCodeOf(o),
     staff: (o) => o.staffCode,
     owner: (o) => o.ownerCode,
-    ship: (o) => o.shippingStatus,
+    ship: (o) => shipViewOf(o),
     tracking: (o) => o.trackingNo,
     match: (o) => o.matchStatus,
   };
@@ -553,17 +574,14 @@ export default async function AdminOrdersPage({
   const orderCount = liveRows.length;
   const unitTotal = liveRows.reduce((s, o) => s + (o.quantity || 1), 0);
   const salesTotal = liveRows.reduce((s, o) => s + o.amount, 0);
-  const shippedCount = liveRows.filter((o) => o.shippingStatus === "出荷済").length;
   /*
-   * お客様のお手元に届いた件数。
-   * 代理店側の画面（顧客一覧・売上・報酬）は配達完了を軸にしているので、
-   * 本部の画面でも同じものが読めるようにする（2026-08-26）。
+   * 進み具合ごとの件数。判定は絞り込みと同じ shipViewOf() を通すので、
+   * ここの数字と「出荷状況」で絞ったときの件数が必ず一致する。
+   * 代理店側の画面（顧客一覧・売上・報酬）も配達完了を軸にしている（2026-08-26）。
    */
-  const deliveredCount = liveRows.filter((o) => o.deliveredAt).length;
-  const shippedNotDelivered = liveRows.filter(
-    (o) => o.shippingStatus === "出荷済" && !o.deliveredAt,
-  ).length;
-  const notShipped = orderCount - shippedCount - deliveredCount + shippedNotDelivered;
+  const deliveredCount = liveRows.filter((o) => shipViewOf(o) === "配達完了").length;
+  const shippedNotDelivered = liveRows.filter((o) => shipViewOf(o) === "出荷済").length;
+  const notShipped = orderCount - deliveredCount - shippedNotDelivered;
   const payableTotal = sumPayable(liveRows);
   const voidedCount = voidedRows.length;
   const voidedSales = voidedRows.reduce((s, o) => s + o.amount, 0);
@@ -991,7 +1009,7 @@ export default async function AdminOrdersPage({
                     </Td>
                     <Td>
                       {/* 届いていれば「配達完了」。代理店側の画面と同じ呼び方にそろえる */}
-                      <StatusBadge status={o.deliveredAt ? "配達完了" : o.shippingStatus} />
+                      <StatusBadge status={shipViewOf(o)} />
                       {o.deliveredAt ? (
                         <div className="tabnum mt-1 text-xs text-ink-400">
                           {jpDate(o.deliveredAt)} 着

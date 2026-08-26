@@ -410,6 +410,24 @@ export function usesPortal(
 }
 
 /**
+ * この人を「どこの会社の人」として扱うか。
+ *
+ * スタッフ（コード区分02）は所属会社名を持っている。入っていなければ所属先の名前。
+ * 会社そのもの（区分00・01）は自分の名前がそのまま会社名になる。
+ *
+ * 売上・報酬の集計と、組織と枠の絞り込みで同じ答えを出すために、ここに集約している。
+ */
+export function companyNameOf(a: {
+  name: string;
+  codeKind?: string | null;
+  companyName?: string | null;
+  parentName?: string | null;
+}): string {
+  if (a.codeKind === "02") return a.companyName || a.parentName || a.name;
+  return a.name;
+}
+
+/**
  * 会社名をまとめるためのキー。
  *
  * 報酬の明細を会社ごとにまとめるとき、表記のゆれで同じ会社が2行に割れないようにする。

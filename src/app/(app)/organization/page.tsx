@@ -31,7 +31,9 @@ import {
   cn,
 } from "@/components/ui";
 import {
+  ALL,
   buildListHref,
+  buildOptions,
   matchesKeyword,
   parseSort,
   readParam,
@@ -43,11 +45,19 @@ import {
 import {
   FilterActions,
   FilterBar,
+  FilterSelect,
   FilterSummary,
   FilterText,
   SortableTh,
 } from "@/components/SortableTh";
-import { agencyTypeOf, belongsToOrg, codeKindLabel, statusTone } from "@/lib/labels";
+import {
+  agencyTypeOf,
+  belongsToOrg,
+  codeKindLabel,
+  companyKey,
+  companyNameOf,
+  statusTone,
+} from "@/lib/labels";
 import { SlotRequestButton } from "./SlotRequestButton";
 import { PayUnitCell } from "@/components/PayUnitCell";
 import { StaffProfileCell } from "@/components/StaffProfileCell";
@@ -115,7 +125,13 @@ function SlotStateNotice({ slots }: { slots: SlotSummary }) {
 export default async function OrganizationPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; sort?: string; dir?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    company?: string;
+    type?: string;
+    sort?: string;
+    dir?: string;
+  }>;
 }) {
   const viewer = await currentViewer();
   if (!viewer) redirect("/login");
@@ -123,6 +139,9 @@ export default async function OrganizationPage({
 
   const params: SearchParams = await searchParams;
   const keyword = readParam(params, "q");
+  /* 絞り込み。"all" は絞っていない状態（選び直しの部品と同じ決まり）。 */
+  const companyParam = readParam(params, "company") || ALL;
+  const typeParam = readParam(params, "type") || ALL;
   const sort = parseSort(params, DEFAULT_SORT, SORT_COLUMNS);
 
   const header = (
@@ -194,36 +213,35 @@ export default async function OrganizationPage({
 
   const rows = tree ? flatten(tree) : [{ agency: me, depth: 0 }];
   const descendants = rows.slice(1).map((r) => r.agency);
-  const directChildren = tree ? tree.children.map((c) => c.agency) : [];
-
-  const countBy = (list: Agency[], kind: string) =>
-    list.filter((a) => (a.codeKind || "") === kind).length;
-
-  // 区分の呼び方は labels.ts の codeKindLabel() だけを出所にする。
-  // ここで文字を直書きすると、同じ区分が画面ごとに違う呼ばれ方になる。
-  // とくに 00 は総販売代理店・統括代理店・サロン代理店・個人販売パートナーまで
-  // まとめて入る区分なので、「販売代理店」と書くと配下の統括代理店まで
-  // 販売代理店として数えているように見えてしまう。
-  const kindRows = [
-    { kind: "00", note: "（コード区分00）", slot: "1名分消費" },
-    { kind: "01", note: "", slot: "1名分消費" },
-    { kind: "02", note: "", slot: "1名分消費" },
-    { kind: "", note: "", slot: "—" },
-  ]
-    .map((b) => ({
-      ...b,
-      label: `${codeKindLabel(b.kind)}${b.note}`,
-      direct: countBy(directChildren, b.kind),
-      all: countBy(descendants, b.kind),
-    }))
-    .filter((b) => b.kind !== "" || b.all > 0);
-
-  const suspendedDirect = directChildren.filter((a) => a.status === "停止・解約").length;
 
   /* --- 配下の一覧（連絡先つき） --- */
-  const contacts = descendants.filter((a) =>
-    matchesKeyword(keyword, [a.code, a.name, a.representative, a.email, a.phone]),
-  );
+
+  /*
+   * 絞り込みに使う値。
+   * 会社名は売上・報酬と同じ出し方（labels.ts の companyNameOf）にそろえる。
+   * ばらばらに書くと、同じ人が画面によって別の会社に見えてしまう。
+   */
+  const companyOf = (a: Agency) => companyNameOf(a);
+  const typeOf = (a: Agency) => agencyTypeOf(a.rank, a.channel, a.codeKind, a.staffType);
+
+  /*
+   * 選択肢は、いま配下にいる顔ぶれから作る。
+   * 選ばれている値は件数が0でも残る（自分で外せなくなるため・buildOptions の決まり）。
+   */
+  const companyOptions = buildOptions(descendants, companyOf, [], companyParam);
+  const typeOptions = buildOptions(descendants, typeOf, [], typeParam);
+
+  const contacts = descendants.filter((a) => {
+    if (!matchesKeyword(keyword, [a.code, a.name, a.representative, a.email, a.phone])) {
+      return false;
+    }
+    // 会社名は表記のゆれを吸収して突き合わせる（「(株)樹」と「株式会社樹」を同じ会社と見る）
+    if (companyParam !== ALL && companyKey(companyOf(a)) !== companyKey(companyParam)) {
+      return false;
+    }
+    if (typeParam !== ALL && typeOf(a) !== typeParam) return false;
+    return true;
+  });
 
   const accessors: Accessors<Agency> = {
     code: (a) => a.code,
@@ -236,8 +254,8 @@ export default async function OrganizationPage({
   };
   const contactRows = sortRows(contacts, sort.column, sort.desc, accessors);
 
-  const isFiltered = keyword !== "";
-  const clearHref = buildListHref(BASE, params, { q: "" });
+  const isFiltered = keyword !== "" || companyParam !== ALL || typeParam !== ALL;
+  const clearHref = buildListHref(BASE, params, { q: "", company: "", type: "" });
   const missingContact = descendants.filter((a) => !a.email && !a.phone).length;
 
   return (
@@ -391,6 +409,26 @@ export default async function OrganizationPage({
                 placeholder="例：山田／ABCD0001／090"
                 width="w-72"
               />
+              {companyOptions.length > 1 ? (
+                <FilterSelect
+                  name="company"
+                  label="会社で絞る"
+                  value={companyParam}
+                  options={companyOptions}
+                  allLabel={`すべての会社（${descendants.length}）`}
+                  width="w-64"
+                />
+              ) : null}
+              {typeOptions.length > 1 ? (
+                <FilterSelect
+                  name="type"
+                  label="種別で絞る"
+                  value={typeParam}
+                  options={typeOptions}
+                  allLabel={`すべての種別（${descendants.length}）`}
+                  width="w-52"
+                />
+              ) : null}
               <FilterActions clearHref={clearHref} filtered={isFiltered} />
             </FilterBar>
 
@@ -408,7 +446,7 @@ export default async function OrganizationPage({
             {contactRows.length === 0 ? (
               <EmptyState
                 title="条件に合う配下がありません"
-                description="名前・代理店コード・メールアドレス・電話番号の一部で探せます。条件を外すと配下すべてが表示されます。"
+                description="名前・代理店コード・メールアドレス・電話番号の一部で探せます。会社と種別でも絞れます。条件を外すと配下すべてが表示されます。"
               />
             ) : (
               <Table>
@@ -588,54 +626,6 @@ export default async function OrganizationPage({
         )}
       </Card>
 
-      {/* 内訳 */}
-      <Card title="配下の内訳">
-        <Table>
-          <thead>
-            <tr>
-              <Th>区分</Th>
-              <Th align="right">直下</Th>
-              <Th align="right">配下すべて</Th>
-              <Th>枠のあつかい</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {kindRows.map((b) => (
-              <tr key={b.label}>
-                <Td>{b.label}</Td>
-                <Td numeric align="right">
-                  {b.direct}
-                </Td>
-                <Td numeric align="right">
-                  {b.all}
-                </Td>
-                <Td>
-                  <span className="text-xs text-ink-400">{b.slot}</span>
-                </Td>
-              </tr>
-            ))}
-            <tr>
-              <Td className="font-medium text-ink-50">合計</Td>
-              <Td numeric align="right" className="font-medium text-ink-50">
-                {directChildren.length}
-              </Td>
-              <Td numeric align="right" className="font-medium text-ink-50">
-                {descendants.length}
-              </Td>
-              <Td>
-                <span className="text-xs text-ink-400">—</span>
-              </Td>
-            </tr>
-          </tbody>
-        </Table>
-
-        <div className="border-t border-ink-800 px-5 py-3 text-xs leading-relaxed text-ink-400">
-          「直下」はあなたが直接登録した先、「配下すべて」はその先の階層も含めた数です。
-          {suspendedDirect > 0
-            ? `直下のうち ${suspendedDirect} 件は停止・解約のため、枠には数えていません。`
-            : ""}
-        </div>
-      </Card>
     </div>
   );
 }

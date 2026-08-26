@@ -39,7 +39,7 @@ import {
   type SortState,
 } from "@/lib/list-params";
 import { SortableTh , FilterBar, FilterSelect, FilterActions} from "@/components/SortableTh";
-import { rankLabel, companyKey} from "@/lib/labels";
+import { rankLabel, companyKey, companyNameOf } from "@/lib/labels";
 import { MonthSelect } from "./MonthSelect";
 
 const BASE = "/rewards";
@@ -242,10 +242,7 @@ export default async function RewardsPage({
        * 会社そのものの行や、所属が未設定のスタッフは自分の名前でまとめる。
        */
       companies = new Map(
-        [self, ...descendants].map((a) => [
-          a.code,
-          (a.codeKind === "02" ? a.companyName || a.parentName : a.name) || a.name,
-        ]),
+        [self, ...descendants].map((a) => [a.code, companyNameOf(a)]),
       );
       // 配下ごとの「1台あたりに払う額」。個別設定（組織図で変更）が最優先。
       payTo = new Map(

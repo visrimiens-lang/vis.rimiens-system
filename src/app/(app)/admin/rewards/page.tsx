@@ -78,8 +78,8 @@ const BASE = "/admin/rewards";
  * 報酬は「各階層が下位に支払う」形になっている
  * （2026-06-27 設計書_VIS統合設計 5.1 カスケード構造）。
  *   目トレ  → Rimiens（総販売代理店） 77,000円/台
- *   Rimiens → 2次代理店               62,700円/台
- *   2次     → 3次・取次               55,000／27,500円（統括の画面で扱う）
+ *   Rimiens → 代理店（2次代理店）      62,700円/台
+ *   代理店  → スタッフ                55,000／25,000円（代理店側の画面で扱う）
  * 上の段が受け取った額から、下の段へ渡していく。
  *
  * 報酬台帳には階層ぶんの行がすべて立つので、支払元で分けずに合計すると、
@@ -96,9 +96,9 @@ const PAYER_TABS = [
   },
   {
     key: "rim",
-    label: "Rimiens → 2次代理店",
+    label: "Rimiens → 代理店",
     ranks: ["2次代理店"],
-    note: "Rimiens がお支払いする分です。本部からは振り込みません（確認用）。",
+    note: "Rimiens が代理店へお支払いする分です。本部からは振り込みません（確認用）。",
     cycle: "翌月25日",
   },
 ] as const;
@@ -1172,7 +1172,7 @@ export default async function AdminRewardsPage({
       <Notice tone={payerKey === "hq" ? "info" : "warn"}>
         {payerTab.note}
         {payerKey === "hq"
-          ? "報酬は各階層が下位に支払う決まりです（目トレ → Rimiens → 2次代理店 → 3次・取次）。"
+          ? "報酬は各階層が下位に支払う決まりです（目トレ → Rimiens → 代理店 → スタッフ）。"
           : "この画面で支払済にすると、本部が振り込んだ記録として残ります。Rimiens の振込を代わりに記録する場合だけお使いください。"}
       </Notice>
 
@@ -1208,7 +1208,7 @@ export default async function AdminRewardsPage({
           hint={
             payerKey === "hq"
               ? "確定 − 支払済。本部がこれから振り込む額です"
-              : "確定 − 支払済。Rimiens が2次代理店へ振り込む額です"
+              : "確定 − 支払済。Rimiens が代理店へ振り込む額です"
           }
         />
       </div>

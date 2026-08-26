@@ -86,7 +86,12 @@ body {
     display: block !important;
   }
 
-  /* 画面でしか意味のないものは出さない */
+  /*
+   * 画面でしか意味のないものは出さない。
+   * スマホ用の上部バーとメニューには no-print を付けてある。
+   * 紙の幅（A4 で 186mm ≒ 703px）は lg の境目より狭いため、
+   * 画面では隠れているこの2つが、放っておくと紙に乗ってしまう。
+   */
   aside,
   nav,
   .no-print,
@@ -109,7 +114,8 @@ body {
     box-shadow: none !important;
   }
 
-  main {
+  main,
+  main > div {
     padding: 0 !important;
     margin: 0 !important;
     max-width: none !important;
@@ -261,9 +267,11 @@ body {
   width: 55%;
 }
 
+.notice-foot {
+  margin-top: 4mm;
+}
 .notice-sum {
   margin-left: auto;
-  margin-top: 4mm;
   border-collapse: collapse;
   font-size: 9pt;
   width: 70mm;
@@ -298,10 +306,63 @@ body {
     padding: 0;
     max-width: none;
   }
+
   /* 通知書の中の網掛けは紙でも残す（様式の一部のため） */
   .notice-table tbody tr.shade td {
     background: #e8e8e8 !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
+  }
+
+  /*
+   * 上の共通ルール（th・td を 10pt・4px・下線あり）は一覧表向けのもの。
+   * 通知書は決まった様式なので、自分の寸法に戻す。
+   */
+  .notice-table thead th {
+    font-size: 9.5pt !important;
+    padding: 1.5mm 2mm !important;
+    border: 0 !important;
+    border-bottom: 1px solid #333 !important;
+  }
+  .notice-table tbody td {
+    font-size: 9.5pt !important;
+    padding: 1.3mm 2mm !important;
+    border: 0 !important;
+  }
+  .notice-sum th,
+  .notice-sum td {
+    font-size: 9pt !important;
+    padding: 1mm 2mm !important;
+    border: 0 !important;
+    border-bottom: 1px solid #ccc !important;
+  }
+  .notice-sum tr.grand th,
+  .notice-sum tr.grand td {
+    border-bottom: 2px solid #333 !important;
+  }
+
+  /*
+   * 改ページの決まり
+   *   ・宛先から「御支払金額」までは、ばらさず1枚目に置く
+   *   ・下の集計（小計・消費税・合計）は途中で切らない。
+   *     合計だけが次のページに1行だけ残るのを防ぐ
+   *   ・品目が多くて2枚目に続くときは、表の見出しをもう一度出す
+   */
+  .notice-keep,
+  .notice-foot {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  /* 集計だけが最後のページに取り残されないよう、表の終わりから離さない */
+  .notice-foot {
+    break-before: avoid;
+    page-break-before: avoid;
+  }
+  .notice-table thead {
+    display: table-header-group;
+  }
+  .notice-table tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 }

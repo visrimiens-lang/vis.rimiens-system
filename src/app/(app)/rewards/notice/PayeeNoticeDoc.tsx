@@ -27,8 +27,11 @@ export type NoticeLine = {
 export type NoticeDoc = {
   /** 支払う相手（宛先） */
   to: { name: string; invoiceNo: string; bank: string; branch: string; type: string; no: string; holder: string };
-  /** 支払う側（発行元＝ログインしている代理店） */
-  from: { name: string; zip: string; address: string; tel: string; invoiceNo: string };
+  /**
+   * 支払う側（発行元＝ログインしている代理店）。
+   * 登録番号は宛先の側に載せるので、ここには持たない。
+   */
+  from: { name: string; zip: string; address: string; tel: string };
   /** 件名。例「2026年8月度 販売委託手数料」 */
   subject: string;
   issuedOn: string;
@@ -51,46 +54,48 @@ export function PayeeNoticeDoc({ doc }: { doc: NoticeDoc }) {
     <div className="notice-doc">
       <h1 className="notice-title">御 支 払 通 知 書</h1>
 
-      <div className="notice-head">
-        <div className="notice-to">
-          <div className="notice-to-name">{doc.to.name}　御中</div>
-          <div className="notice-small">登録番号　{doc.to.invoiceNo || "—"}</div>
-          <div className="notice-block">
-            <div className="notice-small">振込口座</div>
-            <div className="notice-small">
-              {doc.to.bank || "—"}　{doc.to.branch ? `${doc.to.branch}支店` : ""}
+      {/* 宛先から御支払金額まではひとかたまり。紙が2枚になっても、ここは割らない */}
+      <div className="notice-keep">
+        <div className="notice-head">
+          <div className="notice-to">
+            <div className="notice-to-name">{doc.to.name}　御中</div>
+            <div className="notice-small">登録番号　{doc.to.invoiceNo || "—"}</div>
+            <div className="notice-block">
+              <div className="notice-small">振込口座</div>
+              <div className="notice-small">
+                {doc.to.bank || "—"}　{doc.to.branch ? `${doc.to.branch}支店` : ""}
+              </div>
+              <div className="notice-small">
+                {doc.to.type || ""}　{doc.to.no || "—"}
+              </div>
+              <div className="notice-small">{doc.to.holder || ""}</div>
             </div>
-            <div className="notice-small">
-              {doc.to.type || ""}　{doc.to.no || "—"}
-            </div>
-            <div className="notice-small">{doc.to.holder || ""}</div>
+          </div>
+
+          <div className="notice-from">
+            <div className="notice-from-name">{doc.from.name}</div>
+            {doc.from.zip ? <div className="notice-small">〒{doc.from.zip}</div> : null}
+            {doc.from.address ? <div className="notice-small">{doc.from.address}</div> : null}
+            {doc.from.tel ? <div className="notice-small">TEL：{doc.from.tel}</div> : null}
           </div>
         </div>
 
-        <div className="notice-from">
-          <div className="notice-from-name">{doc.from.name}</div>
-          {doc.from.zip ? <div className="notice-small">〒{doc.from.zip}</div> : null}
-          {doc.from.address ? <div className="notice-small">{doc.from.address}</div> : null}
-          {doc.from.tel ? <div className="notice-small">TEL：{doc.from.tel}</div> : null}
-          <div className="notice-small">登録番号：{doc.from.invoiceNo || "—"}</div>
+        <div className="notice-dates">
+          <div>発行日：　{jpDate(doc.issuedOn) || doc.issuedOn}</div>
+          <div>振込日：　—</div>
         </div>
-      </div>
 
-      <div className="notice-dates">
-        <div>発行日：　{jpDate(doc.issuedOn) || doc.issuedOn}</div>
-        <div>振込日：　—</div>
-      </div>
-
-      <div className="notice-subject">
-        <div>
-          <span className="notice-subject-label">件名：</span>
-          {doc.subject}
+        <div className="notice-subject">
+          <div>
+            <span className="notice-subject-label">件名：</span>
+            {doc.subject}
+          </div>
         </div>
-      </div>
 
-      <div className="notice-total-line">
-        <span className="notice-total-label">御支払金額</span>
-        <span className="notice-total-value">¥{yen(total)}</span>
+        <div className="notice-total-line">
+          <span className="notice-total-label">御支払金額</span>
+          <span className="notice-total-value">¥{yen(total)}</span>
+        </div>
       </div>
 
       <table className="notice-table">
@@ -122,42 +127,50 @@ export function PayeeNoticeDoc({ doc }: { doc: NoticeDoc }) {
         </tbody>
       </table>
 
-      <table className="notice-sum">
-        <tbody>
-          <tr>
-            <th>小計</th>
-            <td className="c-num">{yen(subtotal)} 円</td>
-          </tr>
-          <tr>
-            <th>消費税</th>
-            <td className="c-num">{yen(tax)} 円</td>
-          </tr>
-          <tr className="grand">
-            <th>合計</th>
-            <td className="c-num">{yen(total)} 円</td>
-          </tr>
-          <tr>
-            <th>内訳</th>
-            <td className="c-num">
-              <span className="notice-inner">10%対象</span>
-              {yen(subtotal)} 円
-            </td>
-          </tr>
-          <tr>
-            <th />
-            <td className="c-num">
-              <span className="notice-inner">消費税</span>
-              {yen(tax)} 円
-            </td>
-          </tr>
-          <tr>
-            <th />
-            <td className="c-num">
-              <span className="notice-inner">8%（軽減税率）対象</span>0 円
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div className="notice-foot">
+        <table className="notice-sum">
+          <tbody>
+            <tr>
+              <th>小計</th>
+              <td className="c-num">{yen(subtotal)} 円</td>
+            </tr>
+            <tr>
+              <th>消費税</th>
+              <td className="c-num">{yen(tax)} 円</td>
+            </tr>
+            <tr className="grand">
+              <th>合計</th>
+              <td className="c-num">{yen(total)} 円</td>
+            </tr>
+            <tr>
+              <th>内訳</th>
+              <td className="c-num">
+                <span className="notice-inner">10%対象</span>
+                {yen(subtotal)} 円
+              </td>
+            </tr>
+            <tr>
+              <th />
+              <td className="c-num">
+                <span className="notice-inner">消費税</span>
+                {yen(tax)} 円
+              </td>
+            </tr>
+            <tr>
+              <th />
+              <td className="c-num">
+                <span className="notice-inner">8%（軽減税率）対象</span>0 円
+              </td>
+            </tr>
+            <tr>
+              <th />
+              <td className="c-num">
+                <span className="notice-inner">消費税</span>0 円
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

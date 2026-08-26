@@ -199,7 +199,6 @@ export default async function PayeeNoticePage({
       zip: self.zip ?? "",
       address: self.address ?? "",
       tel: self.phone ?? "",
-      invoiceNo: self.invoiceNo ?? "",
     },
     subject: `${jpMonthLabel(month)}度 販売委託手数料`,
     issuedOn: new Date().toISOString().slice(0, 10),

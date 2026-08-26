@@ -179,7 +179,11 @@ export function Sidebar({
       </aside>
 
       {/* ── スマホ: 上部バー ── */}
-      <header className="sticky top-0 z-40 flex items-center justify-between gap-3 border-b border-ink-800 bg-ink-950/90 px-4 py-2.5 backdrop-blur lg:hidden">
+      {/*
+        no-print が要る理由：紙の幅は lg の境目より狭いので、
+        lg:hidden だけだと印刷のときにこのバーが出てきてしまう。
+      */}
+      <header className="no-print sticky top-0 z-40 flex items-center justify-between gap-3 border-b border-ink-800 bg-ink-950/90 px-4 py-2.5 backdrop-blur lg:hidden">
         <Brand />
         <button
           type="button"
@@ -194,7 +198,7 @@ export function Sidebar({
 
       {/* ── スマホ: ドロワー ── */}
       <div
-        className={cn("fixed inset-0 z-50 lg:hidden", open ? "" : "pointer-events-none")}
+        className={cn("no-print fixed inset-0 z-50 lg:hidden", open ? "" : "pointer-events-none")}
         aria-hidden={!open}
       >
         {/* 暗い背景。押すと閉じる */}

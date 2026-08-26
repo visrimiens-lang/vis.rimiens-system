@@ -37,6 +37,14 @@ function toAgency(r: Row): Agency {
     area: s_(r, "area_class") || s_(r, "area"),
     email: s_(r, "email"),
     phone: s_(r, "phone"),
+    zip: s_(r, "zip"),
+    address: s_(r, "address"),
+    invoiceNo: s_(r, "invoice_no"),
+    bankName: s_(r, "bank_name"),
+    bankBranch: s_(r, "bank_branch"),
+    accountType: s_(r, "account_type"),
+    accountNo: s_(r, "account_no"),
+    accountHolder: s_(r, "account_holder"),
     status: s_(r, "status"),
     staffLimit:
       r["limit_staff"] === null || r["limit_staff"] === undefined

@@ -43,6 +43,15 @@ export type Agency = {
   area: string;
   email: string;
   phone: string;
+  /** 支払通知書に出す住所・振込先・登録番号（2026-08-26 追加） */
+  zip: string;
+  address: string;
+  invoiceNo: string;
+  bankName: string;
+  bankBranch: string;
+  accountType: string;
+  accountNo: string;
+  accountHolder: string;
   status: string;
   /**
    * 直下に登録できるスタッフの上限（2026-08-22〜）。

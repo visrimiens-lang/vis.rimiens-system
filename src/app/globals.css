@@ -145,3 +145,163 @@ body {
     margin: 12mm;
   }
 }
+
+/* ───────────────────────────────────────────────
+   御支払通知書（/rewards/notice）
+   統括代理店が配下へ渡す書面。画面でも紙でも同じ見た目にする。
+   紙に載せる書類なので、ここだけは常に白地・黒字で組む。
+   ─────────────────────────────────────────────── */
+.notice-doc {
+  background: #fff;
+  color: #000;
+  font-family: "Hiragino Sans", "Yu Gothic", "Noto Sans JP", sans-serif;
+  font-size: 10.5pt;
+  line-height: 1.6;
+  padding: 12mm 10mm;
+  max-width: 210mm;
+  margin: 0 auto;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
+}
+
+.notice-title {
+  text-align: center;
+  font-size: 17pt;
+  font-weight: 700;
+  letter-spacing: 0.5em;
+  text-indent: 0.5em;
+  margin: 0 0 10mm;
+}
+
+.notice-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10mm;
+  margin-bottom: 8mm;
+}
+.notice-to-name {
+  font-size: 11pt;
+  font-weight: 700;
+}
+.notice-from {
+  text-align: right;
+}
+.notice-from-name {
+  font-size: 11pt;
+  font-weight: 700;
+}
+.notice-small {
+  font-size: 8.5pt;
+  line-height: 1.5;
+}
+.notice-block {
+  margin-top: 4mm;
+}
+
+.notice-dates {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9.5pt;
+  margin-bottom: 4mm;
+}
+
+.notice-subject {
+  font-size: 11pt;
+  font-weight: 700;
+  margin-bottom: 2mm;
+  padding-left: 6mm;
+}
+.notice-subject-label {
+  font-weight: 700;
+  margin-right: 1mm;
+}
+
+.notice-total-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8mm;
+  padding: 0 0 3mm 12mm;
+  border-bottom: 1px solid #999;
+  margin-bottom: 4mm;
+}
+.notice-total-label {
+  font-size: 11pt;
+  font-weight: 700;
+}
+.notice-total-value {
+  font-size: 16pt;
+  font-weight: 700;
+  margin-left: auto;
+  margin-right: 10mm;
+}
+
+.notice-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 9.5pt;
+}
+.notice-table thead th {
+  border-bottom: 1px solid #333;
+  padding: 1.5mm 2mm;
+  font-weight: 700;
+  text-align: left;
+}
+.notice-table thead th.c-num,
+.notice-table td.c-num {
+  text-align: right;
+}
+.notice-table tbody td {
+  padding: 1.5mm 2mm;
+  border: none;
+}
+.notice-table tbody tr.shade td {
+  background: #e8e8e8;
+}
+.notice-table .c-item {
+  width: 55%;
+}
+
+.notice-sum {
+  margin-left: auto;
+  margin-top: 4mm;
+  border-collapse: collapse;
+  font-size: 9pt;
+  width: 70mm;
+}
+.notice-sum th {
+  text-align: left;
+  font-weight: 400;
+  padding: 1mm 2mm;
+  border-bottom: 1px solid #ccc;
+  white-space: nowrap;
+}
+.notice-sum td {
+  text-align: right;
+  padding: 1mm 2mm;
+  border-bottom: 1px solid #ccc;
+  white-space: nowrap;
+}
+.notice-sum tr.grand th,
+.notice-sum tr.grand td {
+  font-weight: 700;
+  border-bottom: 2px solid #333;
+}
+.notice-inner {
+  font-size: 7.5pt;
+  color: #555;
+  margin-right: 3mm;
+}
+
+@media print {
+  .notice-doc {
+    box-shadow: none;
+    padding: 0;
+    max-width: none;
+  }
+  /* 通知書の中の網掛けは紙でも残す（様式の一部のため） */
+  .notice-table tbody tr.shade td {
+    background: #e8e8e8 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

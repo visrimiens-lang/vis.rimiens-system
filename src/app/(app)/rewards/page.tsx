@@ -1,4 +1,6 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
+import { FileText } from "lucide-react";
 import { currentViewer } from "@/lib/auth";
 import { findAgencyByCode, listDescendants } from "@/lib/agencies";
 import { effectivePayUnit } from "@/lib/pay-defaults";
@@ -447,6 +449,21 @@ export default async function RewardsPage({
         }
         actions={
           <div className="flex flex-wrap items-center gap-3">
+            {/*
+              支払通知書は「誰に払うか」が決まらないと作れないので、
+              会社または担当で絞り込んでいるときだけ出す。
+            */}
+            {isFiltered ? (
+              <Link
+                href={`/rewards/notice?month=${month}${
+                  companyParam !== ALL ? `&company=${encodeURIComponent(companyParam)}` : ""
+                }${ownerParam !== ALL ? `&owner=${encodeURIComponent(ownerParam)}` : ""}`}
+                className="inline-flex items-center gap-2 rounded-lg border border-gold-500/50 px-3 py-1.5 text-xs font-medium text-gold-300 transition hover:bg-gold-500/10"
+              >
+                <FileText className="h-3.5 w-3.5" />
+                支払通知書を作る
+              </Link>
+            ) : null}
             <PrintButton />
             <MonthSelect months={monthOptions} value={month} />
           </div>

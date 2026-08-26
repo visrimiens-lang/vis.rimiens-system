@@ -37,3 +37,27 @@ create index if not exists orders_delivered_on_idx
 -- 確認用（実行後に流すと、移送できたかが分かります）
 -- select id, customer_name, ship_status, shipped_on, delivered_on
 -- from public.orders order by id desc limit 20;
+
+-- ── 顧客台帳にも写す ──────────────────────────────────
+-- 本部の顧客一覧とお客様マイページは顧客台帳（customers）を見ている。
+-- 受注側にだけ配達完了日を入れると、同じお客様が
+-- 代理店の画面では「配達完了」、マイページでは「未出荷」に見えてしまう。
+--
+-- 1人が複数買っている場合は、いちばん新しい受注の状態を写す。
+update public.customers c
+set delivered_on = o.delivered_on,
+    ship_status  = case o.ship_status
+                     when '出荷待ち' then '未出荷'
+                     when 'キャンセル' then c.ship_status
+                     else o.ship_status
+                   end
+from (
+  select distinct on (customer_id)
+         customer_id, delivered_on, ship_status
+  from public.orders
+  where customer_id is not null
+  order by customer_id, coalesce(delivered_on, shipped_on, ordered_on) desc, id desc
+) o
+where c.id = o.customer_id
+  and (c.delivered_on is distinct from o.delivered_on
+       or c.ship_status is distinct from o.ship_status);

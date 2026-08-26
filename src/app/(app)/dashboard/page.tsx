@@ -180,8 +180,15 @@ async function load(code: string, month: string): Promise<Loaded | null> {
     recent: latest.map((o) => ({
       ...o,
       reviewResult: reviewById.get(o.recordId) ?? "",
+      /*
+       * 配達が終わった日。
+       * 2026-08-26 から受注（orders.delivered_on）が本体で、
+       * 顧客台帳はそれ以前の分の受け皿。顧客一覧と同じ順で見る。
+       */
       deliveredOn:
-        deliveredByCustomer.get(customerIdByOrder.get(o.recordId) ?? "") ?? "",
+        o.deliveredAt ||
+        deliveredByCustomer.get(customerIdByOrder.get(o.recordId) ?? "") ||
+        "",
     })),
   };
 }

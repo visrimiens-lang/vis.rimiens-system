@@ -388,7 +388,7 @@ export default async function OrganizationPage({
                 name="q"
                 label="名前・コード・連絡先"
                 value={keyword}
-                placeholder="例：山田／RIM0003／090"
+                placeholder="例：山田／ABCD0001／090"
                 width="w-72"
               />
               <FilterActions clearHref={clearHref} filtered={isFiltered} />

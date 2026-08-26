@@ -183,7 +183,7 @@ function DetailFields({
             list={listId}
             defaultValue={machine?.holderCode ?? ""}
             disabled={disabled}
-            placeholder="例）RIM0003"
+            placeholder="例）ABCD0001"
             className={`${inputCls} tabnum`}
           />
           <datalist id={listId}>

@@ -73,7 +73,7 @@ export function StaffProfileCell({
         name="companyName"
         defaultValue={companyName}
         maxLength={100}
-        placeholder="例：株式会社樹（個人の方は空欄）"
+        placeholder="例：○○商事株式会社（個人の方は空欄）"
         className="w-full rounded-lg border border-ink-700 bg-ink-950 px-2 py-1.5 text-sm text-ink-100 placeholder:text-ink-500 focus:border-ink-600"
       />
       <label className="block text-xs text-ink-400">種別</label>

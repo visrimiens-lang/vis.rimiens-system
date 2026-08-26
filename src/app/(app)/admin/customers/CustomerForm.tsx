@@ -444,7 +444,7 @@ export function CustomerRow({
                   maxLength={20}
                   defaultValue={customer.staffCode}
                   disabled={saving}
-                  placeholder="例：RIM0003"
+                  placeholder="例：ABCD0001"
                   className={`${inputCls} tabnum`}
                 />
                 <span className={hintCls}>

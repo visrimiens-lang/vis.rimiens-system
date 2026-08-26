@@ -374,7 +374,7 @@ function ReviewSection({
               maxLength={20}
               value={referrer}
               onChange={(e) => setReferrer(e.target.value)}
-              placeholder="例：RIM0003"
+              placeholder="例：ABCD0001"
               disabled={pending}
               className={`${inputCls} tabnum`}
             />

@@ -175,7 +175,7 @@ export function Progress({
         <div
           className={cn(
             "h-full rounded-full transition-all",
-            done ? "bg-good-500" : "bg-gold-500",
+            done ? "bg-good-500" : "bg-brand",
           )}
           style={{ width: `${state.percent}%` }}
         />

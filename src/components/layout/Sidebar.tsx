@@ -26,6 +26,7 @@ import {
   X,
 } from "lucide-react";
 import { logoutAction } from "@/actions/auth-actions";
+import { ThemeToggle } from "./ThemeToggle";
 import { cn } from "@/components/ui";
 
 /**
@@ -155,15 +156,18 @@ export function Sidebar({
           <div className="tabnum truncate text-xs text-ink-500">{viewerCode}</div>
         ) : null}
       </div>
-      <form action={logoutAction}>
-        <button
-          type="submit"
-          className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-ink-400 transition hover:bg-ink-850 hover:text-ink-100"
-        >
-          <LogOut className="h-4 w-4" />
-          ログアウト
-        </button>
-      </form>
+      <div className="flex items-center justify-between gap-2">
+        <form action={logoutAction}>
+          <button
+            type="submit"
+            className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-ink-400 transition hover:bg-ink-850 hover:text-ink-100"
+          >
+            <LogOut className="h-4 w-4" />
+            ログアウト
+          </button>
+        </form>
+        <ThemeToggle className="no-print shrink-0" />
+      </div>
     </div>
   );
 

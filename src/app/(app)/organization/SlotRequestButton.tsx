@@ -21,7 +21,7 @@ export function SlotRequestButton({ alreadyRequested }: { alreadyRequested: bool
         <button
           type="submit"
           disabled={disabled}
-          className="w-full rounded-lg bg-gold-500 px-4 py-2.5 text-sm font-semibold text-ink-950 transition hover:bg-gold-400 disabled:cursor-not-allowed disabled:bg-ink-700 disabled:text-ink-300"
+          className="w-full rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-on-gold transition hover:bg-brand-strong disabled:cursor-not-allowed disabled:bg-ink-700 disabled:text-ink-300"
         >
           {pending
             ? "送信中…"

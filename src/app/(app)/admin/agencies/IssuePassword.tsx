@@ -59,7 +59,7 @@ export function IssuePassword({
         <button
           type="submit"
           disabled={pending || !selected}
-          className="inline-flex items-center gap-2 rounded-lg bg-gold-500 px-4 py-2.5 text-sm font-semibold text-ink-950 transition hover:bg-gold-400 disabled:opacity-50"
+          className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-on-gold transition hover:bg-brand-strong disabled:opacity-50"
         >
           <KeyRound className="h-4 w-4" />
           {pending ? "発行中…" : "パスワードを発行"}

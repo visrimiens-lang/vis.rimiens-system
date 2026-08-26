@@ -11,7 +11,7 @@ import { Notice } from "@/components/ui";
 const initial: AdminSlotActionState = {};
 
 const primaryBtn =
-  "rounded-lg bg-gold-500 px-3 py-2 text-sm font-semibold text-ink-950 transition hover:bg-gold-400 disabled:cursor-not-allowed disabled:bg-ink-700 disabled:text-ink-300";
+  "rounded-lg bg-brand px-3 py-2 text-sm font-semibold text-on-gold transition hover:bg-brand-strong disabled:cursor-not-allowed disabled:bg-ink-700 disabled:text-ink-300";
 const quietBtn =
   "rounded-lg border border-ink-700 px-3 py-2 text-sm font-medium text-ink-200 transition hover:border-ink-600 hover:text-ink-50 disabled:cursor-not-allowed disabled:text-ink-500";
 const dangerBtn =

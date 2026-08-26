@@ -44,7 +44,7 @@ export function SlotBreakdown({ data }: { data: Breakdown }) {
             <div
               className={cn(
                 "h-full rounded-full transition-all",
-                data.isFull ? "bg-warn-500" : "bg-gold-500",
+                data.isFull ? "bg-warn-500" : "bg-brand",
               )}
               style={{ width: `${pct}%` }}
             />

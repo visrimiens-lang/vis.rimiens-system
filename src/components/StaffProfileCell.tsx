@@ -94,7 +94,7 @@ export function StaffProfileCell({
         <button
           type="submit"
           disabled={pending}
-          className="rounded-lg bg-gold-500 px-3 py-1.5 text-xs font-semibold text-ink-950 transition hover:bg-gold-400 disabled:opacity-50"
+          className="rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-on-gold transition hover:bg-brand-strong disabled:opacity-50"
         >
           {pending ? "保存中…" : "保存"}
         </button>

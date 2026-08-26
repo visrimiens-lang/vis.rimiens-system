@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useActionState } from "react";
 import { loginAction, type FormState } from "@/actions/auth-actions";
+import { ThemeToggle } from "@/components/layout/ThemeToggle";
 
 const initial: FormState = {};
 
@@ -10,7 +11,9 @@ export default function LoginPage() {
   const [state, doLogin, pending] = useActionState(loginAction, initial);
 
   return (
-    <main className="flex min-h-screen items-center justify-center px-6 py-12">
+    <main className="relative flex min-h-screen items-center justify-center px-6 py-12">
+      {/* ログインの画面でも配色を選べるようにしておく（明るい部屋で使う方のため） */}
+      <ThemeToggle className="absolute right-4 top-4" />
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
           <div className="text-[11px] font-medium uppercase tracking-[0.28em] text-gold-500">
@@ -53,7 +56,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={pending}
-              className="w-full rounded-lg bg-gold-500 px-4 py-2.5 text-sm font-semibold text-ink-950 transition hover:bg-gold-400 disabled:opacity-60"
+              className="w-full rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-on-gold transition hover:bg-brand-strong disabled:opacity-60"
             >
               {pending ? "確認中…" : "ログイン"}
             </button>

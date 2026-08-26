@@ -5,15 +5,23 @@
   ブランド: 黒 × ゴールド（QR2 決済ページと同系統）
 */
 @theme {
+  /*
+    ink は「紙と文字」の目盛り。
+    950 がいちばん下地寄り、50 がいちばん文字寄り。
+    暗い配色では 950 が黒・50 が生成り色、明るい配色ではその役目が入れ替わる。
+    どの画面も番号の意味（下地なのか文字なのか）で選ぶこと。
+  */
   --color-ink-950: #0a0a0b;
   --color-ink-900: #101012;
   --color-ink-850: #16161a;
   --color-ink-800: #1d1d22;
   --color-ink-700: #2a2a31;
   --color-ink-600: #3a3a44;
+  --color-ink-500: #5f5f6b;
   --color-ink-400: #6b6b78;
   --color-ink-300: #9a9aa6;
   --color-ink-200: #c7c7d0;
+  --color-ink-100: #e0ddd6;
   --color-ink-50: #efece4;
 
   --color-gold-500: #c9a227;
@@ -28,6 +36,19 @@
   --color-bad-500: #c2503f;
   --color-bad-100: #f2d9d5;
 
+  /*
+    金色のボタン。下地に使う金と、文字に使う金は分けている。
+    ひとつの色で兼ねると、明るい配色でどちらかが必ず読めなくなる
+    （明るい下地に載る文字は濃く、濃い下地に載る文字は明るくしないといけないため）。
+      brand        … ボタンの下地
+      brand-strong … 押したとき。どちらの配色でも少し明るくなる
+      on-gold      … その上に載る文字。どちらの配色でも黒のまま
+    文字としての金色は gold-300／400／500 のほうを使う。
+  */
+  --color-brand: #c9a227;
+  --color-brand-strong: #d8b64a;
+  --color-on-gold: #17140a;
+
   --font-sans: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP",
     system-ui, -apple-system, "Segoe UI", sans-serif;
 }
@@ -38,6 +59,58 @@ body {
   color: var(--color-ink-50);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+}
+
+/* ───────────────────────────────────────────────
+   明るい配色
+   画面が暗いと見にくい場面（明るい部屋・プロジェクタ・印刷前の確認）
+   のために用意した。切り替えは左下の日／月のボタン。
+
+   やっていることは色の入れ替えだけ。
+   ink の番号が持つ役目（950＝下地、50＝文字）はそのままに、
+   値を明るい側に置き換えている。だから画面ごとに手を入れる必要がない。
+   ─────────────────────────────────────────────── */
+:root[data-theme="light"] {
+  /* 下地 */
+  --color-ink-950: #f6f4ee;
+  --color-ink-900: #ffffff;
+  --color-ink-850: #efece3;
+  /* 罫線 */
+  --color-ink-800: #e2ddd0;
+  --color-ink-700: #d2ccb9;
+  --color-ink-600: #bcb5a0;
+  /* 文字（下にいくほど濃い） */
+  --color-ink-500: #8b8474;
+  --color-ink-400: #6f6857;
+  --color-ink-300: #55503f;
+  --color-ink-200: #3b372c;
+  --color-ink-100: #262319;
+  --color-ink-50: #14120c;
+
+  /* ボタンの下地。押すと明るくなる（暗い配色と同じ向き） */
+  --color-brand: #a8811a;
+  --color-brand-strong: #bd9426;
+
+  /* 文字としての金色。白地では明るすぎるので、はっきり濃くする */
+  --color-gold-500: #8a6a10;
+  --color-gold-400: #7f6109;
+  --color-gold-300: #6b510a;
+  --color-gold-100: #52400a;
+
+  /* 状態の色。-500 は下地と罫線、-100 は文字。文字側を濃くする */
+  --color-good-500: #2f8a58;
+  --color-good-100: #1a5e3a;
+  --color-warn-500: #9a6408;
+  --color-warn-100: #7c5205;
+  --color-bad-500: #b6402f;
+  --color-bad-100: #8d2b1c;
+}
+
+/* 切り替えの瞬間だけ、色をなめらかに移す */
+:root[data-theme] body {
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
 }
 
 /* 数字を桁で揃える（金額・件数の一覧で効く） */

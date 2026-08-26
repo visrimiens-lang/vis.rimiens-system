@@ -103,7 +103,7 @@ export default function ForgotPasswordPage() {
                 <button
                   type="submit"
                   disabled={pending}
-                  className="w-full rounded-lg bg-gold-500 px-4 py-2.5 text-sm font-semibold text-ink-950 transition hover:bg-gold-400 disabled:opacity-60"
+                  className="w-full rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-on-gold transition hover:bg-brand-strong disabled:opacity-60"
                 >
                   {pending ? "送信中…" : "再発行を申し込む"}
                 </button>

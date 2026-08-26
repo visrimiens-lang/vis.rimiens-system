@@ -308,7 +308,7 @@ export default async function CustomersPage({
   const header = (
     <PageHeader
       title="顧客一覧"
-      description="自分と配下が獲得した受注です。申込から商品のお届けまで、いまどこまで進んでいるかを一覧で確認できます。お客様のお名前・電話番号で探せます。"
+      description="自分とスタッフが獲得した受注です。申込から商品のお届けまで、いまどこまで進んでいるかを一覧で確認できます。お客様のお名前・電話番号で探せます。"
       actions={<AutoRefresh seconds={REFRESH_SECONDS} label="顧客一覧" />}
     />
   );
@@ -332,7 +332,7 @@ export default async function CustomersPage({
   /*
    * 担当コード → その人が属している会社のコード。
    * 会社を選んで絞ったときに、その会社のスタッフぶんも拾えるようにする。
-   * さかのぼるのは1段だけ（会社 → その配下）。
+   * さかのぼるのは1段だけ（会社 → その下）。
    */
   const companyOfCode = new Map<string, string>();
   for (const m of members) {
@@ -351,7 +351,7 @@ export default async function CustomersPage({
     }
   }
 
-  // 選択肢は「配下の全コード」＋「受注に出てきたコード」。0件の人も選べるようにする。
+  // 選択肢は「スタッフの全コード」＋「受注に出てきたコード」。0件の人も選べるようにする。
   const optionCodes = new Set<string>(members.map((m) => m.code).filter(Boolean));
   for (const code of countByCode.keys()) if (code) optionCodes.add(code);
 
@@ -799,7 +799,7 @@ export default async function CustomersPage({
         「担当スタッフ」は受注に記録された、実際に売った方です。記録が無い受注は、担当コードの持ち主が
         取次パートナー・スタッフのときだけその方を出し、会社としての受注は「—」と表示します。
         コードの下の名前は代理店一覧から引いています。名前が出ない場合は、代理店一覧にそのコードが登録されていないか、
-        配下から外れています。
+        スタッフから外れています。
       </Notice>
     </div>
   );

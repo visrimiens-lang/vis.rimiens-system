@@ -132,7 +132,7 @@ export default async function DemoMachinesPage({
   const header = (
     <PageHeader
       title="デモ機"
-      description="自分と配下が保有しているデモ機の一覧です。製造番号・状態・保有代理店・貸出先を確認できます。表の見出しを押すと並び替わります。"
+      description="自分とスタッフが保有しているデモ機の一覧です。製造番号・状態・保有代理店・貸出先を確認できます。表の見出しを押すと並び替わります。"
     />
   );
 
@@ -226,7 +226,7 @@ export default async function DemoMachinesPage({
           label="貸出中"
           value={String(summary.onLoan)}
           unit="台"
-          hint="お客様や配下にお貸ししている台数"
+          hint="お客様やスタッフにお貸ししている台数"
         />
         <StatTile
           label="故障・修理"

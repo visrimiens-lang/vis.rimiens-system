@@ -94,9 +94,9 @@ type OwnerGroup = {
   units: number;
   reward: number | null;
   /**
-   * この担当（配下）に払う1台あたりの額。
-   * 個別に決めた額（組織図で設定）があればそれ、無ければランクの既定。
-   * 自分の売上の行と、配下として登録されていないコードは null（払う相手ではない）。
+   * この担当（スタッフ）に払う1台あたりの額。
+   * 個別に決めた額（スタッフ一覧で設定）があればそれ、無ければランクの既定。
+   * 自分の売上の行と、スタッフとして登録されていないコードは null（払う相手ではない）。
    */
   payUnit: number | null;
   /** payUnit × 台数。支払通知にそのまま使える額。 */
@@ -125,7 +125,7 @@ function groupByOwner(
     .map(([code, list]) => {
       const units = sumUnits(list);
       /*
-       * 自分の売上には払わない。配下として登録されているコードにだけ支払額を出す。
+       * 自分の売上には払わない。スタッフとして登録されているコードにだけ支払額を出す。
        *
        * 担当がスタッフのときは、本人に個別の額が入っていればそれを使い、
        * 入っていなければ所属している会社の額を使う（payeeOf がその相手を返す）。
@@ -244,7 +244,7 @@ export default async function RewardsPage({
       companies = new Map(
         [self, ...descendants].map((a) => [a.code, companyNameOf(a)]),
       );
-      // 配下ごとの「1台あたりに払う額」。個別設定（組織図で変更）が最優先。
+      // スタッフごとの「1台あたりに払う額」。個別設定（スタッフ一覧で変更）が最優先。
       payTo = new Map(
         descendants.map((d) => [
           d.code,
@@ -749,7 +749,7 @@ export default async function RewardsPage({
                 <Th>名前</Th>
                 <Th align="right">台数</Th>
                 {showReward ? <Th align="right">報酬額</Th> : null}
-                {/* 配下にいくら払うか。単価は組織図で変更できる（個別 or ランクの既定） */}
+                {/* スタッフにいくら払うか。単価はスタッフ一覧で変更できる（個別 or ランクの既定） */}
                 {showReward ? <Th align="right">支払単価（税抜）</Th> : null}
                 {showReward ? <Th align="right">お支払額（税抜）</Th> : null}
               </tr>

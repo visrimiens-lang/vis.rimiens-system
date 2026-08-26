@@ -232,7 +232,7 @@ export default async function PayeeNoticePage({
       <div className="space-y-4">
         {backLink}
         <Notice tone="bad">
-          「{owner || company}」にあたる配下が見つかりませんでした。
+          「{owner || company}」にあたるスタッフが見つかりませんでした。
           売上・報酬の画面から選び直してください。
         </Notice>
       </div>

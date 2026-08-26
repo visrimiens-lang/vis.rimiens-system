@@ -94,7 +94,7 @@ export function CustomerFilters({
             </optgroup>
           ) : null}
           {others.length ? (
-            <optgroup label="配下">
+            <optgroup label="スタッフ">
               {others.map((o) => (
                 <option key={o.code} value={o.code}>
                   {label(o)}

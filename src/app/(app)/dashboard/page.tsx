@@ -85,7 +85,7 @@ type Loaded = {
   breakdown: SlotBreakdownData;
   /** 枠の単位。エリア枠は「社」、スタッフ枠は「名」。 */
   slotUnit: string;
-  /** 枠のカードを出すか（配下を持てない相手には出さない）。 */
+  /** 枠のカードを出すか（下に人を持てない相手には出さない）。 */
   showSlots: boolean;
   recent: RecentOrder[];
 };
@@ -99,7 +99,7 @@ async function load(code: string, month: string): Promise<Loaded | null> {
     getSlotSummary(self),
     listDirectChildren(code),
   ]);
-  // 総販売代理店の配下は統括代理店なので、スタッフ枠ではなく全国60社のエリア枠で見る。
+  // 総販売代理店の下にいるのは統括代理店なので、スタッフ枠ではなく全国60社のエリア枠で見る。
   let breakdown = breakdownSlots(self, direct);
   if (slotModelOf(self) === "area") {
     const usage = areaUsage(await listAllAgencies());
@@ -114,7 +114,7 @@ async function load(code: string, month: string): Promise<Loaded | null> {
   /** 枠の単位。エリア枠は「社」、スタッフ枠は「名」。 */
   const slotUnit = slotModelOf(self) === "area" ? "社" : "名";
   /*
-   * 取次パートナー・スタッフ・取次店ランクの3次代理店は配下を持てない。
+   * 取次パートナー・スタッフ・取次店ランクの3次代理店は下に人を持てない。
    * 枠の話そのものが当てはまらないので、枠のカードも数字も出さない。
    */
   const showSlots = slotModelOf(self) !== "none";
@@ -261,7 +261,7 @@ export default async function DashboardPage() {
     <div className="space-y-6">
       <PageHeader
         title="ダッシュボード"
-        description={`${self.name}（${self.code}）／ ${jpMonthLabel(month)}の状況です。自分の分と配下の分を合わせて集計しています。`}
+        description={`${self.name}（${self.code}）／ ${jpMonthLabel(month)}の状況です。自分の分とスタッフの分を合わせて集計しています。`}
         actions={
           <>
             <Badge tone="gold">{rankText}</Badge>
@@ -285,8 +285,8 @@ export default async function DashboardPage() {
           value={yen(summary.salesTotal)}
           hint={
             stoppedCount > 0
-              ? "ご自身と配下の販売金額の合計（中止分を除く）"
-              : "ご自身と配下の販売金額の合計"
+              ? "ご自身とスタッフの販売金額の合計（中止分を除く）"
+              : "ご自身とスタッフの販売金額の合計"
           }
         />
         {showReward ? (
@@ -351,16 +351,16 @@ export default async function DashboardPage() {
         </Notice>
       ) : null}
 
-      {/* 2. 枠の状況。配下を持てない相手（取次パートナー・スタッフ・3次代理店）には出さない */}
+      {/* 2. 枠の状況。下に人を持てない相手（取次パートナー・スタッフ・3次代理店）には出さない */}
       {showSlots ? (
         <Card
-          title={slotModelOf(self) === "area" ? "エリア枠（統括代理店）" : "配下の枠"}
+          title={slotModelOf(self) === "area" ? "エリア枠（統括代理店）" : "スタッフの枠"}
           action={
             <Link
               href="/organization"
               className="text-xs text-ink-300 transition hover:text-gold-300"
             >
-              組織を見る →
+              スタッフ一覧 →
             </Link>
           }
         >
@@ -423,7 +423,7 @@ export default async function DashboardPage() {
         {recent.length === 0 ? (
           <EmptyState
             title="まだ受注がありません"
-            description="QR2 の決済が完了すると、ここに自動で表示されます。ご自身の受注と、配下の代理店・取次店の受注がまとめて並びます。"
+            description="QR2 の決済が完了すると、ここに自動で表示されます。ご自身の受注と、スタッフの受注がまとめて並びます。"
           />
         ) : (
           <Table>

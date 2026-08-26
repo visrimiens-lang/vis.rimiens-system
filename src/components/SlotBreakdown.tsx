@@ -25,7 +25,7 @@ export function SlotBreakdown({ data }: { data: Breakdown }) {
           <div className="mt-1 text-sm text-ink-300">
             {unlimited
               ? "上限は設けていません（特別枠）。"
-              : `配下に登録できるのは ${data.limit} 名までです。`}
+              : `スタッフに登録できるのは ${data.limit} 名までです。`}
           </div>
         </div>
         <div className="flex items-center gap-2 text-xs leading-relaxed text-ink-500">

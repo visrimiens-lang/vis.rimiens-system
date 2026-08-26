@@ -193,6 +193,7 @@ function toAdminOrder(r: Row): AdminOrder {
     amount: num(r, "amount"),
     quantity,
     phone: str(r, "phone"),
+    deliveredAt: str(r, "delivered_on"),
     shippingStatus,
     shippedAt: str(r, "shipped_on"),
     paymentMethod: str(r, "payment_method"),

@@ -60,7 +60,7 @@ export default async function PayeeNoticePage({
   const byCode = new Map(descendants.map((d) => [d.code, d]));
   const { raw } = await listOrders(scopeCodes(self, descendants), {
     month,
-    basis: "shipped",
+    basis: "delivered",
   });
   /*
    * キャンセルと審査否決は入金にならないので、支払通知にも載せない
@@ -244,7 +244,7 @@ export default async function PayeeNoticePage({
       <div className="space-y-4">
         {backLink}
         <Notice tone="warn">
-          {jpMonthLabel(month)}に、{toName} の出荷完了した受注がありません。
+          {jpMonthLabel(month)}に、{toName} の配達が完了した受注がありません。
           月を変えるか、絞り込みを見直してください。
         </Notice>
       </div>

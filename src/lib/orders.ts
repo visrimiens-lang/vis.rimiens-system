@@ -29,6 +29,7 @@ function toOrder(r: Row): Order {
     phone: s_(r, "phone"),
     shippingStatus: s_(r, "ship_status"),
     shippedAt: s_(r, "shipped_on"),
+    deliveredAt: s_(r, "delivered_on"),
     paymentMethod: s_(r, "payment_method"),
     matchStatus: s_(r, "match_status"),
     agencyCode,
@@ -76,8 +77,15 @@ export type OrderWithReward = Order & { unitReward: number | null; reward: numbe
 export type OrderQuery = {
   /** "2026-08" 形式。未指定なら全期間。 */
   month?: string;
-  /** 月の判定に使う日付。既定は受注日。報酬は配送完了日で見る。 */
-  basis?: "order" | "shipped";
+  /**
+   * 月の判定に使う日付。
+   *   order     … 受注日（顧客一覧・ダッシュボード）
+   *   delivered … 配達完了日（売上・報酬・支払通知書）
+   *
+   * 売上・報酬を配達完了で切るのは 2026-08-26 の決定。
+   * それまでは出荷完了日で切っていたため、顧客一覧と件数が合わなかった。
+   */
+  basis?: "order" | "delivered";
 };
 
 function monthRange(month: string): { from: string; to: string } {
@@ -96,12 +104,6 @@ export async function listOrders(
   codes: string[],
   opts: OrderQuery = {},
 ): Promise<{ orders: OrderWithReward[]; raw: Row[] }> {
-  const basisField = opts.basis === "shipped" ? "出荷完了日" : "日付";
-  const conds: string[] = [];
-  if (opts.month) {
-    const { from, to } = monthRange(opts.month);
-    conds.push(`${basisField} >= "${from}"`, `${basisField} <= "${to}"`);
-  }
   // 自分に関係する受注だけをデータベース側で絞る。
   const wanted = codes.map((c) => c.trim()).filter(Boolean);
   if (wanted.length === 0) return { orders: [], raw: [] };
@@ -123,7 +125,7 @@ export async function listOrders(
   ];
   if (opts.month) {
     const { from, to } = monthRange(opts.month);
-    const col = opts.basis === "shipped" ? "shipped_on" : "ordered_on";
+    const col = opts.basis === "delivered" ? "delivered_on" : "ordered_on";
     filters.push(`${col}=gte.${from}`, `${col}=lte.${to}`);
   }
   const [rows, products] = await Promise.all([

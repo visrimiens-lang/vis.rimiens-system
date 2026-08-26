@@ -222,8 +222,12 @@ export default async function CustomersPage({
         if (customerId) customerByOrder.set(id, customerId);
       }
 
-      // 配達が終わった日は顧客台帳のほうに入る。
-      // 顧客が紐づいている受注があるときだけ引きに行く。
+      /*
+       * 配達が終わった日。
+       * 2026-08-26 から受注（orders.delivered_on）が本体で、
+       * 顧客台帳（customers.delivered_on）はそれ以前の分の受け皿。
+       * 受注側に入っていればそちらを使う。
+       */
       const deliveredByCustomer = new Map<string, string>();
       const customerIds = [...new Set(customerByOrder.values())].filter((id) =>
         /^\d+$/.test(id),
@@ -276,7 +280,9 @@ export default async function CustomersPage({
       periodOrders = orders.map((o) => {
         const reviewResult = reviewByOrder.get(o.recordId) ?? "";
         const deliveredOn =
-          deliveredByCustomer.get(customerByOrder.get(o.recordId) ?? "") ?? "";
+          o.deliveredAt ||
+          deliveredByCustomer.get(customerByOrder.get(o.recordId) ?? "") ||
+          "";
         const state = progressOf({
           reviewResult,
           shipStatus: o.shippingStatus,
@@ -528,6 +534,16 @@ export default async function CustomersPage({
           台数・販売金額には数えていませんが、下の表には「中止」として残しています。
         </Notice>
       ) : null}
+
+      {/*
+        売上・報酬と件数が合わない、という問い合わせが実際にあった。
+        この画面は受注日、売上・報酬は配達完了日で月を切っているため、
+        受注した月とお届けした月が違う受注は、必ずどちらか片方にしか出ない。
+      */}
+      <Notice tone="info">
+        この画面は「受注日」で月を切っています。売上・報酬は「配達完了日」で切るため、
+        同じ月でも件数は一致しません（受注した月と、お届けした月が違うため）。
+      </Notice>
 
       <Card
         title={`受注明細（${periodLabel}${

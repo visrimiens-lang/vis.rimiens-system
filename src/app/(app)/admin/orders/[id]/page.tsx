@@ -335,7 +335,7 @@ export default async function AdminOrderDetailPage({
    *
    * 報酬は受注が登録された時点で「未確定」として立つ（lib/intake.ts の accrueRewards）。
    * それを打ち消すマイナスは、出荷状況をキャンセルにしたときにしか立たない
-   * （lib/rewards.ts の onShipStatusChanged）。
+   * （actions/order-actions.ts の updateShipStatusAction）。
    * 一方で受注一覧は、審査否決の受注も支払対象額から外している。
    * そのため審査否決だけの受注は、一覧では 0 円なのにこの画面には金額が残り、
    * 同じ受注の報酬見込みが一覧と詳細で食い違って見える。

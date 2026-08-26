@@ -312,9 +312,13 @@ export async function updateShipmentAction(
   }
 
   /*
-   * 配達完了日。お客様の進捗を「配達完了」まで進めるために使う。
-   * 置き場所は顧客台帳（customers.delivered_on）で、受注ではない。
-   * 進捗の表示（components/Progress.tsx）とお客様一覧が、そこを見ているため。
+   * 配達完了日。
+   *
+   * 受注（orders.delivered_on）と顧客台帳（customers.delivered_on）の両方に書く。
+   *   受注側 … 売上・報酬はこの日付の月で数える（2026-08-26〜）。
+   *            お客様1人が2件買ったときに、あとの1件で前の1件が
+   *            上書きされないよう、受注ごとに持たせている。
+   *   台帳側 … お客様マイページと本部の顧客一覧が見ている。
    */
   const deliveredOn = readDate(formData, "deliveredOn");
   if (deliveredOn === undefined) {
@@ -329,7 +333,7 @@ export async function updateShipmentAction(
 
   try {
     const order = await selectOne<Row>(
-      `orders?select=id,customer_id,customer_name,ship_status,tracking_no,shipped_on&id=eq.${id}`,
+      `orders?select=id,customer_id,customer_name,ship_status,tracking_no,shipped_on,delivered_on&id=eq.${id}`,
     );
     if (!order) return { error: NOT_FOUND };
 
@@ -357,8 +361,10 @@ export async function updateShipmentAction(
       {
         ship_status: next,
         tracking_no: tracking || null,
-        // 出荷済で日付が空なら、今日の日付を入れておく（報酬の締めに使うため）
+        // 出荷済で日付が空なら、今日の日付を入れておく
         shipped_on: shippedOn ?? (next === "出荷済" ? todayInJapan() : null),
+        // 売上・報酬はこの日付の月で数える
+        delivered_on: next === "キャンセル" ? null : deliveredOn,
       },
     );
     if (saved.length === 0) {
@@ -381,7 +387,15 @@ export async function updateShipmentAction(
   // 報酬の取消に失敗したあとにやり直すと「前もキャンセル」になり、
   // 報酬が生きたまま二度と取り消せなくなるため。
   // 判断材料は報酬側の今の姿（取り消されていない、プラスの報酬が残っているか）にする。
-  let touchRewards = next === "出荷済";
+  /*
+   * 報酬を確定させるのは「配達完了日が入ったとき」。
+   *
+   * 2026-08-07 の会議で「報酬確定を配送完了ベースにする」と決まっていたが、
+   * 実装は出荷済で確定していた（lib/rewards.ts のコメントだけが正しかった）。
+   * 2026-08-26 に売上・報酬も配達完了で切るようにしたので、ここも揃える。
+   */
+  const nowDelivered = Boolean(deliveredOn) && next !== "キャンセル";
+  let touchRewards = nowDelivered;
   if (next === "キャンセル") {
     let rewardRows: Row[];
     try {
@@ -448,23 +462,21 @@ export async function updateShipmentAction(
   if (touchRewards) {
     try {
       // 何件動いたかを必ず受け取る。0件のまま「確定しました」とは言わない。
-      rewardCount =
-        next === "出荷済"
-          ? await confirmRewards(id)
-          : await reverseRewards(id, "受注のキャンセル");
+      rewardCount = nowDelivered
+        ? await confirmRewards(id)
+        : await reverseRewards(id, "受注のキャンセル");
       if (rewardCount > 0) {
-        rewardNote =
-          next === "出荷済"
-            ? `この受注の報酬 ${rewardCount} 件を確定しました。`
-            : `この受注の報酬 ${rewardCount} 件を取り消しました（同額のマイナスを立てて相殺しています）。`;
+        rewardNote = nowDelivered
+          ? `この受注の報酬 ${rewardCount} 件を確定しました。`
+          : `この受注の報酬 ${rewardCount} 件を取り消しました（同額のマイナスを立てて相殺しています）。`;
       } else {
-        rewardNote = await noRewardNote(id, next === "出荷済");
+        rewardNote = await noRewardNote(id, nowDelivered);
       }
     } catch (e) {
       // 出荷の記録は済んでいる。報酬だけが残っている状態を、はっきり伝える。
       await audit(
         await actorName(),
-        next === "出荷済" ? "報酬確定の失敗" : "報酬取消の失敗",
+        nowDelivered ? "報酬確定の失敗" : "報酬取消の失敗",
         { type: "order", key: id },
         { 出荷状況: next, 理由: reason(e) },
       );
@@ -472,7 +484,7 @@ export async function updateShipmentAction(
       revalidatePath(`/admin/orders/${id}`);
       return {
         error:
-          `出荷状況は「${next}」に保存しましたが、報酬の${next === "出荷済" ? "確定" : "取消"}に失敗しました。` +
+          `出荷状況は「${next}」に保存しましたが、報酬の${nowDelivered ? "確定" : "取消"}に失敗しました。` +
           `${reason(e)} 下の報酬一覧をご確認のうえ、もう一度この操作を行ってください。`,
         at: Date.now(),
       };

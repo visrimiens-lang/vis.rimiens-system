@@ -513,21 +513,6 @@ export async function reverseRewardsDetailed(
   };
 }
 
-/**
- * 受注の出荷状況が変わったときに呼ぶ。
- * 配送完了なら確定、キャンセルなら取消。
- */
-export async function onShipStatusChanged(
-  orderId: string | number,
-  status: string,
-): Promise<void> {
-  if (status === "出荷済") {
-    await confirmRewards(orderId);
-  } else if (status === "キャンセル") {
-    await reverseRewards(orderId, "受注のキャンセル");
-  }
-}
-
 /* ══════════════════ 審査結果が変わったとき ══════════════════ */
 
 /**

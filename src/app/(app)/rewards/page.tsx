@@ -48,10 +48,10 @@ const BASE = "/rewards";
  * 見出しを押して並び替えられる列。
  * 単価と報酬額はスタッフには出さないので、スタッフのときは並び替えにも使わせない。
  */
-const SORT_COLUMNS = ["shipped", "customer", "product", "qty", "amount", "owner"];
+const SORT_COLUMNS = ["delivered", "customer", "product", "qty", "amount", "owner"];
 const REWARD_SORT_COLUMNS = [...SORT_COLUMNS, "unit", "reward"];
 
-/** 既定は出荷完了日の新しい順。 */
+/** 既定は配達完了日の新しい順。 */
 const DEFAULT_SORT: SortState = { column: "", desc: false };
 
 type Row = Record<string, unknown>;
@@ -286,13 +286,13 @@ export default async function RewardsPage({
 
       const { raw } = await listOrders(scopeCodes(self, descendants), {
         month,
-        basis: "shipped",
+        basis: "delivered",
       });
       // キャンセルと審査否決は支払の対象にならないので、明細にも合計にも入れない。
       const live = raw.filter((r) => !isStopped(r));
       stoppedCount = raw.length - live.length;
       rows = attachRewards(live, rewardRank).sort((a, b) =>
-        (b.shippedAt || "").localeCompare(a.shippedAt || ""),
+        (b.deliveredAt || "").localeCompare(a.deliveredAt || ""),
       );
     }
   } catch (e) {
@@ -312,7 +312,7 @@ export default async function RewardsPage({
     showReward ? REWARD_SORT_COLUMNS : SORT_COLUMNS,
   );
   const accessors: Accessors<OrderWithReward> = {
-    shipped: (r) => r.shippedAt,
+    delivered: (r) => r.deliveredAt,
     customer: (r) => r.customerName,
     product: (r) => r.productName,
     qty: (r) => r.quantity || 1,
@@ -465,10 +465,10 @@ export default async function RewardsPage({
       />
 
       <Notice tone="info">
-        出荷が完了した受注だけを集計しています。出荷完了日が{jpMonthLabel(month)}
-        の受注が対象で、まだ出荷していない受注はここには出ません。
-        お客様のお手元に届く「配達完了」より前の段階で対象になるため、
-        顧客一覧の進み具合とは表示がずれることがあります。
+        お客様のお手元に届いた受注だけを集計しています。配達完了日が{jpMonthLabel(month)}
+        の受注が対象で、まだ届いていない受注はここには出ません。
+        顧客一覧は「受注日」で月を切っているので、同じ月でも件数は一致しません
+        （受注した月と、お届けした月が違うため）。
         {showReward && rewardRank
           ? `報酬額は「${rewardRankText}」としての単価で計算しています。`
           : null}
@@ -556,12 +556,12 @@ export default async function RewardsPage({
 
       <div className="grid gap-4 sm:grid-cols-3">
         <StatTile
-          label="出荷完了台数"
+          label="配達完了台数"
           value={units.toLocaleString("ja-JP")}
           unit="台"
           hint={`受注 ${shown.length.toLocaleString("ja-JP")} 件分`}
         />
-        <StatTile label="売上合計" value={yen(salesTotal)} hint="出荷完了分の販売金額" />
+        <StatTile label="売上合計" value={yen(salesTotal)} hint="配達完了分の販売金額" />
         {showReward ? (
           <StatTile
             label="報酬合計"
@@ -606,7 +606,7 @@ export default async function RewardsPage({
         </Notice>
       ) : null}
 
-      <Card title={`出荷完了の明細（${jpMonthLabel(month)}）`}>
+      <Card title={`配達完了の明細（${jpMonthLabel(month)}）`}>
         {rows.length === 0 ? (
           <EmptyState
             title="この月はまだ出荷が完了した受注がありません"
@@ -617,8 +617,8 @@ export default async function RewardsPage({
             <thead>
               <tr>
                 <SortableTh
-                  column="shipped"
-                  label="出荷完了日"
+                  column="delivered"
+                  label="配達完了日"
                   sort={sort}
                   basePath={BASE}
                   params={params}
@@ -685,7 +685,7 @@ export default async function RewardsPage({
             <tbody>
               {detail.map((r) => (
                 <tr key={r.recordId}>
-                  <Td numeric>{jpDate(r.shippedAt)}</Td>
+                  <Td numeric>{jpDate(r.deliveredAt)}</Td>
                   <Td>{r.customerName || "—"}</Td>
                   <Td className="min-w-[13rem] max-w-[22rem]">
                       <span className="line-clamp-2 leading-snug" title={r.productName || undefined}>

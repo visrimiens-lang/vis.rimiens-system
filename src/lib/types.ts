@@ -97,6 +97,8 @@ export type Order = {
   phone: string;
   shippingStatus: string;
   shippedAt: string;
+  /** 配達が完了した日。売上・報酬はこの日付の月で数える。 */
+  deliveredAt: string;
   paymentMethod: string;
   matchStatus: string;
   agencyCode: string;

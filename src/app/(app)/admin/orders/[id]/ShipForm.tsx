@@ -89,7 +89,7 @@ export function ShipForm({
 /**
  * 出荷状況・送り状番号・出荷日を変える。
  *
- * 出荷済にすると報酬が確定し、キャンセルにすると報酬が取り消される。
+ * 配達完了日を入れると報酬が確定し、キャンセルにすると報酬が取り消される。
  * どちらも後戻りしにくいので、押す前に何が起きるかを画面に出しておく。
  */
 function ShipmentSection({
@@ -140,7 +140,7 @@ function ShipmentSection({
               ))}
             </select>
             <span className={hintCls}>
-              出荷済にすると、この受注の報酬が確定します。
+              出荷済にすると、お客様に送り状番号でお届け状況をご案内できます。
             </span>
           </label>
 
@@ -186,7 +186,8 @@ function ShipmentSection({
               className={`${inputCls} tabnum`}
             />
             <span className={hintCls}>
-              入れると、お客様の進捗が「配達完了」になります。空にすると戻せます。
+              入れると、お客様の進捗が「配達完了」になり、この受注の報酬が確定します。
+              売上・報酬もこの日付の月に計上されます。空にすると戻せます。
             </span>
           </label>
         </div>

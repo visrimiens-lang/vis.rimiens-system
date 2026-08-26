@@ -6,7 +6,7 @@ import { attachRewards, listOrders, scopeCodes } from "@/lib/orders";
 import { effectivePayUnit } from "@/lib/pay-defaults";
 import { companyKey } from "@/lib/labels";
 import { readParam, type SearchParams } from "@/lib/list-params";
-import { Notice, jpMonthLabel } from "@/components/ui";
+import { Card, Notice, jpMonthLabel } from "@/components/ui";
 import { PayeeNoticeDoc, type NoticeDoc, type NoticeLine } from "./PayeeNoticeDoc";
 import { PrintButton } from "../PrintButton";
 
@@ -46,21 +46,6 @@ export default async function PayeeNoticePage({
 
   const back = `/rewards?month=${month}`;
 
-  if (!company && !owner) {
-    return (
-      <div className="space-y-6">
-        <Notice tone="info">
-          支払通知書は、お支払いする相手ごとに作ります。
-          「売上・報酬」の画面で会社または担当で絞り込んでから、
-          「支払通知書を作る」を押してください。
-          <Link href={back} className="ml-2 underline underline-offset-4">
-            売上・報酬に戻る
-          </Link>
-        </Notice>
-      </div>
-    );
-  }
-
   const self = await findAgencyByCode(viewer.code);
   if (!self) {
     return (
@@ -86,6 +71,72 @@ export default async function PayeeNoticePage({
     return s !== "キャンセル" && rv !== "否決";
   });
   const orders = attachRewards(live, "");
+
+  /*
+   * 相手が指定されていないときは、その月に売上があった相手を並べて選んでもらう。
+   * 「売上・報酬」で絞り込まずにこの画面へ来た場合が該当する。
+   */
+  if (!company && !owner) {
+    const seen = new Map<string, { label: string; href: string; qty: number }>();
+    for (const o of orders) {
+      const person = byCode.get(o.ownerCode);
+      if (!person) continue;
+      const label =
+        person.codeKind === "02"
+          ? person.companyName || person.parentName || person.name
+          : person.name;
+      const key = companyKey(label) || o.ownerCode;
+      const hit = seen.get(key);
+      const qty = o.quantity || 1;
+      if (hit) hit.qty += qty;
+      else
+        seen.set(key, {
+          label,
+          href: `/rewards/notice?month=${month}&company=${encodeURIComponent(label)}`,
+          qty,
+        });
+    }
+    const choices = [...seen.values()].sort((a, b) => b.qty - a.qty);
+
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Link href={back} className="text-sm text-ink-300 underline underline-offset-4">
+            ← 売上・報酬に戻る
+          </Link>
+        </div>
+        <Card title={`支払通知書を作る（${jpMonthLabel(month)}）`}>
+          {choices.length === 0 ? (
+            <div className="px-5 py-6">
+              <Notice tone="warn">
+                {jpMonthLabel(month)}に出荷が完了した受注がありません。
+                月を選び直してください。
+              </Notice>
+            </div>
+          ) : (
+            <div className="space-y-2 px-5 py-4">
+              <p className="text-sm text-ink-300">
+                お支払いする相手を選んでください。会社ごとに1枚の通知書を作ります。
+              </p>
+              <ul className="divide-y divide-ink-850">
+                {choices.map((c) => (
+                  <li key={c.href}>
+                    <Link
+                      href={c.href}
+                      className="flex items-center justify-between gap-4 py-3 text-sm transition hover:text-gold-300"
+                    >
+                      <span className="text-ink-100">{c.label}</span>
+                      <span className="tabnum text-xs text-ink-400">{c.qty} 台分 →</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </Card>
+      </div>
+    );
+  }
 
   /*
    * この通知書に載せる相手を決める。

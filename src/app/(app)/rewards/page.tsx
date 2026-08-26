@@ -41,7 +41,6 @@ import {
 import { SortableTh , FilterBar, FilterSelect, FilterActions} from "@/components/SortableTh";
 import { rankLabel, companyKey} from "@/lib/labels";
 import { MonthSelect } from "./MonthSelect";
-import { PrintButton } from "./PrintButton";
 
 const BASE = "/rewards";
 
@@ -450,21 +449,19 @@ export default async function RewardsPage({
         actions={
           <div className="flex flex-wrap items-center gap-3">
             {/*
-              支払通知書は「誰に払うか」が決まらないと作れないので、
-              会社または担当で絞り込んでいるときだけ出す。
+              支払通知書はいつでも押せるようにしておく。
+              絞り込んでいれば、その相手の分で作る。
+              絞り込んでいなければ、通知書の画面で相手を選んでもらう。
             */}
-            {isFiltered ? (
-              <Link
-                href={`/rewards/notice?month=${month}${
-                  companyParam !== ALL ? `&company=${encodeURIComponent(companyParam)}` : ""
-                }${ownerParam !== ALL ? `&owner=${encodeURIComponent(ownerParam)}` : ""}`}
-                className="inline-flex items-center gap-2 rounded-lg border border-gold-500/50 px-3 py-1.5 text-xs font-medium text-gold-300 transition hover:bg-gold-500/10"
-              >
-                <FileText className="h-3.5 w-3.5" />
-                支払通知書を作る
-              </Link>
-            ) : null}
-            <PrintButton />
+            <Link
+              href={`/rewards/notice?month=${month}${
+                companyParam !== ALL ? `&company=${encodeURIComponent(companyParam)}` : ""
+              }${ownerParam !== ALL ? `&owner=${encodeURIComponent(ownerParam)}` : ""}`}
+              className="inline-flex items-center gap-2 rounded-lg border border-gold-500/50 px-3 py-1.5 text-xs font-medium text-gold-300 transition hover:bg-gold-500/10"
+            >
+              <FileText className="h-3.5 w-3.5" />
+              支払通知書を作る
+            </Link>
             <MonthSelect months={monthOptions} value={month} />
           </div>
         }
@@ -508,25 +505,6 @@ export default async function RewardsPage({
           {showReward ? "・報酬" : ""}には数えていません。内容は顧客一覧でご確認ください。
         </Notice>
       ) : null}
-
-      {/*
-        紙・PDFにしたときだけ出る見出し。
-        画面には出さない（画面には同じ内容がページ上部にあるため）。
-        これが無いと、印刷した紙が「誰の・いつの・どの範囲の集計か」分からない。
-      */}
-      <div className="print-only" style={{ marginBottom: "8mm" }}>
-        <div style={{ fontSize: "14pt", fontWeight: 700 }}>
-          売上・報酬のご案内（{jpMonthLabel(month)}）
-        </div>
-        <div style={{ fontSize: "10pt", marginTop: "2mm" }}>
-          {selfName}（{viewer.code}）　／　出荷完了日が{jpMonthLabel(month)}の分
-          {companyParam !== ALL ? `　／　会社：${companyParam}` : ""}
-          {ownerParam !== ALL ? `　／　担当：${ownerParam}` : ""}
-        </div>
-        <div style={{ fontSize: "9pt", marginTop: "1mm", color: "#555" }}>
-          出力日：{new Date().toLocaleDateString("ja-JP")}
-        </div>
-      </div>
 
       {/*
         会社・担当での絞り込み。絞ると下の合計もその範囲で計算し直す。

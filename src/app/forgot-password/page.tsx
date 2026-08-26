@@ -65,7 +65,7 @@ export default function ForgotPasswordPage() {
                     type="text"
                     required
                     maxLength={32}
-                    placeholder="RIM0002"
+                    placeholder="ABCD0001"
                     autoComplete="username"
                     className={fieldClass}
                   />

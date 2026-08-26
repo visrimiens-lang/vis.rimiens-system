@@ -31,7 +31,7 @@ export default function LoginPage() {
                 name="loginId"
                 type="text"
                 required
-                placeholder="RIM0002"
+                placeholder="ABCD0001"
                 autoComplete="username"
                 className="mt-1.5 w-full rounded-lg border border-ink-700 bg-ink-950 px-3.5 py-2.5 text-sm text-ink-50 placeholder:text-ink-600 focus:border-gold-500 focus:outline-none"
               />

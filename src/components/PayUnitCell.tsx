@@ -36,7 +36,7 @@ export function PayUnitCell({
   op1,
   op2,
   padYearly,
-  fallback,
+  fallbacks,
   note,
   editable,
 }: {
@@ -47,8 +47,8 @@ export function PayUnitCell({
   op1: number | null;
   op2: number | null;
   padYearly: number | null;
-  /** 本体が未設定のときに実際に使われる額（税抜きで渡す。lib/pay-defaults.ts） */
-  fallback: number | null;
+  /** 未設定のときに実際に使われる推奨額（品目ごと・税抜きで渡す。lib/pay-defaults.ts） */
+  fallbacks: { body: number | null; op1: number | null; op2: number | null; padYearly: number | null };
   note: string;
   editable: boolean;
 }) {
@@ -98,7 +98,11 @@ export function PayUnitCell({
    * 保存を税込にすると、支払通知書が小計にもう一度消費税を足してしまう。
    */
   const bodyShown =
-    value !== null ? yen(payTaxIncl(value)) : fallback !== null ? yen(payTaxIncl(fallback)) : "—";
+    value !== null
+      ? yen(payTaxIncl(value))
+      : fallbacks.body !== null
+        ? yen(payTaxIncl(fallbacks.body))
+        : "—";
   const extras = (["op1", "op2", "padYearly"] as PayItem[]).filter(
     (i) => current[i] !== null,
   );
@@ -183,10 +187,8 @@ export function PayUnitCell({
                     数字を打ったときに入力済みなのかどうかが見分けにくい。
                   */}
                   <span className="mt-0.5 block text-xs text-ink-500">
-                    {item === "body"
-                      ? fallback !== null
-                        ? `空欄なら既定の ${payTaxIncl(fallback).toLocaleString("ja-JP")} 円`
-                        : "空欄なら商品マスタの単価"
+                    {fallbacks[item] !== null
+                      ? `空欄なら推奨の ${payTaxIncl(fallbacks[item] as number).toLocaleString("ja-JP")} 円`
                       : "空欄ならこの品目では払わない"}
                   </span>
                   <input
@@ -204,8 +206,8 @@ export function PayUnitCell({
                       current[item] !== null ? String(payTaxIncl(current[item] as number)) : ""
                     }
                     placeholder={
-                      item === "body" && fallback !== null
-                        ? payTaxIncl(fallback).toLocaleString("ja-JP")
+                      fallbacks[item] !== null
+                        ? payTaxIncl(fallbacks[item] as number).toLocaleString("ja-JP")
                         : "0"
                     }
                     className="tabnum mt-1 w-full rounded-lg border border-ink-700 bg-ink-900 px-2.5 py-2 text-sm text-ink-100 placeholder:text-ink-500 focus:border-ink-600"
@@ -226,8 +228,8 @@ export function PayUnitCell({
             </div>
 
             <p className="text-xs leading-relaxed text-ink-500">
-              本体を空にすると既定に戻ります。OP①・OP②・1年後定期を空にすると、
-              その品目では払わない扱いになります。0 円にしたいときは 0 と入れてください。
+              空にした品目は推奨額に戻ります（推奨の無い品目は払わない扱い）。
+              0 円にしたいときは 0 と入れてください。
               <br />
               本部の報酬台帳はさかのぼって変わりませんが、「売上・報酬」のお支払額の表示は、
               過去の月もいまの額で計算し直されます。

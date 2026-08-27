@@ -58,7 +58,7 @@ import {
 import { SlotRequestButton } from "./SlotRequestButton";
 import { PayUnitCell } from "@/components/PayUnitCell";
 import { StaffProfileCell } from "@/components/StaffProfileCell";
-import { defaultPayUnit } from "@/lib/pay-defaults";
+import { defaultPayUnits } from "@/lib/pay-defaults";
 
 const BASE = "/organization";
 
@@ -535,7 +535,7 @@ export default async function OrganizationPage({
                           op1={a.payUnitOp1}
                           op2={a.payUnitOp2}
                           padYearly={a.payUnitPadYearly}
-                          fallback={defaultPayUnit(a)}
+                          fallbacks={defaultPayUnits(a)}
                           note={a.payUnitNote}
                           editable={a.parentCode === me.code}
                         />

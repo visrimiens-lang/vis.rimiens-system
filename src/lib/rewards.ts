@@ -1,7 +1,7 @@
 import "server-only";
 import { audit, insert, inList, select, selectAll, selectOne, update } from "./db";
 import { todayInJapan } from "./jst";
-import { payoutForOrder, type PayUnits } from "./pay-defaults";
+import { defaultPayUnits, payTaxIncl, payoutForOrder, type PayUnits } from "./pay-defaults";
 import { AMOUNT_COLUMNS, PRODUCT_COLUMNS, buildProductMatcher, type MatchHow } from "./product-match";
 
 /**
@@ -248,34 +248,35 @@ export async function accrueRewards(
   );
 
   /*
-   * 個別に決めた「この相手に払う額」。入っていればランク別の単価より優先する。
+   * 個別に決めた「この相手に払う額」（金額修正）。品目ごとに、
+   * 入っていれば推奨額（lib/pay-defaults.ts の RANK_DEFAULTS）より優先する。
    * 「インボイス登録が無いので減額したい」のような個別契約に使う。
    *
-   * この台帳に立つのは総販売代理店・2次代理店だけ（amountColumn を参照）なので、
-   * ここで効くのも本部がその2ランクに入れた額だけ。
-   * 3次・取次の pay_unit（既定 50,000／25,000・税抜）は統括の画面の支払集計が使う。
-   * 入れた額は換算せずそのまま計上する（「税抜きの金額をそのまま払う」2026-08-19 決定）。
+   * この台帳に立つのは総販売代理店・2次代理店だけ（amountColumn を参照）。
+   * 3次・取次・スタッフの支払額は統括の画面の支払集計が使う。
+   * 保存されている額は税抜きで、帳簿に載せるときに税込へ直す（画面・帳簿は税込統一）。
    *
-   * 列がまだ無いうちに動いても報酬計算が止まらないよう、失敗したら既定の単価だけで進む。
-   * （マイグレーション supabase/migrations/2026-08-19_agency_pay_unit.sql を流すと効き始める）
+   * 列がまだ無いうちに動いても報酬計算が止まらないよう、失敗したら推奨額だけで進む。
    */
-  const payUnit = new Map<string, PayUnits>();
+  const payUnit = new Map<string, Partial<PayUnits>>();
   try {
     const rows = await select<Row>(
       `agencies?select=code,pay_unit,pay_unit_op1,pay_unit_op2,pay_unit_pad_yearly&code=${inList(unique)}`,
     );
     for (const r of rows) {
+      const o: Partial<PayUnits> = {};
       const body = num_(r, "pay_unit");
-      if (body === null || body <= 0) continue;
-      payUnit.set(s_(r, "code"), {
-        body,
-        op1: num_(r, "pay_unit_op1"),
-        op2: num_(r, "pay_unit_op2"),
-        padYearly: num_(r, "pay_unit_pad_yearly"),
-      });
+      const op1 = num_(r, "pay_unit_op1");
+      const op2 = num_(r, "pay_unit_op2");
+      const pad = num_(r, "pay_unit_pad_yearly");
+      if (body !== null) o.body = body;
+      if (op1 !== null) o.op1 = op1;
+      if (op2 !== null) o.op2 = op2;
+      if (pad !== null) o.padYearly = pad;
+      if (Object.keys(o).length > 0) payUnit.set(s_(r, "code"), o);
     }
   } catch {
-    // 列がまだ無い。既定の単価で進む。
+    // 列がまだ無い。推奨額で進む。
   }
 
   /*
@@ -314,23 +315,36 @@ export async function accrueRewards(
       s_(a, "rank") === "取次店" && s_(a, "channel") === "販売代理店"
         ? "販売代理店"
         : s_(a, "rank");
-    const col = amountColumn(rank);
-    if (!col) continue;
+    if (!amountColumn(rank)) continue;
     /*
-     * 上位が決めた額があればそれを使う。無ければランク別の単価。
+     * 金額は「推奨額（ランク別・品目別・税抜） ← 金額修正の上書き」で組み立てて、
+     * 受注に含まれる品目（本体価格・OP①・OP②・1年後定期）を足し、税込にして計上する。
      *
-     * 2026-08-27 に支払額を品目ごとに分けたので、決めてある相手には
-     * 受注に含まれる品目（本体価格・OP①・OP②・1年後定期）を足して計上する。
-     * 決めていない相手はこれまでどおり商品マスタの単価 × 台数。
+     * 以前は商品マスタの報酬列を使い、金額修正も本体を入れた相手にしか効かなかった。
+     * 2026-08-27 の会議で「本体だけ変えてもオプションの取り分は変わらない」
+     * 「Rimiensが目トレからもらう金額も変更できるように」と決まったため、
+     * 品目ごとの推奨＋上書きに一本化した。推奨のままなら、
+     * 税込にした額は商品マスタの報酬列と一致する（62,700 → 63,800 など）。
      */
-    const override = payUnit.get(s_(a, "code"));
-    const overrideAmount = override
-      ? payoutForOrder(override, s_(order, "product_name"), quantity)
-      : null;
-    const unit = basis.unit[col] ?? 0;
-    if (overrideAmount === null && unit <= 0) continue;
-    const amount = overrideAmount !== null ? overrideAmount : unit * quantity;
-    if (amount <= 0) continue;
+    const o = payUnit.get(s_(a, "code")) ?? {};
+    const defs = defaultPayUnits({
+      rank: s_(a, "rank") as Parameters<typeof defaultPayUnits>[0]["rank"],
+      channel: s_(a, "channel") as Parameters<typeof defaultPayUnits>[0]["channel"],
+      codeKind: "00",
+      staffType: "",
+    });
+    const paidExcl = payoutForOrder(
+      {
+        body: o.body ?? defs.body,
+        op1: o.op1 ?? defs.op1,
+        op2: o.op2 ?? defs.op2,
+        padYearly: o.padYearly ?? defs.padYearly,
+      },
+      s_(order, "product_name"),
+      quantity,
+    );
+    if (paidExcl === null || paidExcl <= 0) continue;
+    const amount = payTaxIncl(paidExcl);
 
     const kind = s_(a, "code") === s_(order, "referrer_code") ? "紹介報酬" : "販売報酬";
     /*

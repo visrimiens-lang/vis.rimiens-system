@@ -25,7 +25,7 @@ import {
   usesPortal,
 } from "@/lib/labels";
 import { PayUnitCell } from "@/components/PayUnitCell";
-import { defaultPayUnit } from "@/lib/pay-defaults";
+import { defaultPayUnits } from "@/lib/pay-defaults";
 import type { Agency } from "@/lib/types";
 import {
   Badge,
@@ -770,7 +770,7 @@ function AgencyTable({
                   op1={a.payUnitOp1}
                   op2={a.payUnitOp2}
                   padYearly={a.payUnitPadYearly}
-                  fallback={defaultPayUnit(a)}
+                  fallbacks={defaultPayUnits(a)}
                   note={a.payUnitNote}
                   editable
                 />
@@ -911,7 +911,7 @@ function PeopleTable({
                   op1={a.payUnitOp1}
                   op2={a.payUnitOp2}
                   padYearly={a.payUnitPadYearly}
-                  fallback={defaultPayUnit(a)}
+                  fallbacks={defaultPayUnits(a)}
                   note={a.payUnitNote}
                   editable
                 />

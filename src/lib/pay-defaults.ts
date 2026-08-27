@@ -14,37 +14,70 @@ import type { Agency } from "./types";
  *   販売代理店（3次）… 50,000円
  *   取次パートナー   … 25,000円
  *
- * ■ 統括（2次）と総販には既定を置かない
+ * ■ 統括（2次）と総販にも推奨額を置く（2026-08-27 会議）
  *
- * 統括へのお支払いは本部からの報酬（商品マスタの税込単価で自動計上）が担当で、
- * この欄の出番は無い。額を変えたいときだけ個別に入れる。
+ * 「Rimiensが目トレからもらう金額も変更できるように」との決定を受け、
+ * 本部の報酬計上（lib/rewards.ts）もこの推奨額＋金額修正の上書きで計算する。
+ * 推奨のままなら商品マスタの報酬列と同じ金額になる。
  *
  * 組織図・本部の代理店管理・配下への支払い集計の3か所から使うので、
  * 数字はここにだけ置く。ばらばらに持つと画面ごとに額が食い違う。
  */
+/**
+ * 推奨額の一覧（1台・1件あたり、税抜き）。2026-08-27 会議の提案資料より。
+ *
+ *   目トレ → 総販売代理店      本体 70,000 ／ OP① 3,000 ／ OP② 3,000 ／ 1年後定期 3,000
+ *   総販 → エリア統括（2次）   本体 57,000 ／ OP① 1,000 ／ OP② 2,000 ／ 1年後定期 1,000
+ *   統括 → 3次・スタッフ販売系 本体 50,000 ／ OP①    500 ／ OP② 1,000 ／ 1年後定期   500
+ *   統括 → 取次（紹介のみ）    本体 25,000 ／ OP系は払わない
+ *
+ * 税込にすると商品マスタの報酬列と一致する
+ * （例：本体 62,700・OP① 1,100 → 統括の「本体＋OP①」は 63,800）。
+ *
+ * 会議の決定は「推奨は既定として自動で効かせ、変えたい相手だけ金額修正で上書きする」。
+ * 以前は OP系に既定を置いていなかったため、統括のスタッフへの支払額が
+ * 本体ぶんだけになり、商品マスタ（55,550 など）と食い違って見えていた。
+ */
+type RankDefaults = { body: number | null; op1: number | null; op2: number | null; padYearly: number | null };
+const RANK_DEFAULTS: Record<string, RankDefaults> = {
+  総販売代理店: { body: 70000, op1: 3000, op2: 3000, padYearly: 3000 },
+  "2次代理店": { body: 57000, op1: 1000, op2: 2000, padYearly: 1000 },
+  販売代理店: { body: 50000, op1: 500, op2: 1000, padYearly: 500 },
+  取次店: { body: 25000, op1: null, op2: null, padYearly: null },
+};
+
+function effectiveRankOf(
+  a: Pick<Agency, "rank" | "channel" | "codeKind" | "staffType">,
+): string {
+  /*
+   * スタッフ（区分02）は、その人の種別で決まる（2026-08-26 決定）。
+   *   取次店   … 紹介だけで販売はしない
+   *   それ以外 … 販売系（販売代理店・サロン代理店・個人販売代理店）。
+   *              種別がまだ設定されていない人も販売系として扱う。
+   *              ここを null にすると、売上・報酬のお支払額が「—」のままになり、
+   *              支払通知が作れない（それに気づかず払い漏れる）ため。
+   */
+  if (a.codeKind === "02") {
+    return a.staffType === "取次店" ? "取次店" : "販売代理店";
+  }
+  // 3次（販売代理店）は「ランク＝取次店 ＋ 販路種別＝販売代理店」で表す（lib/orders.ts と同じ）
+  return a.rank === "取次店" && a.channel === "販売代理店" ? "販売代理店" : a.rank;
+}
+
+/** 品目ごとの推奨額（税抜き）。ランクに推奨が無ければすべて null。 */
+export function defaultPayUnits(
+  a: Pick<Agency, "rank" | "channel" | "codeKind" | "staffType">,
+): PayUnits {
+  const d = RANK_DEFAULTS[effectiveRankOf(a)];
+  return d
+    ? { body: d.body, op1: d.op1, op2: d.op2, padYearly: d.padYearly }
+    : { body: null, op1: null, op2: null, padYearly: null };
+}
+
 export function defaultPayUnit(
   a: Pick<Agency, "rank" | "channel" | "codeKind" | "staffType">,
 ): number | null {
-  /*
-   * スタッフ（区分02）の既定は、その人の種別で決まる（2026-08-26 決定）。
-   *
-   *   取次店   … 25,000円（紹介だけで販売はしないため）
-   *   それ以外 … 50,000円（販売代理店・サロン代理店・個人販売代理店）
-   *
-   * 種別がまだ設定されていない人にも 50,000円 を出す。
-   * ここを null にすると、売上・報酬のお支払額が「—」のままになり、
-   * 支払通知が作れない（それに気づかず払い漏れる）ため。
-   * 種別ごとに違う額にしたい場合は「組織と枠」で個別の額を入れれば上書きされる。
-   */
-  if (a.codeKind === "02") {
-    return a.staffType === "取次店" ? 25000 : 50000;
-  }
-
-  // 3次（販売代理店）は「ランク＝取次店 ＋ 販路種別＝販売代理店」で表す（lib/orders.ts と同じ）
-  const rank = a.rank === "取次店" && a.channel === "販売代理店" ? "販売代理店" : a.rank;
-  if (rank === "販売代理店") return 50000;
-  if (rank === "取次店") return 25000;
-  return null;
+  return defaultPayUnits(a).body;
 }
 
 /** 実際に使われる1台あたりの支払額（税抜き）。個別の額が最優先。 */
@@ -93,17 +126,16 @@ type PayUnitFields = Pick<
 /**
  * この相手に払う額を品目ごとに出す。
  *
- * 本体は今までどおり、個別の額が無ければランクの既定（50,000／25,000）を使う。
- * OP①・OP②・1年後定期には既定を置かない。ここに額を入れて初めて払う扱いになる。
- * 既定を置いてしまうと、これまで本体だけで払っていた相手の支払額が
- * この画面を開いた日から勝手に増えるため。
+ * どの品目も、個別の額（金額修正で入れた値）が最優先。
+ * 無ければランクの推奨額（RANK_DEFAULTS）が自動で効く（2026-08-27 会議）。
  */
 export function effectivePayUnits(a: PayUnitFields): PayUnits {
+  const d = defaultPayUnits(a);
   return {
-    body: effectivePayUnit(a),
-    op1: a.payUnitOp1,
-    op2: a.payUnitOp2,
-    padYearly: a.payUnitPadYearly,
+    body: a.payUnit ?? d.body,
+    op1: a.payUnitOp1 ?? d.op1,
+    op2: a.payUnitOp2 ?? d.op2,
+    padYearly: a.payUnitPadYearly ?? d.padYearly,
   };
 }
 

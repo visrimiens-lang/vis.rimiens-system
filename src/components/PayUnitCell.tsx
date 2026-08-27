@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { setPayUnitAction, type PayUnitState } from "@/actions/pay-unit-actions";
 import { PAY_ITEMS, PAY_ITEM_HINT, PAY_ITEM_LABEL, type PayItem } from "@/lib/pay-items";
 
@@ -53,6 +54,32 @@ export function PayUnitCell({
   const [open, setOpen] = useState(false);
   const [state, action, pending] = useActionState<PayUnitState, FormData>(setPayUnitAction, {});
 
+  /*
+   * モーダルは body の直下に出す。
+   *
+   * この欄は表の中にあり、表は横スクロールのために overflow を持っている
+   * （components/ui.tsx の Table → .scroll-x）。そのまま置くと
+   * position: fixed が効かず、モーダルが表の中に閉じ込められて見切れる。
+   * サーバー側では document を触れないので、画面に出てから差し込む。
+   */
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  // 開いている間は Esc で閉じられるようにし、背面が動かないようにする
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    const before = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = before;
+    };
+  }, [open]);
+
   const current: Record<PayItem, number | null> = {
     body: value,
     op1,
@@ -104,9 +131,10 @@ export function PayUnitCell({
       </button>
       {state.ok ? <div className="mt-1 text-xs text-good-100">{state.ok}</div> : null}
 
-      {open ? (
+      {open && mounted
+        ? createPortal(
         <div
-          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 sm:items-center"
+          className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-black/60 p-4 sm:items-center"
           role="dialog"
           aria-modal="true"
           aria-label={`${name} に払う額`}
@@ -121,7 +149,7 @@ export function PayUnitCell({
           />
           <form
             action={action}
-            className="relative w-full max-w-md space-y-4 rounded-2xl border border-ink-700 bg-ink-950 p-5 text-left shadow-2xl"
+            className="relative my-auto max-h-[90vh] w-full max-w-md space-y-4 overflow-y-auto rounded-2xl border border-ink-700 bg-ink-950 p-5 text-left shadow-2xl"
           >
             <input type="hidden" name="code" value={code} />
 
@@ -209,8 +237,10 @@ export function PayUnitCell({
               </button>
             </div>
           </form>
-        </div>
-      ) : null}
+        </div>,
+        document.body,
+      )
+        : null}
     </div>
   );
 }

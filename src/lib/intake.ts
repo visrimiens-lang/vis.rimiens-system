@@ -1217,6 +1217,8 @@ export async function linkCustomer(app: {
    * これを入れないと、お届けまで終わったお客様が一覧で「未決済」のまま残る。
    */
   paymentStatus?: string;
+  /** 顧客台帳の決済方法。本部の顧客管理で「銀行振込／クレジットカード／アプラス」を出すのに使う。 */
+  paymentMethod?: string;
 }): Promise<number | null> {
   const name = (app.name || "").trim();
   if (!name) return null;
@@ -1248,6 +1250,7 @@ export async function linkCustomer(app: {
      * いちばん新しい決済の結果が正しいため。
      */
     if (app.paymentStatus) patch["payment_status"] = app.paymentStatus;
+    if (app.paymentMethod) patch["payment_method"] = app.paymentMethod;
     if (Object.keys(patch).length > 0) {
       await update(`customers?id=eq.${encodeURIComponent(s_(found, "id"))}`, patch);
     }
@@ -1263,6 +1266,7 @@ export async function linkCustomer(app: {
       address: app.address || null,
       building: app.building || null,
       ...(app.paymentStatus ? { payment_status: app.paymentStatus } : {}),
+      ...(app.paymentMethod ? { payment_method: app.paymentMethod } : {}),
       ...attribution,
     },
   ]);
@@ -1485,6 +1489,7 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
         staffCode,
         referrerCode,
         paymentStatus,
+        paymentMethod: normalizePaymentMethod(app.paymentMethod ?? "").value ?? undefined,
       });
     const initialPay = initialPaymentStatus(
       normalizePaymentMethod(app.paymentMethod ?? "").value,

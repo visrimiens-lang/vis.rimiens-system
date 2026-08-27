@@ -1462,23 +1462,39 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
 
   let customerId: number | null = null;
   try {
-    customerId = await linkCustomer({
-      name,
-      phone: app.phone,
-      email: app.email,
-      zip: app.zip,
-      address: app.address,
-      building: app.building,
-      agencyCode,
-      staffCode,
-      referrerCode,
-      /*
-       * お客様側のお支払い状況も受注と同じ初期値にする（2026-08-27）。
-       * 銀行振込・アプラスは着金までお金が動いていないので「着金待ち」。
-       * 本部が受注詳細で決済完了にすると、こちらにも写る。
-       */
-      paymentStatus: initialPaymentStatus(normalizePaymentMethod(app.paymentMethod ?? "").value),
-    });
+    /*
+     * お客様側のお支払い状況も受注と同じ初期値にする（2026-08-27）。
+     * 銀行振込・アプラスは着金までお金が動いていないので「着金待ち」。
+     * 本部が受注詳細で決済完了にすると、こちらにも写る。
+     *
+     * customers.payment_status には許可する値の決まりがあり、
+     * 「着金待ち」はマイグレーション（2026-08-27_order_payment_status.sql）を
+     * 流すまで弾かれる。そのせいでお客様の紐づけごと失敗すると、
+     * 顧客一覧に出ない受注が生まれるので、弾かれたら従来の「決済完了」で
+     * 登録し直す（お支払いの実態は受注側のステータスで追える）。
+     */
+    const link = (paymentStatus: string) =>
+      linkCustomer({
+        name,
+        phone: app.phone,
+        email: app.email,
+        zip: app.zip,
+        address: app.address,
+        building: app.building,
+        agencyCode,
+        staffCode,
+        referrerCode,
+        paymentStatus,
+      });
+    const initialPay = initialPaymentStatus(
+      normalizePaymentMethod(app.paymentMethod ?? "").value,
+    );
+    try {
+      customerId = await link(initialPay);
+    } catch (e) {
+      if (initialPay === "決済完了") throw e;
+      customerId = await link("決済完了");
+    }
     if (customerId) {
       await update(`orders?id=eq.${encodeURIComponent(String(order["id"]))}`, {
         customer_id: customerId,

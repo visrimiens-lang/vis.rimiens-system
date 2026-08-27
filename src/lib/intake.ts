@@ -1332,14 +1332,19 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
     /*
      * 5分以内の同じ内容は、通知の二度届きとみなして前の受注を返す。
      * 名前と金額だけで見ると同姓同名の別人まで巻き込むので、
-     * メールアドレスが分かるときはそれも一致条件に足す。
+     * 電話番号が分かるときはそれも一致条件に足す。
+     *
+     * 受注にはメールアドレスの列が無い（連絡先の本体は顧客台帳）。
+     * 以前ここでメールアドレスを条件にしていて、メール付きの通知が
+     * 全部この場所で失敗していた。再送は同じ内容がそのまま届くので、
+     * 電話番号の完全一致で十分見分けられる。
      */
-    const mail5 = (app.email || "").trim().toLowerCase();
+    const phone5 = (app.phone || "").trim();
     const since = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     const recent = await selectOne<Row>(
       `orders?select=id,amount&customer_name=eq.${encodeURIComponent(name)}` +
         `&amount=eq.${Number(app.amount ?? 0)}` +
-        (mail5 ? `&email=eq.${encodeURIComponent(mail5)}` : "") +
+        (phone5 ? `&phone=eq.${encodeURIComponent(phone5)}` : "") +
         `&created_at=gte.${encodeURIComponent(since)}&order=id.desc`,
     );
     if (recent) {
@@ -1363,10 +1368,10 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
      * 満額もう1件分（139,700円）立ってしまう状態だった。
      * 登録は止めずに行い、受信箱に残して本部に見分けてもらう。
      */
-    if (mail5) {
+    if (phone5) {
       const day = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
       const sameDay = await selectOne<Row>(
-        `orders?select=id&email=eq.${encodeURIComponent(mail5)}` +
+        `orders?select=id&phone=eq.${encodeURIComponent(phone5)}` +
           `&amount=eq.${Number(app.amount ?? 0)}` +
           `&created_at=gte.${encodeURIComponent(day)}&order=id.desc`,
       );

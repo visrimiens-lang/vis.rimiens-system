@@ -33,6 +33,7 @@ import {
   yamatoTrackingUrl,
   type ProgressStep,
 } from "@/components/Progress";
+import { paymentMethodLabel, paymentStatusOf, reviewStatusLabel } from "@/lib/payment-status";
 import {
   ALL,
   buildListHref,
@@ -79,6 +80,7 @@ const SORT_COLUMNS = [
   "staff",
   "progress",
   "review",
+  "pay",
   "ship",
 ];
 
@@ -148,6 +150,10 @@ function orderDate(v: string, withYear: boolean): string {
 type OrderView = OrderWithReward & {
   reviewResult: string;
   deliveredOn: string;
+  /** お客様のメールアドレス（顧客台帳から）。 */
+  email: string;
+  /** お支払いの状況（着金待ち / 決済完了）。受注に無ければ顧客台帳から補う。 */
+  payStatus: string;
   /** 担当スタッフのコード。分からないときは空。 */
   staffCode: string;
   /** 担当スタッフの名前。分からないときは空。 */
@@ -229,17 +235,24 @@ export default async function CustomersPage({
        * 受注側に入っていればそちらを使う。
        */
       const deliveredByCustomer = new Map<string, string>();
+      // 本部の顧客管理と同じものを出すための、メールアドレスとお支払いの状況
+      const emailByCustomer = new Map<string, string>();
+      const paymentByCustomer = new Map<string, string>();
       const customerIds = [...new Set(customerByOrder.values())].filter((id) =>
         /^\d+$/.test(id),
       );
       if (customerIds.length > 0) {
         try {
           const rows = await select<Row>(
-            `customers?select=id,delivered_on&id=in.(${customerIds.join(",")})`,
+            `customers?select=id,delivered_on,email,payment_status&id=in.(${customerIds.join(",")})`,
           );
           for (const c of rows) {
             const day = text(c, "delivered_on");
             if (day) deliveredByCustomer.set(text(c, "id"), day);
+            const mail = text(c, "email");
+            if (mail) emailByCustomer.set(text(c, "id"), mail);
+            const pay = text(c, "payment_status");
+            if (pay) paymentByCustomer.set(text(c, "id"), pay);
           }
         } catch {
           // 配達完了日が読めなくても、出荷までの進み具合は表示できるので続ける
@@ -287,20 +300,28 @@ export default async function CustomersPage({
 
       periodOrders = orders.map((o) => {
         const reviewResult = reviewByOrder.get(o.recordId) ?? "";
+        const customerId = customerByOrder.get(o.recordId) ?? "";
         const deliveredOn =
-          o.deliveredAt ||
-          deliveredByCustomer.get(customerByOrder.get(o.recordId) ?? "") ||
-          "";
+          o.deliveredAt || deliveredByCustomer.get(customerId) || "";
+        // 受注側に入っていればそちら。列ができる前の受注は顧客台帳から補う。
+        const payStatus = paymentStatusOf(
+          o.paymentMethod,
+          o.paymentStatus || paymentByCustomer.get(customerId),
+        );
         const state = progressOf({
           reviewResult,
           shipStatus: o.shippingStatus,
           deliveredOn,
+          paymentMethod: o.paymentMethod,
+          paymentStatus: payStatus,
         });
         return {
           ...o,
           ...staffOf(o),
           reviewResult,
           deliveredOn,
+          email: emailByCustomer.get(customerId) ?? "",
+          payStatus,
           stopped: state.stopped,
           percent: state.stopped ? 0 : state.percent,
         };
@@ -413,7 +434,8 @@ export default async function CustomersPage({
     owner: (o) => o.ownerCode,
     staff: (o) => o.staffName || o.staffCode,
     progress: (o) => o.percent,
-    review: (o) => o.reviewResult,
+    review: (o) => reviewStatusLabel(o.paymentMethod, o.reviewResult),
+    pay: (o) => o.payStatus,
     ship: (o) => o.shippingStatus,
   };
   const rows = sortRows(found, sort.column, sort.desc, accessors);
@@ -610,7 +632,7 @@ export default async function CustomersPage({
                   basePath={BASE}
                   params={params}
                 />
-                <Th>電話番号</Th>
+                <Th>電話番号・メール</Th>
                 <SortableTh
                   column="product"
                   label="商品名"
@@ -657,7 +679,14 @@ export default async function CustomersPage({
                 />
                 <SortableTh
                   column="review"
-                  label="審査結果"
+                  label="審査"
+                  sort={sort}
+                  basePath={BASE}
+                  params={params}
+                />
+                <SortableTh
+                  column="pay"
+                  label="お支払い"
                   sort={sort}
                   basePath={BASE}
                   params={params}
@@ -679,7 +708,14 @@ export default async function CustomersPage({
                   <tr key={o.recordId}>
                     <Td numeric>{orderDate(o.date, allPeriod)}</Td>
                     <Td>{o.customerName || "—"}</Td>
-                    <Td numeric>{o.phone || "—"}</Td>
+                    <Td className="whitespace-nowrap">
+                      <span className="tabnum">{o.phone || "—"}</span>
+                      {o.email ? (
+                        <div className="mt-1 max-w-[13rem] truncate text-xs text-ink-400" title={o.email}>
+                          {o.email}
+                        </div>
+                      ) : null}
+                    </Td>
                     <Td className="min-w-[13rem] max-w-[22rem]">
                       <span className="line-clamp-2 leading-snug" title={o.productName || undefined}>
                         {o.productName || "—"}
@@ -729,10 +765,20 @@ export default async function CustomersPage({
                         reviewResult={o.reviewResult}
                         shipStatus={o.shippingStatus}
                         deliveredOn={o.deliveredOn}
+                        paymentMethod={o.paymentMethod}
+                        paymentStatus={o.payStatus}
                       />
                     </Td>
                     <Td>
-                      <StatusBadge status={o.reviewResult} />
+                      <StatusBadge status={reviewStatusLabel(o.paymentMethod, o.reviewResult)} />
+                    </Td>
+                    <Td>
+                      <StatusBadge status={o.stopped ? "キャンセル" : o.payStatus} />
+                      {o.paymentMethod ? (
+                        <div className="mt-1 whitespace-nowrap text-xs text-ink-400">
+                          {paymentMethodLabel(o.paymentMethod)}
+                        </div>
+                      ) : null}
                     </Td>
                     <Td>
                       <StatusBadge status={o.shippingStatus} />

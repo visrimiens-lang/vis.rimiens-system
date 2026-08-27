@@ -473,6 +473,8 @@ export default async function DashboardPage() {
                       reviewResult={o.reviewResult}
                       shipStatus={o.shippingStatus}
                       deliveredOn={o.deliveredOn}
+                      paymentMethod={o.paymentMethod}
+                      paymentStatus={o.paymentStatus}
                     />
                   </Td>
                 </tr>

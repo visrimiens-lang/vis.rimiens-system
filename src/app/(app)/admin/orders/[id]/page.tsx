@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import { select, selectOne } from "@/lib/db";
 import { PRODUCT_COLUMNS, buildProductMatcher } from "@/lib/product-match";
+import { paymentMethodLabel, paymentStatusOf } from "@/lib/payment-status";
 import { rankLabel, rankShort } from "@/lib/labels";
 import { digitsOf } from "@/lib/list-params";
 import {
@@ -481,7 +482,14 @@ export default async function AdminOrderDetailPage({
               {yen(amount)}
             </span>
           </Field>
-          <Field label="お支払い方法">{str(order, "payment_method")}</Field>
+          <Field label="お支払い方法">
+            {paymentMethodLabel(str(order, "payment_method")) || str(order, "payment_method")}
+          </Field>
+          <Field label="お支払い">
+            <StatusBadge
+              status={paymentStatusOf(str(order, "payment_method"), str(order, "payment_status"))}
+            />
+          </Field>
           <Field label="審査結果">
             {reviewResult ? (
               <StatusBadge status={reviewResult} />
@@ -603,6 +611,8 @@ export default async function AdminOrderDetailPage({
         referrerOptions={referrerOptions}
         staffCode={str(order, "staff_code")}
         staffOptions={staffOptions}
+        paymentMethod={str(order, "payment_method")}
+        paymentStatus={str(order, "payment_status")}
       />
 
       <Card

@@ -3,6 +3,7 @@ import { audit, insert, select, selectOne, update } from "./db";
 import { todayInJapan } from "./jst";
 import { usesPortal } from "./labels";
 import { OFFICIAL_LINE_URL, QR2_APPROVED, buildQrUrl, tossUpUrl } from "./qr";
+import { initialPaymentStatus } from "./payment-status";
 import { AREA_QUOTA, DEFAULT_STAFF_LIMIT } from "./slots";
 import {
   HQ_MAIL,
@@ -1450,6 +1451,15 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
 
   // 受注が残ったので、お客様を顧客台帳に結びつける。
   // ここで失敗しても受注は消さない（進み具合の表示が出ないだけで、売上と報酬は残る）。
+  // お支払いの初期値。orders.payment_status の列がまだ無くても受注は残す。
+  try {
+    await update(`orders?id=eq.${encodeURIComponent(String(order["id"]))}`, {
+      payment_status: initialPaymentStatus(normalizePaymentMethod(app.paymentMethod ?? "").value),
+    });
+  } catch {
+    // 列がまだ無い。supabase/migrations の payment_status を流すと入り始める。
+  }
+
   let customerId: number | null = null;
   try {
     customerId = await linkCustomer({
@@ -1462,8 +1472,12 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
       agencyCode,
       staffCode,
       referrerCode,
-      // 受注は決済が済んだ知らせとして届く（kintone 顧客管理と同じ言葉づかい）
-      paymentStatus: "決済完了",
+      /*
+       * お客様側のお支払い状況も受注と同じ初期値にする（2026-08-27）。
+       * 銀行振込・アプラスは着金までお金が動いていないので「着金待ち」。
+       * 本部が受注詳細で決済完了にすると、こちらにも写る。
+       */
+      paymentStatus: initialPaymentStatus(normalizePaymentMethod(app.paymentMethod ?? "").value),
     });
     if (customerId) {
       await update(`orders?id=eq.${encodeURIComponent(String(order["id"]))}`, {

@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import { listAllAgencies } from "@/lib/agencies";
 import { effectivePayUnits, payTaxIncl, payoutForOrder } from "@/lib/pay-defaults";
+import { paymentMethodLabel, paymentStatusOf, reviewStatusLabel } from "@/lib/payment-status";
 import { select } from "@/lib/db";
 import { agencyTypeOf, companyNameOf, rankLabel } from "@/lib/labels";
 import { PRODUCT_COLUMNS, buildProductMatcher } from "@/lib/product-match";
@@ -138,6 +139,8 @@ const SORT_COLUMNS = [
   "quantity",
   "amount",
   "payment",
+  "review",
+  "pay",
   "payee",
   "staff",
   "owner",
@@ -219,6 +222,7 @@ function toAdminOrder(r: Row): AdminOrder {
     shippedAt: str(r, "shipped_on"),
     paymentMethod: str(r, "payment_method"),
     matchStatus: str(r, "match_status"),
+    paymentStatus: str(r, "payment_status"),
     agencyCode,
     secondaryCode: str(r, "niji_code"),
     referrerCode: referrer,
@@ -576,7 +580,9 @@ export default async function AdminOrdersPage({
     product: (o) => o.productName,
     quantity: (o) => o.quantity || 1,
     amount: (o) => o.amount,
-    payment: (o) => o.paymentMethod,
+    payment: (o) => paymentMethodLabel(o.paymentMethod),
+    review: (o) => reviewStatusLabel(o.paymentMethod, o.reviewResult),
+    pay: (o) => paymentStatusOf(o.paymentMethod, o.paymentStatus),
     payee: (o) => payeeCodeOf(o),
     staff: (o) => nameByCode.get(o.staffCode) || o.staffCode,
     owner: (o) => o.ownerCode,
@@ -963,6 +969,8 @@ export default async function AdminOrdersPage({
                 <SortableTh column="quantity" label="台数" sort={sort} basePath={BASE} params={params} align="right" />
                 <SortableTh column="amount" label="金額（税込）" sort={sort} basePath={BASE} params={params} align="right" />
                 <SortableTh column="payment" label="決済方法" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="review" label="審査" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="pay" label="お支払い" sort={sort} basePath={BASE} params={params} />
                 <SortableTh column="payee" label="代理店" sort={sort} basePath={BASE} params={params} />
                 <SortableTh column="staff" label="担当スタッフ" sort={sort} basePath={BASE} params={params} />
                 <SortableTh column="owner" label="担当コード" sort={sort} basePath={BASE} params={params} />
@@ -1019,7 +1027,15 @@ export default async function AdminOrdersPage({
                       {yen(o.amount)}
                     </Td>
                     <Td className="whitespace-nowrap">
-                      {o.paymentMethod || <span className="text-ink-400">—</span>}
+                      {paymentMethodLabel(o.paymentMethod) || <span className="text-ink-400">—</span>}
+                    </Td>
+                    {/* 審査：アプラス（信販）だけ審査がある。銀行振込・クレカは自動で完了。 */}
+                    <Td className="whitespace-nowrap">
+                      <StatusBadge status={reviewStatusLabel(o.paymentMethod, o.reviewResult)} />
+                    </Td>
+                    {/* お支払い：着金待ち／決済完了。変更は受注詳細から。 */}
+                    <Td className="whitespace-nowrap">
+                      <StatusBadge status={o.voided ? "キャンセル" : paymentStatusOf(o.paymentMethod, o.paymentStatus)} />
                     </Td>
                     <Td>
                       {payee ? (
@@ -1101,6 +1117,9 @@ export default async function AdminOrdersPage({
                 <Td numeric align="right" className="font-semibold text-gold-300">
                   {yen(salesTotal)}
                 </Td>
+                {/* 決済方法・審査・お支払いのぶん（見出しと列数を合わせる） */}
+                <Td>{null}</Td>
+                <Td>{null}</Td>
                 <Td>{null}</Td>
                 <Td>{null}</Td>
                 <Td>{null}</Td>
@@ -1122,6 +1141,8 @@ export default async function AdminOrdersPage({
                   <Td numeric align="right" className="whitespace-nowrap text-bad-100 line-through">
                     {yen(voidedSales)}
                   </Td>
+                  <Td>{null}</Td>
+                  <Td>{null}</Td>
                   <Td>{null}</Td>
                   <Td>{null}</Td>
                   <Td>{null}</Td>

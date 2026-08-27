@@ -145,7 +145,14 @@ function progressSourceOf(c: CustomerView): ProgressSource {
   // 出荷の状態だけを見ていると、止まった案件が「審査完了 40%」のまま並んでしまう。
   const ship = c.paymentStatus === "否決・キャンセル" ? "キャンセル" : c.shipStatus;
 
-  return { reviewResult: review, shipStatus: ship, deliveredOn: c.deliveredOn };
+  return {
+    reviewResult: review,
+    shipStatus: ship,
+    deliveredOn: c.deliveredOn,
+    // 決済完了（着金）の段階を進み具合に効かせる（2026-08-27）
+    paymentMethod: c.paymentMethod,
+    paymentStatus: c.paymentStatus,
+  };
 }
 
 /**

@@ -1,12 +1,15 @@
 import { Badge, cn } from "@/components/ui";
+import { paymentStatusOf, reviewStatusLabel } from "@/lib/payment-status";
 
 /**
  * 申込から商品のお届けまでの進み具合。
  *
  * 2026-04-23 の打ち合わせで「自分が獲得したお客様が今どこまで進んでいるか、
  * その場で分かるようにしてほしい」という要望が出ている。
- * 段階と割合は設計書の取り決めどおり（申込20 → 審査完了40 → 出荷手配中60 →
- * 出荷済80 → 配達完了100）。
+ * 段階と割合は設計書の取り決め（申込20 → 審査完了40 → 出荷手配中60 →
+ * 出荷済80 → 配達完了100）を土台に、2026-08-27 の会議で「決済完了（着金）」を
+ * 審査と出荷の間に足した（申込20 → 審査完了40 → 決済完了50 → 出荷手配中60 →
+ * 出荷済80 → 配達完了100）。銀行振込・アプラスは、お金が届くまでここで止まる。
  *
  * 判定のもとになるのは受注の「審査結果」「出荷状況」と、顧客台帳の「配達完了日」。
  * どの画面でも同じ言い方・同じ割合になるように、判定はこのファイルに集める。
@@ -21,6 +24,7 @@ export type ProgressStep = {
 export const PROGRESS_STEPS: readonly ProgressStep[] = [
   { key: "applied", label: "申込", percent: 20 },
   { key: "reviewed", label: "審査完了", percent: 40 },
+  { key: "paid", label: "決済完了", percent: 50 },
   { key: "arranging", label: "出荷手配中", percent: 60 },
   { key: "shipped", label: "出荷済", percent: 80 },
   { key: "delivered", label: "配達完了", percent: 100 },
@@ -33,6 +37,10 @@ export type ProgressSource = {
   shipStatus?: string | null;
   /** 顧客台帳の配達完了日。入っていればお届け済み。 */
   deliveredOn?: string | null;
+  /** 受注の決済方法（Stripe / 振込 / アプラス など）。審査の有無の判定に使う。 */
+  paymentMethod?: string | null;
+  /** 受注のお支払い状況（着金待ち / 決済完了）。空なら決済方法から補う。 */
+  paymentStatus?: string | null;
 };
 
 /** 進んでいる途中か、途中で止まったか。 */
@@ -82,6 +90,8 @@ export function progressOf(src: ProgressSource): ProgressState {
   const ship = clean(src.shipStatus);
   const review = clean(src.reviewResult);
   const delivered = clean(src.deliveredOn);
+  const reviewLabel = reviewStatusLabel(src.paymentMethod, review);
+  const paid = paymentStatusOf(src.paymentMethod, src.paymentStatus) === "決済完了";
 
   // 途中で止まったもの。棒を伸ばさず、止まったことが分かる形で出す。
   if (ship === "キャンセル") {
@@ -111,8 +121,19 @@ export function progressOf(src: ProgressSource): ProgressState {
   if (ship === "出荷手配中") {
     return advancing("arranging", "発送の準備をしています。");
   }
-  if (review === "承認") {
-    return advancing("reviewed", "審査に通りました。発送の手配をお待ちください。");
+  /*
+   * 出荷前は「審査 → 決済（着金） → 出荷」の順に見る。
+   * 銀行振込・アプラスは、審査が済んでいてもお金が届くまでは
+   * 「審査完了」で止め、着金の確認待ちであることを伝える。
+   */
+  if (reviewLabel === "審査完了") {
+    if (paid) {
+      return advancing("paid", "お支払いを確認しました。発送の手配をお待ちください。");
+    }
+    return advancing(
+      "reviewed",
+      "審査は完了しています。ご入金（着金）の確認待ちです。",
+    );
   }
   if (review === "電話確認待ち") {
     return advancing(
@@ -131,10 +152,12 @@ export function Progress({
   reviewResult,
   shipStatus,
   deliveredOn,
+  paymentMethod,
+  paymentStatus,
   compact = false,
   className,
 }: ProgressSource & { compact?: boolean; className?: string }) {
-  const state = progressOf({ reviewResult, shipStatus, deliveredOn });
+  const state = progressOf({ reviewResult, shipStatus, deliveredOn, paymentMethod, paymentStatus });
 
   if (state.stopped) {
     return (

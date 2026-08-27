@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { PAYMENT_STATUSES } from "@/lib/payment-status";
 import { currentViewer } from "@/lib/auth";
 import { audit, select, selectOne, update } from "@/lib/db";
 import { todayInJapan } from "@/lib/jst";
@@ -609,6 +610,16 @@ export async function updateOrderAction(
     return { error: "照合の状態は「照合済」「要確認」「直販」から選んでください。" };
   }
 
+  /*
+   * お支払い（着金待ち／決済完了）。2026-08-27 会議で追加。
+   * 銀行振込・アプラスの着金を本部が確認して、手で「決済完了」に変える欄。
+   * 欄を出していない古い画面から届いたときは空で、その場合は何も変えない。
+   */
+  const paymentStatus = text(formData, "paymentStatus");
+  if (paymentStatus && !(PAYMENT_STATUSES as readonly string[]).includes(paymentStatus)) {
+    return { error: "お支払いは「着金待ち」「決済完了」から選んでください。" };
+  }
+
   const referrer = text(formData, "referrerCode");
   if (referrer && !/^[A-Za-z0-9-]{1,20}$/.test(referrer)) {
     return {
@@ -718,6 +729,7 @@ export async function updateOrderAction(
       match_status: matchStatus,
       referrer_code: referrer || null,
     };
+
     // 空欄のときは、はっきり「空にする」と言われた場合だけ消す
     if (staff) patch.staff_code = staff;
     else if (clearStaff) patch.staff_code = null;
@@ -742,6 +754,26 @@ export async function updateOrderAction(
         保存しようとした審査結果: review || "（未設定）",
       });
       return { error: RACED };
+    }
+
+    /*
+     * お支払いは別枠で保存する。
+     * payment_status の列がまだ無い環境でも、審査・照合の保存まで
+     * 巻き添えで失敗しないようにするため。
+     * お客様側（customers.payment_status）にも写す。顧客一覧と
+     * 代理店の顧客管理は、そちらを見ているため。
+     */
+    if (paymentStatus) {
+      try {
+        await update(`orders?id=eq.${id}`, { payment_status: paymentStatus });
+        if (reviewCustomerId && /^\d+$/.test(reviewCustomerId)) {
+          await update(`customers?id=eq.${reviewCustomerId}`, {
+            payment_status: paymentStatus,
+          });
+        }
+      } catch {
+        // 列がまだ無い。supabase/migrations の payment_status を流すと保存できる。
+      }
     }
   } catch (e) {
     return failed("審査・照合の内容を保存できませんでした。", e);

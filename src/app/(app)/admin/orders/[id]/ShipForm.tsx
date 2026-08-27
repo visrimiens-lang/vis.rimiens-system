@@ -7,6 +7,7 @@ import {
   type OrderActionState,
 } from "@/actions/order-actions";
 import { Card, Notice } from "@/components/ui";
+import { PAYMENT_STATUSES, paymentMethodLabel, paymentStatusOf } from "@/lib/payment-status";
 
 const initial: OrderActionState = {};
 
@@ -44,6 +45,8 @@ export function ShipForm({
   referrerOptions,
   staffCode = "",
   staffOptions,
+  paymentMethod = "",
+  paymentStatus = "",
 }: {
   orderId: string;
   shipStatus: string;
@@ -54,6 +57,10 @@ export function ShipForm({
   reviewResult: string;
   creditRefNo: string;
   matchStatus: string;
+  /** 決済方法（Stripe / 振込 / アプラス など）。お支払い欄の説明に使う。 */
+  paymentMethod?: string;
+  /** お支払いの状況（着金待ち / 決済完了）。列ができる前の受注は空。 */
+  paymentStatus?: string;
   referrerCode: string;
   referrerOptions: ReferrerOption[];
   /** いま記録されている担当スタッフのコード。渡されなければ空欄で始まる。 */
@@ -73,6 +80,8 @@ export function ShipForm({
       <ReviewSection
         orderId={orderId}
         reviewResult={reviewResult}
+        paymentMethod={paymentMethod}
+        paymentStatus={paymentStatus}
         creditRefNo={creditRefNo}
         matchStatus={matchStatus}
         referrerCode={referrerCode}
@@ -258,6 +267,8 @@ function ShipmentSection({
 function ReviewSection({
   orderId,
   reviewResult,
+  paymentMethod,
+  paymentStatus,
   creditRefNo,
   matchStatus,
   referrerCode,
@@ -267,6 +278,8 @@ function ReviewSection({
 }: {
   orderId: string;
   reviewResult: string;
+  paymentMethod: string;
+  paymentStatus: string;
   creditRefNo: string;
   matchStatus: string;
   referrerCode: string;
@@ -327,6 +340,27 @@ function ReviewSection({
             </select>
             <span className={hintCls}>
               信販会社からの回答を選びます。否決にすると報酬が取り消されます。
+            </span>
+          </label>
+
+          <label className="block">
+            <span className={labelCls}>お支払い</span>
+            <select
+              name="paymentStatus"
+              defaultValue={paymentStatusOf(paymentMethod, paymentStatus)}
+              disabled={pending}
+              className={inputCls}
+            >
+              {PAYMENT_STATUSES.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </select>
+            <span className={hintCls}>
+              {paymentMethodLabel(paymentMethod) || "決済方法が未記録"}のご注文です。
+              銀行振込・アプラスは着金を確認したら「決済完了」に変えてください。
+              クレジットカードは自動で決済完了になります。
             </span>
           </label>
 

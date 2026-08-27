@@ -33,6 +33,7 @@ function toOrder(r: Row): Order {
     shippedAt: s_(r, "shipped_on"),
     deliveredAt: s_(r, "delivered_on"),
     paymentMethod: s_(r, "payment_method"),
+    paymentStatus: s_(r, "payment_status"),
     matchStatus: s_(r, "match_status"),
     agencyCode,
     secondaryCode: s_(r, "niji_code"),

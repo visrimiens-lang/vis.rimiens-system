@@ -1,5 +1,6 @@
 "use client";
 
+import { paymentMethodLabel } from "@/lib/payment-status";
 import { Fragment, useActionState, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Search, X } from "lucide-react";
@@ -149,6 +150,7 @@ function reviewTone(v: string): Tone {
 function paymentTone(v: string): Tone {
   if (v === "決済完了") return "good";
   if (v === "否決・キャンセル") return "bad";
+  // 着金待ちなどは「まだお金が届いていない」ので注意色
   return "warn";
 }
 
@@ -212,8 +214,13 @@ export function CustomerRow({
             ) : null}
           </div>
         </Td>
-        <Td numeric className="whitespace-nowrap">
-          {customer.phone || "—"}
+        <Td className="whitespace-nowrap">
+          <span className="tabnum">{customer.phone || "—"}</span>
+          {customer.email ? (
+            <div className="mt-1 max-w-[14rem] truncate text-xs text-ink-400" title={customer.email}>
+              {customer.email}
+            </div>
+          ) : null}
         </Td>
         <Td>
           {customer.agencyCode ? (
@@ -270,7 +277,9 @@ export function CustomerRow({
             tone={paymentTone(customer.paymentStatus)}
           />
           {customer.paymentMethod ? (
-            <div className="mt-1 text-xs text-ink-400">{customer.paymentMethod}</div>
+            <div className="mt-1 text-xs text-ink-400">
+              {paymentMethodLabel(customer.paymentMethod) || customer.paymentMethod}
+            </div>
           ) : null}
         </Td>
         <Td>

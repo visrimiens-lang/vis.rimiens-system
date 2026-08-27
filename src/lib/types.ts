@@ -107,6 +107,8 @@ export type Order = {
   /** 配達が完了した日。売上・報酬はこの日付の月で数える。 */
   deliveredAt: string;
   paymentMethod: string;
+  /** お支払いの状況（着金待ち / 決済完了）。列ができる前の受注は空。 */
+  paymentStatus: string;
   matchStatus: string;
   agencyCode: string;
   secondaryCode: string;

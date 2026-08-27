@@ -172,6 +172,18 @@ export function PayUnitCell({
                       {PAY_ITEM_HINT[item]}
                     </span>
                   </span>
+                  {/*
+                    空欄のときに何が使われるかは、入力欄ではなくラベルの側に出す。
+                    薄い字で入る文字は金額だけにしておかないと、
+                    数字を打ったときに入力済みなのかどうかが見分けにくい。
+                  */}
+                  <span className="mt-0.5 block text-xs text-ink-500">
+                    {item === "body"
+                      ? fallback !== null
+                        ? `空欄なら既定の ${fallback.toLocaleString("ja-JP")} 円`
+                        : "空欄なら商品マスタの単価"
+                      : "空欄ならこの品目では払わない"}
+                  </span>
                   <input
                     name={
                       item === "body"
@@ -185,11 +197,9 @@ export function PayUnitCell({
                     inputMode="numeric"
                     defaultValue={current[item] !== null ? String(current[item]) : ""}
                     placeholder={
-                      item === "body"
-                        ? fallback !== null
-                          ? `空欄なら ${fallback.toLocaleString("ja-JP")}（既定）`
-                          : "空欄なら既定"
-                        : "空欄ならこの品目では払わない"
+                      item === "body" && fallback !== null
+                        ? fallback.toLocaleString("ja-JP")
+                        : "0"
                     }
                     className="tabnum mt-1 w-full rounded-lg border border-ink-700 bg-ink-900 px-2.5 py-2 text-sm text-ink-100 placeholder:text-ink-500 focus:border-ink-600"
                   />

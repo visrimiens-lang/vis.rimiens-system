@@ -129,7 +129,11 @@ export async function POST(req: NextRequest) {
         acquiredKind: pick(data, "取得区分", "購入区分", "acquiredKind") || undefined,
         acquiredOn: pick(data, "取得日", "購入日", "acquiredOn") || undefined,
         holderCode: pick(data, "代理店コード", "保有代理店コード", "code") || undefined,
-        holderName: pick(data, "保有代理店名", "代理店名") || undefined,
+        // 「所属代理店名」は販売代理店だけの欄。エリア統括・個人販売代理店の
+        // 申込は「自社会社名」に書く（フォーム 261833737598069 の分岐）。
+        // 拾えないと代理店マスタの名前で埋まり、2026-08-27 の
+        // 「個人代理店キャプテン」が「株式会社キャプテン」として入っていた。
+        holderName: pick(data, "保有代理店名", "代理店名", "自社会社名") || undefined,
         purpose: pick(data, "貸与目的", "主な利用用途", "目的", "purpose") || undefined,
         note: pick(data, "備考", "note") || undefined,
       });

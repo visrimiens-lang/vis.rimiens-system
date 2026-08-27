@@ -159,7 +159,8 @@ export async function reprocessInboxAction(
         acquiredKind: pick("取得区分", "購入区分", "acquiredKind") || undefined,
         acquiredOn: pick("取得日", "購入日", "acquiredOn") || undefined,
         holderCode: pick("代理店コード", "保有代理店コード", "code") || undefined,
-        holderName: pick("保有代理店名", "代理店名") || undefined,
+        // 「自社会社名」を足す理由は webhook 側と同じ（jotform/route.ts）
+        holderName: pick("保有代理店名", "代理店名", "自社会社名") || undefined,
         purpose: pick("貸与目的", "主な利用用途", "目的", "purpose") || undefined,
         note: pick("備考", "note") || undefined,
       });

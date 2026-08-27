@@ -3,7 +3,7 @@ import Link from "next/link";
 import { FileText } from "lucide-react";
 import { currentViewer } from "@/lib/auth";
 import { findAgencyByCode, listDescendants } from "@/lib/agencies";
-import { effectivePayUnits, payoutForOrder, type PayUnits } from "@/lib/pay-defaults";
+import { effectivePayUnits, payTaxIncl, payoutForOrder, type PayUnits } from "@/lib/pay-defaults";
 import {
   attachRewards,
   canComputeReward,
@@ -153,7 +153,9 @@ function groupByOwner(
           if (one === null) { ok = false; break; }
           sum += one;
         }
-        payout = ok ? sum : null;
+        // 画面はすべて税込。支払額は税抜きで持っているので、ここで足す。
+        // 支払通知書は税抜きの小計に消費税を足して総額を出すので、そちらは触らない。
+        payout = ok ? payTaxIncl(sum) : null;
       }
       return {
         code,
@@ -186,20 +188,15 @@ function MemberRow({ g, showReward }: { g: OwnerGroup; showReward: boolean }) {
         </Td>
       ) : null}
       {showReward ? (
-        <Td numeric align="right">
-          {g.payUnit === null ? (
+        <Td numeric align="right" className="text-ink-50">
+          {g.payout === null ? (
             <span className="text-ink-500">—</span>
           ) : (
             <>
-              {yen(g.payUnit)}
+              {yen(g.payout)}
               {g.payCustom ? <span className="ml-1 text-xs text-gold-500">個別</span> : null}
             </>
           )}
-        </Td>
-      ) : null}
-      {showReward ? (
-        <Td numeric align="right" className="text-ink-50">
-          {g.payout === null ? <span className="text-ink-500">—</span> : yen(g.payout)}
         </Td>
       ) : null}
     </tr>
@@ -503,14 +500,14 @@ export default async function RewardsPage({
       {/*
         3次（販売代理店）と取次店へのお支払いは、本部ではなく上位のエリア統括代理店から。
         この画面の報酬額は商品マスタの税込単価で出した目安なので、
-        実際に受け取る額（上位が決める・税抜）とは基準が違う。
+        実際に受け取る額（上位が決める）とは基準が違う。
         黙っていると「画面より5,000円少ない」という行き違いが起きるため、先に断っておく。
       */}
       {showReward && (rewardRank === "販売代理店" || rewardRank === "取次店") ? (
         <Notice tone="info">
           この画面の報酬額は、商品マスタの税込単価で計算した目安です。
           実際のお支払いは上位の代理店からとなり、1台あたりの金額は
-          上位の代理店が決めます（税抜。ご不明な場合は上位の代理店にご確認ください）。
+          上位の代理店が決めます（ご不明な場合は上位の代理店にご確認ください）。
         </Notice>
       ) : null}
 
@@ -620,7 +617,7 @@ export default async function RewardsPage({
         <Notice tone="warn">
           支払額を出せない担当が {missingPayUnit.length} 名います（
           {missingPayUnit.map((g) => g.name || g.code).join("、")}）。
-          「スタッフ一覧」の「金額修正」からその方の支払額（本体価格・OP①・OP②・1年後定期／税抜）を
+          「スタッフ一覧」の「金額修正」からその方の支払額（本体価格・OP①・OP②・1年後定期／税込）を
           入れると、お支払額と合計が出ます。お支払額は、受注ごとに含まれている品目の額を足して数量を掛けたものです。
           入るまで、お支払額の合計は出しません。
         </Notice>
@@ -770,8 +767,7 @@ export default async function RewardsPage({
                 <Th align="right">台数</Th>
                 {showReward ? <Th align="right">報酬額（税込）</Th> : null}
                 {/* スタッフにいくら払うか。単価はスタッフ一覧で変更できる（個別 or ランクの既定） */}
-                {showReward ? <Th align="right">本体価格（税抜）</Th> : null}
-                {showReward ? <Th align="right">お支払額（税抜）</Th> : null}
+                {showReward ? <Th align="right">お支払額（税込）</Th> : null}
               </tr>
             </thead>
             <tbody>
@@ -797,7 +793,6 @@ export default async function RewardsPage({
                         {yen(row.reward)}
                       </Td>
                     ) : null}
-                    {showReward ? <Td>{null}</Td> : null}
                     {showReward ? (
                       <Td numeric align="right" className="font-semibold text-ink-100">
                         {row.payout === null ? (
@@ -825,8 +820,6 @@ export default async function RewardsPage({
                     {yen(rewardTotal)}
                   </Td>
                 ) : null}
-                {/* 支払単価は人ごとに違うので、合計は出さない */}
-                {showReward ? <Td>{null}</Td> : null}
                 {showReward ? (
                   <Td numeric align="right" className="font-semibold text-gold-400">
                     {hasPayout ? yen(payoutTotal) : "—"}

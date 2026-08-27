@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { setPayUnitAction, type PayUnitState } from "@/actions/pay-unit-actions";
+import { payTaxIncl } from "@/lib/pay-defaults";
 import { PAY_ITEMS, PAY_ITEM_HINT, PAY_ITEM_LABEL, type PayItem } from "@/lib/pay-items";
 
 /**
@@ -46,7 +47,7 @@ export function PayUnitCell({
   op1: number | null;
   op2: number | null;
   padYearly: number | null;
-  /** 本体が未設定のときに実際に使われる額（推奨の税抜単価。lib/pay-defaults.ts） */
+  /** 本体が未設定のときに実際に使われる額（税抜きで渡す。lib/pay-defaults.ts） */
   fallback: number | null;
   note: string;
   editable: boolean;
@@ -92,8 +93,12 @@ export function PayUnitCell({
     if (state.ok) setOpen(false);
   }, [state.ok]);
 
+  /*
+   * 表示はすべて税込。支払額は税抜きで保存しているので、出すときに消費税を足す。
+   * 保存を税込にすると、支払通知書が小計にもう一度消費税を足してしまう。
+   */
   const bodyShown =
-    value !== null ? yen(value) : fallback !== null ? yen(fallback) : "—";
+    value !== null ? yen(payTaxIncl(value)) : fallback !== null ? yen(payTaxIncl(fallback)) : "—";
   const extras = (["op1", "op2", "padYearly"] as PayItem[]).filter(
     (i) => current[i] !== null,
   );
@@ -108,7 +113,7 @@ export function PayUnitCell({
         <div className="mt-1 space-y-0.5">
           {extras.map((i) => (
             <div key={i} className="text-xs text-ink-400">
-              {PAY_ITEM_LABEL[i]} {yen(current[i] as number)}
+              {PAY_ITEM_LABEL[i]} {yen(payTaxIncl(current[i] as number))}
             </div>
           ))}
         </div>
@@ -155,11 +160,11 @@ export function PayUnitCell({
 
             <div>
               <h2 className="text-base font-semibold text-ink-50">
-                {name} に払う額
+                {name} に払う額（税込）
               </h2>
               <p className="mt-1 text-xs leading-relaxed text-ink-400">
                 受注に含まれている品目の額を足して、数量を掛けたものがお支払額になります。
-                金額はすべて税抜きです（支払通知書が小計に消費税を足します）。
+                金額はすべて税込です。支払通知書には、消費税を分けた小計とあわせて出ます。
               </p>
             </div>
 
@@ -180,7 +185,7 @@ export function PayUnitCell({
                   <span className="mt-0.5 block text-xs text-ink-500">
                     {item === "body"
                       ? fallback !== null
-                        ? `空欄なら既定の ${fallback.toLocaleString("ja-JP")} 円`
+                        ? `空欄なら既定の ${payTaxIncl(fallback).toLocaleString("ja-JP")} 円`
                         : "空欄なら商品マスタの単価"
                       : "空欄ならこの品目では払わない"}
                   </span>
@@ -195,10 +200,12 @@ export function PayUnitCell({
                             : "amountPadYearly"
                     }
                     inputMode="numeric"
-                    defaultValue={current[item] !== null ? String(current[item]) : ""}
+                    defaultValue={
+                      current[item] !== null ? String(payTaxIncl(current[item] as number)) : ""
+                    }
                     placeholder={
                       item === "body" && fallback !== null
-                        ? fallback.toLocaleString("ja-JP")
+                        ? payTaxIncl(fallback).toLocaleString("ja-JP")
                         : "0"
                     }
                     className="tabnum mt-1 w-full rounded-lg border border-ink-700 bg-ink-900 px-2.5 py-2 text-sm text-ink-100 placeholder:text-ink-500 focus:border-ink-600"

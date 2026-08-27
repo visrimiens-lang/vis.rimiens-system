@@ -1,6 +1,6 @@
 import "server-only";
 
-import { payoutForOrder, type PayUnits } from "./pay-defaults";
+import { payTaxIncl, payoutForOrder, type PayUnits } from "./pay-defaults";
 import { select } from "./db";
 import { PRODUCT_COLUMNS, buildProductMatcher } from "./product-match";
 import type { Agency, Order } from "./types";
@@ -185,7 +185,9 @@ export function attachRewards(
     if (payUnits) {
       const paid = payoutForOrder(payUnits, o.productName, qty);
       if (paid !== null) {
-        return { ...o, unitReward: qty > 0 ? Math.round(paid / qty) : null, reward: paid };
+        // 支払額は税抜きで持っている。画面はすべて税込でそろえるので、ここで足す。
+        const incl = payTaxIncl(paid);
+        return { ...o, unitReward: qty > 0 ? Math.round(incl / qty) : null, reward: incl };
       }
     }
 

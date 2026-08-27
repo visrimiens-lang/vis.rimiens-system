@@ -760,7 +760,7 @@ function AgencyTable({
                 この代理店に払う額。「金額修正」を押すと、本体価格・OP①・OP②・1年後定期を
                 品目ごとに決められる。本部は誰の額でも変えられる
                 （権限の判定は actions/pay-unit-actions.ts が行う）。
-                本体を空欄にすると既定（推奨の税抜単価）が使われる。
+                本体を空欄にすると既定（推奨の単価・税込）が使われる。
               */}
               <Td numeric align="right">
                 <PayUnitCell

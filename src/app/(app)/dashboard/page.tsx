@@ -305,20 +305,16 @@ export default async function DashboardPage() {
         {showReward ? (
           <StatTile
             /*
-             * 見出しの税の書き方を、金額の出どころに合わせる。
-             * 商品マスタの単価は税込、上位が決めた支払額は税抜で持っているため、
-             * 一方に合わせて固定すると、どちらかが必ず食い違う。
+             * 出どころが商品マスタでも上位が決めた支払額でも、画面はすべて税込でそろえる。
+             * 支払額は税抜きで持っているので、消費税を足してから出している
+             * （lib/orders.ts の attachRewards → payTaxIncl）。
              */
-            label={
-              selfPayUnits.body !== null
-                ? "今月の報酬見込み（税別）"
-                : "今月の報酬見込み（税込）"
-            }
+            label="今月の報酬見込み（税込）"
             value={rewardTotal === null ? "—" : yen(rewardTotal)}
             tone="gold"
             hint={
               selfPayUnits.body !== null
-                ? "上位の代理店が決めた本体価格・OP①・OP②・1年後定期から、受注ごとに計算しています（税別）。消費税を加えた額が支払通知書のお支払金額です。"
+                ? "上位の代理店が決めた本体価格・OP①・OP②・1年後定期から、受注ごとに計算しています。支払通知書のお支払金額と同じ額です。"
                 : rewardAvailable
                   ? `${rewardRankText}としての単価 × 台数。確定額は本部の締め後に確定します。`
                   : "単価が未設定のため計算できません"

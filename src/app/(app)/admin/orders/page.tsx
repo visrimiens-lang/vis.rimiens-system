@@ -3,7 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import { listAllAgencies } from "@/lib/agencies";
-import { effectivePayUnits, payoutForOrder } from "@/lib/pay-defaults";
+import { effectivePayUnits, payTaxIncl, payoutForOrder } from "@/lib/pay-defaults";
 import { select } from "@/lib/db";
 import { agencyTypeOf, companyNameOf, rankLabel } from "@/lib/labels";
 import { PRODUCT_COLUMNS, buildProductMatcher } from "@/lib/product-match";
@@ -487,7 +487,9 @@ export default async function AdminOrdersPage({
     const qty = o.quantity || 1;
     const paid = payoutForOrder(effectivePayUnits(payee), o.productName, qty);
     if (paid === null) return o;
-    return { ...o, secondaryUnit: qty > 0 ? Math.round(paid / qty) : null, secondaryTotal: paid };
+    // 支払額は税抜きで持っている。この列は税込でそろえるので、消費税を足す。
+    const incl = payTaxIncl(paid);
+    return { ...o, secondaryUnit: qty > 0 ? Math.round(incl / qty) : null, secondaryTotal: incl };
   });
 
   /**
@@ -836,7 +838,7 @@ export default async function AdminOrdersPage({
                 <Th align="right">件数</Th>
                 <Th align="right">台数</Th>
                 <Th align="right">売上（税込）</Th>
-                <Th align="right">支払対象額（税抜）</Th>
+                <Th align="right">支払対象額（税込）</Th>
                 <Th align="right">取消（集計外）</Th>
               </tr>
             </thead>

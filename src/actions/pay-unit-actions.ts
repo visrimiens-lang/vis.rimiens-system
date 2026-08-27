@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { currentViewer } from "@/lib/auth";
 import { audit, selectOne, update } from "@/lib/db";
+import { payTaxExcl, payTaxIncl } from "@/lib/pay-defaults";
 
 /**
  * 「この代理店にいくら払うか」を決める。
@@ -10,11 +11,11 @@ import { audit, selectOne, update } from "@/lib/db";
  * ■ 何のための機能か
  *
  * 報酬の単価は商品マスタにランク別で1組だけ持っていて、全代理店に同じ額が当たる。
- * 「推奨は 50,000円（税抜）だが、この人だけ 30,000円にしたい」
+ * 「推奨は 55,000円（税込）だが、この人だけ 33,000円にしたい」
  * 「インボイス登録が無いので減額したい」ができなかった。
  *
  * ここで額を入れると、その相手への報酬だけその額になる。
- * 空にすれば、また推奨の税抜単価（lib/pay-defaults.ts）に戻る。
+ * 空にすれば、また推奨の単価（lib/pay-defaults.ts）に戻る。
  *
  * ■ 誰が変えられるか
  *
@@ -78,6 +79,10 @@ export async function setPayUnitAction(
    * 入力欄は品目ごとに4つある。空欄と 0 は意味が違う。
    *   空欄 … 未設定。本体はランクの既定に戻り、OP は「払わない」。
    *   0    … わざと 0 円にした。既定には戻さない。
+   *
+   * 入力欄の金額は税込（画面をすべて税込でそろえたため）。
+   * 保存は税抜きのままにする。支払通知書が小計に消費税を足して総額を出すので、
+   * 税込で保存すると書面の金額が二重に課税された額になる。
    */
   const read = (field: string, label: string): number | null | { error: string } => {
     const raw = String(formData.get(field) ?? "").trim().replace(/[,，\s円]/g, "");
@@ -107,8 +112,8 @@ export async function setPayUnitAction(
   for (const f of fields) {
     const v = read(f.field, f.label);
     if (v !== null && typeof v === "object") return { error: v.error };
-    values[f.column] = v;
-    shown.push(`${f.label} ${v === null ? "未設定" : `${v.toLocaleString("ja-JP")}円`}`);
+    values[f.column] = v === null ? null : payTaxExcl(v);
+    shown.push(`${f.label} ${v === null ? "未設定" : `${v.toLocaleString("ja-JP")}円（税込）`}`);
   }
 
   const before = s_(target, "pay_unit");
@@ -143,7 +148,9 @@ export async function setPayUnitAction(
     { type: "agency", key: code },
     {
       対象: `${s_(target, "name")}（${code}）`,
-      変更前: before ? `${Number(before).toLocaleString("ja-JP")}円` : "既定（推奨の税抜単価）",
+      変更前: before
+        ? `${payTaxIncl(Number(before)).toLocaleString("ja-JP")}円（税込）`
+        : "既定（推奨の単価）",
       変更後: shown.join(" ／ "),
       理由: note || "（未記入）",
       補足:

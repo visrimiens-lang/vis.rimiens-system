@@ -72,31 +72,61 @@ export async function setPayUnitAction(
     };
   }
 
-  const raw = String(formData.get("amount") ?? "").trim().replace(/[,，\s円]/g, "");
   const note = String(formData.get("note") ?? "").trim().slice(0, 200);
 
-  let value: number | null = null;
-  if (raw !== "") {
+  /*
+   * 入力欄は品目ごとに4つある。空欄と 0 は意味が違う。
+   *   空欄 … 未設定。本体はランクの既定に戻り、OP は「払わない」。
+   *   0    … わざと 0 円にした。既定には戻さない。
+   */
+  const read = (field: string, label: string): number | null | { error: string } => {
+    const raw = String(formData.get(field) ?? "").trim().replace(/[,，\s円]/g, "");
+    if (raw === "") return null;
     const n = Number(raw);
     if (!Number.isFinite(n) || !Number.isInteger(n)) {
-      return { error: "金額は整数で入力してください。" };
+      return { error: `${label}は整数で入力してください。` };
     }
-    if (n < 0) return { error: "金額にマイナスは入れられません。" };
+    if (n < 0) return { error: `${label}にマイナスは入れられません。` };
     if (n > MAX_UNIT) {
-      return { error: `金額が大きすぎます。1台あたり ${MAX_UNIT.toLocaleString("ja-JP")} 円までで入力してください。` };
+      return {
+        error: `${label}が大きすぎます。${MAX_UNIT.toLocaleString("ja-JP")} 円までで入力してください。`,
+      };
     }
-    value = n;
+    return n;
+  };
+
+  const fields: { field: string; column: string; label: string }[] = [
+    { field: "amount", column: "pay_unit", label: "本体価格" },
+    { field: "amountOp1", column: "pay_unit_op1", label: "OP①" },
+    { field: "amountOp2", column: "pay_unit_op2", label: "OP②" },
+    { field: "amountPadYearly", column: "pay_unit_pad_yearly", label: "1年後定期" },
+  ];
+
+  const values: Record<string, number | null> = {};
+  const shown: string[] = [];
+  for (const f of fields) {
+    const v = read(f.field, f.label);
+    if (v !== null && typeof v === "object") return { error: v.error };
+    values[f.column] = v;
+    shown.push(`${f.label} ${v === null ? "未設定" : `${v.toLocaleString("ja-JP")}円`}`);
   }
 
   const before = s_(target, "pay_unit");
   try {
     await update(`agencies?code=eq.${encodeURIComponent(code)}`, {
-      pay_unit: value,
+      ...values,
       pay_unit_note: note || null,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "不明なエラー";
     // 列がまだ無いときは、何が足りないのかがすぐ分かるように書く
+    if (/pay_unit_op1|pay_unit_op2|pay_unit_pad_yearly/.test(msg)) {
+      return {
+        error:
+          "OP①・OP②・1年後定期を保存する場所がまだ用意されていません。" +
+          "agencies に pay_unit_op1 / pay_unit_op2 / pay_unit_pad_yearly を足してから、もう一度お試しください。",
+      };
+    }
     if (/pay_unit/.test(msg)) {
       return {
         error:
@@ -114,7 +144,7 @@ export async function setPayUnitAction(
     {
       対象: `${s_(target, "name")}（${code}）`,
       変更前: before ? `${Number(before).toLocaleString("ja-JP")}円` : "既定（推奨の税抜単価）",
-      変更後: value === null ? "既定（推奨の税抜単価）" : `${value.toLocaleString("ja-JP")}円`,
+      変更後: shown.join(" ／ "),
       理由: note || "（未記入）",
       補足:
         "本部の報酬台帳はさかのぼって変わらない。" +
@@ -127,9 +157,6 @@ export async function setPayUnitAction(
   revalidatePath(`/admin/agencies/${code}`);
 
   return {
-    ok:
-      value === null
-        ? `${s_(target, "name")} の支払額を既定に戻しました。次の受注から効きます。`
-        : `${s_(target, "name")} の支払額を ${value.toLocaleString("ja-JP")} 円にしました。次の受注から効きます。`,
+    ok: `${s_(target, "name")} の支払額を保存しました（${shown.join(" ／ ")}）。`,
   };
 }

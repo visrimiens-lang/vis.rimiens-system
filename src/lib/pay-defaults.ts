@@ -1,3 +1,4 @@
+import { payItemsOf, type PayItem } from "./pay-items";
 import type { Agency } from "./types";
 
 /**
@@ -51,4 +52,50 @@ export function effectivePayUnit(
   a: Pick<Agency, "rank" | "channel" | "codeKind" | "payUnit" | "staffType">,
 ): number | null {
   return a.payUnit ?? defaultPayUnit(a);
+}
+
+/* ═══════════════════════ 品目ごとの支払額 ═══════════════════════ */
+
+/** 品目ごとの1件あたりの支払額（税抜）。null は「この品目では払わない」。 */
+export type PayUnits = Record<PayItem, number | null>;
+
+type PayUnitFields = Pick<
+  Agency,
+  "rank" | "channel" | "codeKind" | "staffType" | "payUnit" | "payUnitOp1" | "payUnitOp2" | "payUnitPadYearly"
+>;
+
+/**
+ * この相手に払う額を品目ごとに出す。
+ *
+ * 本体は今までどおり、個別の額が無ければランクの既定（50,000／25,000）を使う。
+ * OP①・OP②・1年後定期には既定を置かない。ここに額を入れて初めて払う扱いになる。
+ * 既定を置いてしまうと、これまで本体だけで払っていた相手の支払額が
+ * この画面を開いた日から勝手に増えるため。
+ */
+export function effectivePayUnits(a: PayUnitFields): PayUnits {
+  return {
+    body: effectivePayUnit(a),
+    op1: a.payUnitOp1,
+    op2: a.payUnitOp2,
+    padYearly: a.payUnitPadYearly,
+  };
+}
+
+/**
+ * 受注1件ぶんの支払額。含まれている品目の額を足し、数量を掛ける。
+ *
+ * 本体の額が決まっていないときだけ null を返す（「まだ決めていない」を
+ * 0円と区別して、画面に「—」を出すため）。
+ * OP の額が未設定なのは「その品目では払わない」という意味なので、
+ * 0 として足す。
+ */
+export function payoutForOrder(
+  units: PayUnits,
+  productName: string,
+  quantity: number,
+): number | null {
+  const items = payItemsOf(productName);
+  if (items.includes("body") && units.body === null) return null;
+  const per = items.reduce((sum, i) => sum + (units[i] ?? 0), 0);
+  return per * (quantity || 1);
 }

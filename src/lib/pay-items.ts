@@ -1,0 +1,57 @@
+/**
+ * 受注に含まれている「支払いの品目」を、商品名から見分ける。
+ *
+ * ■ なぜ商品名から見るのか
+ *
+ * UTAGE は本体・事務手数料・オプションをまとめて1回で決済するので、
+ * 受注に残るのは買ったものを並べた1本の文字列になる。実データの例:
+ *   「VIS本体　先行予約 ／ 事務手数料 ／ 3年保証セット ／ ジェルパッド1年分 先行購入（OP①・13,200円）」
+ * 受注そのものには「OP①が付いているか」を表す欄が無いため、ここで読み取る。
+ *
+ * ■ 判定に使う言葉
+ *
+ * 商品マスタに実際に入っている名前から採った（2026-08-27 時点の27件）。
+ * 同じものが複数の書き方で登録されているので、どれでも拾えるようにしてある。
+ *   OP① … 「ジェルパッド1年分」「OP①」
+ *   OP② … 「延長保証」「3年保証」「OP②」
+ *   1年後定期 … 「定期パッド配送」「定期パッド」
+ *
+ * 事務手数料は品目に数えない（お客様からお預かりするだけで、支払いの対象ではない）。
+ */
+
+/** 上位が配下に払うときの品目。agencies の pay_unit 系の列と1対1で対応する。 */
+export type PayItem = "body" | "op1" | "op2" | "padYearly";
+
+export const PAY_ITEMS: PayItem[] = ["body", "op1", "op2", "padYearly"];
+
+/** 画面と支払通知書に出す品目の名前。 */
+export const PAY_ITEM_LABEL: Record<PayItem, string> = {
+  body: "本体価格",
+  op1: "OP①",
+  op2: "OP②",
+  padYearly: "1年後定期",
+};
+
+/** 何を指すのかが分かるように添える説明。 */
+export const PAY_ITEM_HINT: Record<PayItem, string> = {
+  body: "VIS本体1台あたり",
+  op1: "ジェルパッド1年分",
+  op2: "延長保証（3年保証）",
+  padYearly: "定期購入のパッド",
+};
+
+/**
+ * 受注の商品名に、どの品目が含まれているかを返す。
+ *
+ * 本体は「VIS本体」または「眼筋トレーニングマシン」で見分ける。
+ * パッド単品やオプションだけの受注もあるので、本体が無いこともある。
+ */
+export function payItemsOf(productName: string): PayItem[] {
+  const n = productName || "";
+  const found: PayItem[] = [];
+  if (/VIS本体|眼筋トレーニングマシン/.test(n)) found.push("body");
+  if (/ジェルパッド1年分|OP①/.test(n)) found.push("op1");
+  if (/延長保証|3年保証|OP②/.test(n)) found.push("op2");
+  if (/定期パッド/.test(n)) found.push("padYearly");
+  return found;
+}

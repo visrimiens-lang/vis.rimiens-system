@@ -1,31 +1,51 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { setPayUnitAction, type PayUnitState } from "@/actions/pay-unit-actions";
+import { PAY_ITEMS, PAY_ITEM_HINT, PAY_ITEM_LABEL, type PayItem } from "@/lib/pay-items";
 
 /**
- * 「この相手にいくら払うか」を、一覧の行の中でそのまま直せる欄。
+ * 「この相手にいくら払うか」を品目ごとに決める欄。
  *
- * 既定（推奨の税抜単価。lib/pay-defaults.ts）のときは既定の額をうすく出し、
- * 個別に決めてあるときはその額をはっきり出す。
- * 空にして保存すると既定に戻る。
+ * ■ なぜ品目ごとに分けたか
+ *
+ * 以前は1台あたりの額を1つだけ持っていたので、本体もオプションも同じ扱いだった。
+ * 実際にはオプションの取り分は本体と別に決めるため、本体価格・OP①・OP②・
+ * 1年後定期の4つを代理店ごとに持てるようにした（2026-08-27）。
+ *
+ * 受注1件の支払額は、その受注に含まれている品目の額を足して数量を掛ける
+ * （lib/pay-defaults.ts の payoutForOrder）。
+ *
+ * ■ 空欄と 0 の違い
+ *
+ * 本体を空欄にするとランクの既定（3次 50,000／取次 25,000）に戻る。
+ * OP①・OP②・1年後定期には既定を置いていないので、空欄は「払わない」。
+ * わざと 0 円にしたいときは 0 と書く（空欄とは別に保存される）。
  *
  * 変えられるのは本部と直上の代理店だけ（判定はサーバー側の setPayUnitAction）。
- * 変えられない相手には数字だけ出す。
  */
+
+const yen = (n: number) => `¥${n.toLocaleString("ja-JP")}`;
+
 export function PayUnitCell({
   code,
   name,
   value,
+  op1,
+  op2,
+  padYearly,
   fallback,
   note,
   editable,
 }: {
   code: string;
   name: string;
-  /** 個別に決めてある額。未設定なら null */
+  /** 本体価格。個別に決めてあれば数値、未設定なら null */
   value: number | null;
-  /** 未設定のときに実際に使われる額（推奨の税抜単価。lib/pay-defaults.ts） */
+  op1: number | null;
+  op2: number | null;
+  padYearly: number | null;
+  /** 本体が未設定のときに実際に使われる額（推奨の税抜単価。lib/pay-defaults.ts） */
   fallback: number | null;
   note: string;
   editable: boolean;
@@ -33,94 +53,164 @@ export function PayUnitCell({
   const [open, setOpen] = useState(false);
   const [state, action, pending] = useActionState<PayUnitState, FormData>(setPayUnitAction, {});
 
-  const shown =
-    value !== null
-      ? `¥${value.toLocaleString("ja-JP")}`
-      : fallback !== null
-        ? `¥${fallback.toLocaleString("ja-JP")}`
-        : "—";
+  const current: Record<PayItem, number | null> = {
+    body: value,
+    op1,
+    op2,
+    padYearly,
+  };
 
-  if (!editable) {
-    return (
-      <div>
-        <div className={value !== null ? "text-ink-100" : "text-ink-400"}>{shown}</div>
-        {value !== null ? (
-          <div className="mt-0.5 text-xs text-gold-500">個別</div>
-        ) : null}
+  // 保存できたらモーダルを閉じる。控えの文言は閉じたあとの欄に出す。
+  useEffect(() => {
+    if (state.ok) setOpen(false);
+  }, [state.ok]);
+
+  const bodyShown =
+    value !== null ? yen(value) : fallback !== null ? yen(fallback) : "—";
+  const extras = (["op1", "op2", "padYearly"] as PayItem[]).filter(
+    (i) => current[i] !== null,
+  );
+
+  const summary = (
+    <>
+      <div className={value !== null ? "text-ink-100" : "text-ink-400"}>{bodyShown}</div>
+      <div className="mt-0.5 text-xs text-ink-500">
+        {value !== null ? "本体・個別に設定" : "本体・既定のまま"}
       </div>
-    );
-  }
+      {extras.length > 0 ? (
+        <div className="mt-1 space-y-0.5">
+          {extras.map((i) => (
+            <div key={i} className="text-xs text-ink-400">
+              {PAY_ITEM_LABEL[i]} {yen(current[i] as number)}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </>
+  );
 
-  if (!open) {
-    return (
-      /* print-keep：紙では押せないが、金額そのものは残す（globals.css の @media print） */
+  if (!editable) return <div>{summary}</div>;
+
+  return (
+    <div>
+      {/* print-keep：紙では押せないが、金額そのものは残す（globals.css の @media print） */}
+      <div className="print-keep">{summary}</div>
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="print-keep text-left"
-        title="押すと変えられます"
+        className="mt-1.5 rounded-lg border border-ink-700 px-2.5 py-1 text-xs text-ink-200 transition hover:bg-ink-900"
       >
-        <div
-          className={
-            value !== null
-              ? "underline decoration-dotted underline-offset-4 text-ink-100"
-              : "underline decoration-dotted underline-offset-4 text-ink-400"
-          }
-        >
-          {shown}
-        </div>
-        <div className="mt-0.5 text-xs text-ink-500">
-          {value !== null ? "個別に設定" : "既定のまま"}
-        </div>
-        {state.ok ? <div className="mt-1 text-xs text-good-100">{state.ok}</div> : null}
+        金額修正
       </button>
-    );
-  }
+      {state.ok ? <div className="mt-1 text-xs text-good-100">{state.ok}</div> : null}
 
-  return (
-    <form action={action} className="w-52 space-y-1.5">
-      <input type="hidden" name="code" value={code} />
-      <label className="block text-xs text-ink-400">
-        {name} に払う額（1台あたり・税抜き）
-      </label>
-      <input
-        name="amount"
-        inputMode="numeric"
-        defaultValue={value !== null ? String(value) : ""}
-        placeholder={fallback !== null ? `空欄なら ${fallback.toLocaleString("ja-JP")}` : "空欄なら既定"}
-        className="tabnum w-full rounded-lg border border-ink-700 bg-ink-950 px-2 py-1.5 text-sm text-ink-100 placeholder:text-ink-500 focus:border-ink-600"
-      />
-      <input
-        name="note"
-        defaultValue={note}
-        maxLength={200}
-        placeholder="理由（インボイス未登録 など）"
-        className="w-full rounded-lg border border-ink-700 bg-ink-950 px-2 py-1.5 text-xs text-ink-100 placeholder:text-ink-500 focus:border-ink-600"
-      />
-      <div className="flex gap-1.5">
-        <button
-          type="submit"
-          disabled={pending}
-          className="rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-on-gold transition hover:bg-brand-strong disabled:opacity-50"
+      {open ? (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 sm:items-center"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`${name} に払う額`}
         >
-          {pending ? "保存中…" : "保存"}
-        </button>
-        <button
-          type="button"
-          onClick={() => setOpen(false)}
-          className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-900"
-        >
-          やめる
-        </button>
-      </div>
-      <p className="text-xs text-ink-500">
-        空にすると既定に戻ります。本部の報酬台帳はさかのぼって変わりませんが、
-        「売上・報酬」のお支払額の表示は、過去の月もいまの額で計算し直されます。
-      </p>
-      {state.error ? (
-        <p className="break-words text-xs text-bad-100">{state.error}</p>
+          {/* 背景を押したら閉じる。中身を押したときは閉じない。 */}
+          <button
+            type="button"
+            aria-hidden
+            tabIndex={-1}
+            onClick={() => setOpen(false)}
+            className="absolute inset-0 cursor-default"
+          />
+          <form
+            action={action}
+            className="relative w-full max-w-md space-y-4 rounded-2xl border border-ink-700 bg-ink-950 p-5 text-left shadow-2xl"
+          >
+            <input type="hidden" name="code" value={code} />
+
+            <div>
+              <h2 className="text-base font-semibold text-ink-50">
+                {name} に払う額
+              </h2>
+              <p className="mt-1 text-xs leading-relaxed text-ink-400">
+                受注に含まれている品目の額を足して、数量を掛けたものがお支払額になります。
+                金額はすべて税抜きです（支払通知書が小計に消費税を足します）。
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              {PAY_ITEMS.map((item) => (
+                <label key={item} className="block">
+                  <span className="text-xs font-medium text-ink-200">
+                    {PAY_ITEM_LABEL[item]}
+                    <span className="ml-1.5 font-normal text-ink-500">
+                      {PAY_ITEM_HINT[item]}
+                    </span>
+                  </span>
+                  <input
+                    name={
+                      item === "body"
+                        ? "amount"
+                        : item === "op1"
+                          ? "amountOp1"
+                          : item === "op2"
+                            ? "amountOp2"
+                            : "amountPadYearly"
+                    }
+                    inputMode="numeric"
+                    defaultValue={current[item] !== null ? String(current[item]) : ""}
+                    placeholder={
+                      item === "body"
+                        ? fallback !== null
+                          ? `空欄なら ${fallback.toLocaleString("ja-JP")}（既定）`
+                          : "空欄なら既定"
+                        : "空欄ならこの品目では払わない"
+                    }
+                    className="tabnum mt-1 w-full rounded-lg border border-ink-700 bg-ink-900 px-2.5 py-2 text-sm text-ink-100 placeholder:text-ink-500 focus:border-ink-600"
+                  />
+                </label>
+              ))}
+
+              <label className="block">
+                <span className="text-xs font-medium text-ink-200">理由</span>
+                <input
+                  name="note"
+                  defaultValue={note}
+                  maxLength={200}
+                  placeholder="インボイス未登録 など"
+                  className="mt-1 w-full rounded-lg border border-ink-700 bg-ink-900 px-2.5 py-2 text-sm text-ink-100 placeholder:text-ink-500 focus:border-ink-600"
+                />
+              </label>
+            </div>
+
+            <p className="text-xs leading-relaxed text-ink-500">
+              本体を空にすると既定に戻ります。OP①・OP②・1年後定期を空にすると、
+              その品目では払わない扱いになります。0 円にしたいときは 0 と入れてください。
+              <br />
+              本部の報酬台帳はさかのぼって変わりませんが、「売上・報酬」のお支払額の表示は、
+              過去の月もいまの額で計算し直されます。
+            </p>
+
+            {state.error ? (
+              <p className="break-words text-xs text-bad-100">{state.error}</p>
+            ) : null}
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded-lg border border-ink-700 px-4 py-2 text-sm text-ink-300 transition hover:bg-ink-900"
+              >
+                やめる
+              </button>
+              <button
+                type="submit"
+                disabled={pending}
+                className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-on-gold transition hover:bg-brand-strong disabled:opacity-50"
+              >
+                {pending ? "保存中…" : "保存"}
+              </button>
+            </div>
+          </form>
+        </div>
       ) : null}
-      {state.ok ? <p className="text-xs text-good-100">{state.ok}</p> : null}
-    </form>
+    </div>
   );
 }

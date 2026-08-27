@@ -3,7 +3,7 @@ import Link from "next/link";
 import { FileText } from "lucide-react";
 import { currentViewer } from "@/lib/auth";
 import { findAgencyByCode, listDescendants } from "@/lib/agencies";
-import { effectivePayUnit } from "@/lib/pay-defaults";
+import { effectivePayUnits, payoutForOrder, type PayUnits } from "@/lib/pay-defaults";
 import {
   attachRewards,
   canComputeReward,
@@ -99,7 +99,10 @@ type OwnerGroup = {
    * 自分の売上の行と、スタッフとして登録されていないコードは null（払う相手ではない）。
    */
   payUnit: number | null;
-  /** payUnit × 台数。支払通知にそのまま使える額。 */
+  /**
+   * 受注ごとに「含まれている品目の額の合計 × 数量」を足したもの。
+   * 支払通知にそのまま使える額。本体の額が決まっていない相手は null。
+   */
   payout: number | null;
   /** 個別に決めた額か（既定との見分け用） */
   payCustom: boolean;
@@ -109,7 +112,7 @@ function groupByOwner(
   rows: OrderWithReward[],
   names: Map<string, string>,
   companies: Map<string, string>,
-  payTo: Map<string, { unit: number | null; custom: boolean }>,
+  payTo: Map<string, { units: PayUnits; custom: boolean }>,
   /** 担当コード → 支払額を引く相手のコード（スタッフなら所属会社にさかのぼる） */
   payeeOf: Map<string, string>,
   selfCode: string,
@@ -135,7 +138,23 @@ function groupByOwner(
        */
       const payeeCode = code !== selfCode ? (payeeOf.get(code) ?? code) : "";
       const pay = payeeCode ? payTo.get(payeeCode) : undefined;
-      const payUnit = pay?.unit ?? null;
+      const payUnit = pay?.units.body ?? null;
+      /*
+       * 受注ごとに品目を見て足す。本体だけの受注と OP 付きの受注が混ざるので、
+       * 「単価 × 台数」ではもう足りない（lib/pay-defaults.ts の payoutForOrder）。
+       * 1件でも額を出せないものがあれば、合計は出さずに「—」にする。
+       */
+      let payout: number | null = null;
+      if (pay) {
+        let sum = 0;
+        let ok = true;
+        for (const o of list) {
+          const one = payoutForOrder(pay.units, o.productName, o.quantity || 1);
+          if (one === null) { ok = false; break; }
+          sum += one;
+        }
+        payout = ok ? sum : null;
+      }
       return {
         code,
         name: names.get(code) ?? "—",
@@ -143,7 +162,7 @@ function groupByOwner(
         units,
         reward: sumReward(list),
         payUnit,
-        payout: payUnit === null ? null : payUnit * units,
+        payout,
         payCustom: pay?.custom ?? false,
       };
     })
@@ -213,7 +232,7 @@ export default async function RewardsPage({
   let names = new Map<string, string>();
   /** 担当コード → 所属会社名。会社ごとにまとめて見るために使う（2026-08-22〜）。 */
   let companies = new Map<string, string>();
-  let payTo = new Map<string, { unit: number | null; custom: boolean }>();
+  let payTo = new Map<string, { units: PayUnits; custom: boolean }>();
   /** 担当コード → 支払額を引く相手のコード（下の payeeOf の説明を参照）。 */
   let payeeOf = new Map<string, string>();
   /** 報酬の単価を引くときのランク（データベースの値）。表示には rankLabel() を通す。 */
@@ -248,7 +267,7 @@ export default async function RewardsPage({
       payTo = new Map(
         descendants.map((d) => [
           d.code,
-          { unit: effectivePayUnit(d), custom: d.payUnit !== null },
+          { units: effectivePayUnits(d), custom: d.payUnit !== null },
         ]),
       );
       /*
@@ -601,7 +620,8 @@ export default async function RewardsPage({
         <Notice tone="warn">
           支払額を出せない担当が {missingPayUnit.length} 名います（
           {missingPayUnit.map((g) => g.name || g.code).join("、")}）。
-          「スタッフ一覧」でその方の支払額（1台あたり・税抜）を入れると、お支払額と合計が出ます。
+          「スタッフ一覧」の「金額修正」からその方の支払額（本体価格・OP①・OP②・1年後定期／税抜）を
+          入れると、お支払額と合計が出ます。お支払額は、受注ごとに含まれている品目の額を足して数量を掛けたものです。
           入るまで、お支払額の合計は出しません。
         </Notice>
       ) : null}
@@ -750,7 +770,7 @@ export default async function RewardsPage({
                 <Th align="right">台数</Th>
                 {showReward ? <Th align="right">報酬額（税込）</Th> : null}
                 {/* スタッフにいくら払うか。単価はスタッフ一覧で変更できる（個別 or ランクの既定） */}
-                {showReward ? <Th align="right">支払単価（税抜）</Th> : null}
+                {showReward ? <Th align="right">本体価格（税抜）</Th> : null}
                 {showReward ? <Th align="right">お支払額（税抜）</Th> : null}
               </tr>
             </thead>

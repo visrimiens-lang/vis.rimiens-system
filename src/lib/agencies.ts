@@ -19,6 +19,17 @@ const n_ = (r: Row, k: string): number => {
   const v = r[k];
   return typeof v === "number" ? v : Number(v ?? 0) || 0;
 };
+/*
+ * 「未設定」と「0円」を混ぜない読み方。
+ * 列がまだ無いうちは undefined で来るので、そちらも未設定として扱う。
+ * 0 を未設定に倒すと、わざと 0 円にした品目が既定に戻ってしまう。
+ */
+const num_ = (r: Row, k: string): number | null => {
+  const v = r[k];
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
 
 function toAgency(r: Row): Agency {
   return {
@@ -71,6 +82,9 @@ function toAgency(r: Row): Agency {
      * 列がまだ無いうちは undefined で来るので null に倒す（既定の単価を使う扱い）。
      */
     payUnit: r["pay_unit"] === null || r["pay_unit"] === undefined ? null : n_(r, "pay_unit"),
+    payUnitOp1: num_(r, "pay_unit_op1"),
+    payUnitOp2: num_(r, "pay_unit_op2"),
+    payUnitPadYearly: num_(r, "pay_unit_pad_yearly"),
     payUnitNote: s_(r, "pay_unit_note"),
   };
 }

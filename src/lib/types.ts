@@ -83,6 +83,13 @@ export type Agency = {
    * null なら推奨の税抜単価（lib/pay-defaults.ts）を使う（既定）。
    */
   payUnit: number | null;
+  /**
+   * 本体以外の品目の支払額（1件あたり・税抜）。
+   * null は「この品目では払わない」。既定は置いていない。
+   */
+  payUnitOp1: number | null;
+  payUnitOp2: number | null;
+  payUnitPadYearly: number | null;
   /** 既定と変えた理由（インボイス未登録、個別契約など）。 */
   payUnitNote: string;
 };

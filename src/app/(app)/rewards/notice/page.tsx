@@ -3,7 +3,8 @@ import Link from "next/link";
 import { currentViewer } from "@/lib/auth";
 import { findAgencyByCode, listDescendants } from "@/lib/agencies";
 import { attachRewards, listOrders, scopeCodes } from "@/lib/orders";
-import { effectivePayUnit } from "@/lib/pay-defaults";
+import { effectivePayUnits } from "@/lib/pay-defaults";
+import { PAY_ITEM_LABEL, payItemsOf } from "@/lib/pay-items";
 import { companyKey, companyNameOf } from "@/lib/labels";
 import { todayInJapan } from "@/lib/jst";
 import { readParam, type SearchParams } from "@/lib/list-params";
@@ -153,27 +154,43 @@ export default async function PayeeNoticePage({
   const rows = orders.filter((o) => targetCodes.has(o.ownerCode));
 
   /*
-   * 品目は「人ごと × 単価ごと」に1行。
-   * 同じ人でも単価が違う受注があれば行を分ける（数量×単価が合わなくなるため）。
+   * 品目は「人ごと × 支払いの品目ごと × 単価ごと」に1行。
+   *
+   * 2026-08-27 に支払額を本体価格・OP①・OP②・1年後定期の4つに分けたので、
+   * 1人ぶんを1行にまとめると、単価×台数と金額が合わなくなる。
+   * 受注に入っている品目を読み取って（lib/pay-items.ts）、品目ごとに立てる。
+   *
+   * 同じ人・同じ品目でも単価が違う受注があれば行を分ける
+   * （途中で額を変えた月に、単価×台数が合わなくなるため）。
+   *
+   * 額を決めていない品目は行を作らない。OP の空欄は「その品目では払わない」ため。
+   * ただし本体だけは、額が未設定でも行を残して「—」を出す
+   * （払う相手なのに額が決まっていないことに気づけるようにする）。
    */
   const bucket = new Map<string, NoticeLine>();
   for (const o of rows) {
     const person = byCode.get(o.ownerCode);
-    const unit = person ? effectivePayUnit(person) : null;
-    const key = `${o.ownerCode}|${unit ?? "none"}`;
+    const units = person ? effectivePayUnits(person) : null;
     const name = person?.name || o.ownerCode;
-    const hit = bucket.get(key);
     const qty = o.quantity || 1;
-    if (hit) {
-      hit.qty += qty;
-      hit.amount = unit === null ? null : (hit.amount ?? 0) + unit * qty;
-    } else {
-      bucket.set(key, {
-        item: `販売委託手数料　${name}（${o.ownerCode}）`,
-        unit,
-        qty,
-        amount: unit === null ? null : unit * qty,
-      });
+
+    for (const item of payItemsOf(o.productName)) {
+      const unit = units ? units[item] : null;
+      if (item !== "body" && unit === null) continue;
+
+      const key = `${o.ownerCode}|${item}|${unit ?? "none"}`;
+      const hit = bucket.get(key);
+      if (hit) {
+        hit.qty += qty;
+        hit.amount = unit === null ? null : (hit.amount ?? 0) + unit * qty;
+      } else {
+        bucket.set(key, {
+          item: `販売委託手数料　${name}（${o.ownerCode}）　${PAY_ITEM_LABEL[item]}`,
+          unit,
+          qty,
+          amount: unit === null ? null : unit * qty,
+        });
+      }
     }
   }
   const lines = [...bucket.values()].sort((a, b) => a.item.localeCompare(b.item, "ja"));

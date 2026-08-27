@@ -119,7 +119,7 @@ function Head({ sort, params }: { sort: SortState; params: SearchParams }) {
     <thead>
       <tr>
         {th("name", "商品名", "left")}
-        {th("price", "販売単価（税別）")}
+        {th("price", "販売単価")}
         <Th align="center">報酬</Th>
         {/* 見出しの呼び方は src/lib/labels.ts に寄せる。
             データベースには「2次代理店」で入っているが、2026-06-17 の呼称変更どおり
@@ -225,10 +225,10 @@ export default async function AdminProductsPage({
           }
         />
         <StatTile
-          label="いちばん高い単価（税別）"
+          label="いちばん高い単価"
           value={highest > 0 ? yen(highest) : "—"}
           tone="gold"
-          hint="取扱中の商品の単価（税別）"
+          hint="取扱中の商品の税込単価"
         />
         <StatTile
           label="取扱を止めた商品"
@@ -261,7 +261,7 @@ export default async function AdminProductsPage({
         <Notice tone="warn">
           販売単価が入っていない商品が {noPrice.length} 件あります（{nameList(noPrice)}）。
           お客様のお支払額が決まらないため、この商品での受注はご案内できません。
-          表の「内容を直す」から税別の単価を入れてください。
+          表の「内容を直す」から税込の単価を入れてください。
         </Notice>
       ) : null}
 

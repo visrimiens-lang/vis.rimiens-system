@@ -1,7 +1,6 @@
 import "server-only";
 import nodemailer from "nodemailer";
 import { audit } from "./db";
-import { exclTax } from "./tax";
 
 /**
  * メールを送る。
@@ -352,7 +351,7 @@ export function acquisitionMail(opts: {
 
   お客様： ${opts.customerName} 様
   商品　： ${opts.productName || "VIS本体"}
-  金額　： ${exclTax(opts.amount).toLocaleString()} 円（税別）
+  金額　： ${opts.amount.toLocaleString()} 円
 
 ${guide}
 ${SIGN}`),

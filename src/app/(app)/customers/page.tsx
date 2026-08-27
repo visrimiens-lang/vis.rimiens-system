@@ -11,7 +11,21 @@ import {
   type OrderWithReward,
 } from "@/lib/orders";
 import type { Agency } from "@/lib/types";
-import { Badge, Card, EmptyState, jpDate, jpMonthLabel, Notice, PageHeader, StatTile, StatusBadge, Table, Td, Th, yen, yenTaxExcl } from "@/components/ui";
+import {
+  Badge,
+  Card,
+  EmptyState,
+  Notice,
+  PageHeader,
+  StatTile,
+  StatusBadge,
+  Table,
+  Td,
+  Th,
+  jpDate,
+  jpMonthLabel,
+  yen,
+} from "@/components/ui";
 import {
   PROGRESS_STEPS,
   Progress,
@@ -502,10 +516,10 @@ export default async function CustomersPage({
         />
         <StatTile label="台数" value={String(unitTotal)} unit="台" hint="数量の合計" />
         <StatTile
-          label="販売金額（税別）"
-          value={yenTaxExcl(salesTotal)}
+          label="販売金額（税込）"
+          value={yen(salesTotal)}
           tone="gold"
-          hint="お客様のお支払額の合計（税別・中止分を除く）"
+          hint="お客様のお支払額の合計（中止分を除く）"
         />
         <StatTile
           label="配達完了の受注"
@@ -614,7 +628,7 @@ export default async function CustomersPage({
                 />
                 <SortableTh
                   column="amount"
-                  label="金額（税別）"
+                  label="金額（税込）"
                   sort={sort}
                   basePath={BASE}
                   params={params}
@@ -675,7 +689,7 @@ export default async function CustomersPage({
                       {o.quantity || 1}
                     </Td>
                     <Td numeric align="right">
-                      {yenTaxExcl(o.amount)}
+                      {yen(o.amount)}
                     </Td>
                     <Td>
                       <div className="flex items-center gap-1.5">
@@ -754,7 +768,7 @@ export default async function CustomersPage({
                   {unitTotal}
                 </Td>
                 <Td numeric align="right" className="font-semibold text-gold-300">
-                  {yenTaxExcl(salesTotal)}
+                  {yen(salesTotal)}
                 </Td>
                 <Td> </Td>
                 <Td> </Td>

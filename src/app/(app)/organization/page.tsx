@@ -430,7 +430,7 @@ export default async function OrganizationPage({
                       params={params}
                     />
                     <Th>所属会社・種別</Th>
-                    <Th>支払額（1台・税別）</Th>
+                    <Th>支払額（1台・税抜）</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -524,7 +524,7 @@ export default async function OrganizationPage({
                       {/*
                         自分の直下にだけ、払う額を決められるようにする。
                         間に人が挟まっている相手の取り分を飛び越えて決められないようにするため。
-                        空欄なら推奨の税別単価（3次 50,000／取次 25,000）がそのまま使われる。
+                        空欄なら推奨の税抜単価（3次 50,000／取次 25,000）がそのまま使われる。
                       */}
                       <Td numeric>
                         <PayUnitCell

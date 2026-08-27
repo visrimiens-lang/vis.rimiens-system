@@ -1,6 +1,8 @@
 import { clsx } from "clsx";
 import type { ReactNode } from "react";
 
+import { exclTax } from "@/lib/tax";
+
 export function cn(...parts: unknown[]) {
   return clsx(parts);
 }
@@ -10,6 +12,20 @@ export function cn(...parts: unknown[]) {
 export function yen(n: number | null | undefined): string {
   if (n === null || n === undefined) return "—";
   return `¥${n.toLocaleString("ja-JP")}`;
+}
+
+/**
+ * 税込で持っている額を、税別にして出す。
+ *
+ * 使ってよいのは受注の決済額（orders.amount）から出した数字だけ。
+ * 決済額はお客様から預かった税込の額なので、税別で出すにはここで割る。
+ *
+ * 支払額（agencies.pay_unit）と支払通知書は、はじめから税抜で持っている。
+ * そちらに使うと二重に割ることになり、相手に渡る書面の支払額が実際より少なくなる。
+ */
+export function yenTaxExcl(n: number | null | undefined): string {
+  if (n === null || n === undefined) return "—";
+  return yen(exclTax(n));
 }
 
 export function jpDate(v: string | null | undefined): string {

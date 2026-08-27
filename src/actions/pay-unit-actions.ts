@@ -10,11 +10,11 @@ import { audit, selectOne, update } from "@/lib/db";
  * ■ 何のための機能か
  *
  * 報酬の単価は商品マスタにランク別で1組だけ持っていて、全代理店に同じ額が当たる。
- * 「推奨は 50,000円（税抜）だが、この人だけ 30,000円にしたい」
+ * 「推奨は 50,000円（税別）だが、この人だけ 30,000円にしたい」
  * 「インボイス登録が無いので減額したい」ができなかった。
  *
  * ここで額を入れると、その相手への報酬だけその額になる。
- * 空にすれば、また推奨の税抜単価（lib/pay-defaults.ts）に戻る。
+ * 空にすれば、また推奨の税別単価（lib/pay-defaults.ts）に戻る。
  *
  * ■ 誰が変えられるか
  *
@@ -113,7 +113,7 @@ export async function setPayUnitAction(
     { type: "agency", key: code },
     {
       対象: `${s_(target, "name")}（${code}）`,
-      変更前: before ? `${Number(before).toLocaleString("ja-JP")}円` : "既定（推奨の税抜単価）",
+      変更前: before ? `${Number(before).toLocaleString("ja-JP")}円` : "既定（推奨の税別単価）",
       変更後: value === null ? "既定（推奨の税抜単価）" : `${value.toLocaleString("ja-JP")}円`,
       理由: note || "（未記入）",
       補足:

@@ -1,5 +1,7 @@
 import "server-only";
 
+import { inclTax } from "@/lib/tax";
+
 /**
  * 受注の商品名から、商品マスタの行（単価・報酬額）を引き当てる。
  *
@@ -132,8 +134,20 @@ export function buildProductMatcher(
 
     const priceSum = used.reduce((sum, p) => sum + n_(p, "price_incl_tax"), 0);
     const q = quantity || 1;
-    // amount が1台ぶんか、台数を掛けた合計かは送り元によって変わる。どちらかに合えばよい。
-    if (priceSum !== amount && priceSum * q !== amount) return null;
+    /*
+     * 決済額と突き合わせて、分解を取り違えていないか確かめる。
+     *
+     * amount が1台ぶんか、台数を掛けた合計かは送り元によって変わるので、
+     * どちらかに合えばよい。
+     *
+     * さらに、商品マスタの単価が税別で入っている場合も通す。
+     * 決済額（amount）はお客様から預かった税込の額で、これは変えようがない。
+     * 税別表示に合わせて商品マスタを入れ替えると、そのままでは
+     * 「税別の合計 ≠ 税込の決済額」となって1件も当たらなくなり、
+     * 報酬が丸ごと 0 円になる。税込に直した額でも照合する。
+     */
+    const forms = [priceSum, priceSum * q, inclTax(priceSum), inclTax(priceSum * q)];
+    if (!forms.includes(amount)) return null;
 
     const row: Row = {
       name: used.map((p) => s_(p, "name")).join(" ＋ "),

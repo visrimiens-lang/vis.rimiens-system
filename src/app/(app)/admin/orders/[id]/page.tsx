@@ -6,21 +6,7 @@ import { select, selectOne } from "@/lib/db";
 import { PRODUCT_COLUMNS, buildProductMatcher } from "@/lib/product-match";
 import { rankLabel, rankShort } from "@/lib/labels";
 import { digitsOf } from "@/lib/list-params";
-import {
-  Badge,
-  Card,
-  EmptyState,
-  Notice,
-  PageHeader,
-  StatTile,
-  StatusBadge,
-  Table,
-  Td,
-  Th,
-  cn,
-  jpMonthLabel,
-  yen,
-} from "@/components/ui";
+import { Badge, Card, cn, EmptyState, jpMonthLabel, Notice, PageHeader, StatTile, StatusBadge, Table, Td, Th, yen, yenTaxExcl } from "@/components/ui";
 import { AttributionForm } from "./AttributionForm";
 import { ShipForm, type ReferrerOption } from "./ShipForm";
 
@@ -357,8 +343,8 @@ export default async function AdminOrderDetailPage({
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile
-          label="ご請求額"
-          value={yen(amount)}
+          label="ご請求額（税別）"
+          value={yenTaxExcl(amount)}
           tone={voided ? "warn" : "gold"}
           hint={
             voided
@@ -379,7 +365,7 @@ export default async function AdminOrderDetailPage({
           }
         />
         <StatTile
-          label="確定した報酬"
+          label="確定した報酬（税別）"
           value={yen(confirmed)}
           tone={voided ? "warn" : "default"}
           hint={
@@ -476,9 +462,9 @@ export default async function AdminOrderDetailPage({
           <Field label="台数">
             <span className="tabnum">{quantity.toLocaleString("ja-JP")} 台</span>
           </Field>
-          <Field label="ご請求額">
+          <Field label="ご請求額（税別）">
             <span className={cn("tabnum", voided ? "text-ink-500 line-through" : "text-gold-300")}>
-              {yen(amount)}
+              {yenTaxExcl(amount)}
             </span>
           </Field>
           <Field label="お支払い方法">{str(order, "payment_method")}</Field>
@@ -652,7 +638,7 @@ export default async function AdminOrderDetailPage({
                 <Th>ランク</Th>
                 <Th>種別</Th>
                 <Th>対象月</Th>
-                <Th align="right">金額</Th>
+                <Th align="right">金額（税別）</Th>
                 <Th>状態</Th>
                 <Th>確定日</Th>
                 <Th>支払日</Th>

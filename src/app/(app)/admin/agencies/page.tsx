@@ -697,7 +697,7 @@ function AgencyTable({
           {th("area", "エリア")}
           {th("parent", "上位代理店")}
           {th("slot", "枠", "right")}
-          <Th align="right">支払額（1台・税抜）</Th>
+          <Th align="right">支払額（1台・税別）</Th>
           {th("status", "稼働ステータス")}
           {th("email", "メールアドレス")}
           {th("phone", "電話番号")}
@@ -759,7 +759,7 @@ function AgencyTable({
               {/*
                 この代理店に払う1台あたりの額。本部は誰の額でも変えられる
                 （権限の判定は actions/pay-unit-actions.ts が行う）。
-                空欄なら既定（推奨の税抜単価）が使われる。
+                空欄なら既定（推奨の税別単価）が使われる。
               */}
               <Td numeric align="right">
                 <PayUnitCell
@@ -839,7 +839,7 @@ function PeopleTable({
           {showKind ? th("rank", "区分") : null}
           <Th>{isStaff ? "所属会社・種別" : "所属代理店"}</Th>
           {isStaff ? null : th("channel", "販路種別")}
-          {showPay ? <Th align="right">支払額（1台・税抜）</Th> : null}
+          {showPay ? <Th align="right">支払額（1台・税別）</Th> : null}
           {th("status", "稼働ステータス")}
           {isStaff ? <Th>QR</Th> : null}
           {isStaff ? <Th>QRを止める</Th> : null}

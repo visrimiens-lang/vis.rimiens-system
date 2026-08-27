@@ -22,22 +22,7 @@ import {
   type SortState,
 } from "@/lib/list-params";
 import type { Agency, Order } from "@/lib/types";
-import {
-  Badge,
-  Card,
-  EmptyState,
-  Notice,
-  PageHeader,
-  StatTile,
-  StatusBadge,
-  Table,
-  Td,
-  Th,
-  cn,
-  jpDate,
-  jpMonthLabel,
-  yen,
-} from "@/components/ui";
+import { Badge, Card, cn, EmptyState, jpDate, jpMonthLabel, Notice, PageHeader, StatTile, StatusBadge, Table, Td, Th, yen, yenTaxExcl } from "@/components/ui";
 import {
   FilterActions,
   FilterBar,
@@ -730,10 +715,10 @@ export default async function AdminOrdersPage({
           hint="キャンセル・否決を除いた数量の合計"
         />
         <StatTile
-          label="売上合計"
-          value={yen(salesTotal)}
+          label="売上合計（税別）"
+          value={yenTaxExcl(salesTotal)}
           tone="gold"
-          hint="お客様のお支払額の合計（キャンセル・否決を除く）"
+          hint="お客様のお支払額の合計（税別・キャンセル・否決を除く）"
         />
         <StatTile
           label="配達完了"
@@ -753,7 +738,7 @@ export default async function AdminOrdersPage({
           tone={voidedCount > 0 ? "warn" : "default"}
           hint={
             voidedCount > 0
-              ? `${yen(voidedSales)} 分を売上・支払対象額から外しています`
+              ? `${yenTaxExcl(voidedSales)} 分を売上・支払対象額から外しています`
               : "取り消された受注はありません"
           }
         />
@@ -761,7 +746,7 @@ export default async function AdminOrdersPage({
 
       {voidedCount > 0 ? (
         <Notice tone="warn">
-          {filterLabel}の受注のうち {voidedCount} 件（{yen(voidedSales)}）は、
+          {filterLabel}の受注のうち {voidedCount} 件（{yenTaxExcl(voidedSales)}）は、
           {cancelledCount > 0 ? `キャンセル ${cancelledCount} 件` : ""}
           {cancelledCount > 0 && rejectedCount > 0 ? "・" : ""}
           {rejectedCount > 0 ? `審査否決 ${rejectedCount} 件` : ""}
@@ -815,8 +800,8 @@ export default async function AdminOrdersPage({
                 <Th>法人名</Th>
                 <Th align="right">件数</Th>
                 <Th align="right">台数</Th>
-                <Th align="right">売上</Th>
-                <Th align="right">支払対象額</Th>
+                <Th align="right">売上（税別）</Th>
+                <Th align="right">支払対象額（税別）</Th>
                 <Th align="right">取消（集計外）</Th>
               </tr>
             </thead>
@@ -840,7 +825,7 @@ export default async function AdminOrdersPage({
                     {g.units.toLocaleString("ja-JP")}
                   </Td>
                   <Td numeric align="right">
-                    {yen(g.sales)}
+                    {yenTaxExcl(g.sales)}
                   </Td>
                   <Td numeric align="right" className="text-gold-300">
                     {yen(g.payable)}
@@ -850,7 +835,7 @@ export default async function AdminOrdersPage({
                       <>
                         {g.voidedCount.toLocaleString("ja-JP")} 件
                         <span className="ml-1 text-xs text-ink-400">
-                          （{yen(g.voidedSales)}）
+                          （{yenTaxExcl(g.voidedSales)}）
                         </span>
                       </>
                     ) : (
@@ -871,7 +856,7 @@ export default async function AdminOrdersPage({
                   {unitTotal.toLocaleString("ja-JP")}
                 </Td>
                 <Td numeric align="right" className="font-semibold text-ink-100">
-                  {yen(salesTotal)}
+                  {yenTaxExcl(salesTotal)}
                 </Td>
                 <Td numeric align="right" className="font-semibold text-gold-400">
                   {yen(payableTotal)}
@@ -880,7 +865,7 @@ export default async function AdminOrdersPage({
                   {voidedCount > 0 ? (
                     <>
                       {voidedCount.toLocaleString("ja-JP")} 件
-                      <span className="ml-1 text-xs text-ink-400">（{yen(voidedSales)}）</span>
+                      <span className="ml-1 text-xs text-ink-400">（{yenTaxExcl(voidedSales)}）</span>
                     </>
                   ) : (
                     <span className="text-ink-500">—</span>
@@ -939,7 +924,7 @@ export default async function AdminOrdersPage({
                 <SortableTh column="customer" label="注文者" sort={sort} basePath={BASE} params={params} />
                 <SortableTh column="product" label="商品" sort={sort} basePath={BASE} params={params} />
                 <SortableTh column="quantity" label="台数" sort={sort} basePath={BASE} params={params} align="right" />
-                <SortableTh column="amount" label="金額" sort={sort} basePath={BASE} params={params} align="right" />
+                <SortableTh column="amount" label="金額（税別）" sort={sort} basePath={BASE} params={params} align="right" />
                 <SortableTh column="payment" label="決済方法" sort={sort} basePath={BASE} params={params} />
                 <SortableTh column="payee" label="代理店" sort={sort} basePath={BASE} params={params} />
                 <SortableTh column="staff" label="担当スタッフ" sort={sort} basePath={BASE} params={params} />
@@ -994,7 +979,7 @@ export default async function AdminOrdersPage({
                       align="right"
                       className={cn("whitespace-nowrap", o.voided && "text-ink-500 line-through")}
                     >
-                      {yen(o.amount)}
+                      {yenTaxExcl(o.amount)}
                     </Td>
                     <Td className="whitespace-nowrap">
                       {o.paymentMethod || <span className="text-ink-400">—</span>}
@@ -1077,7 +1062,7 @@ export default async function AdminOrdersPage({
                   {unitTotal.toLocaleString("ja-JP")}
                 </Td>
                 <Td numeric align="right" className="font-semibold text-gold-300">
-                  {yen(salesTotal)}
+                  {yenTaxExcl(salesTotal)}
                 </Td>
                 <Td>{null}</Td>
                 <Td>{null}</Td>
@@ -1098,7 +1083,7 @@ export default async function AdminOrdersPage({
                   <Td className="text-xs text-ink-400">キャンセル・審査否決</Td>
                   <Td>{null}</Td>
                   <Td numeric align="right" className="whitespace-nowrap text-bad-100 line-through">
-                    {yen(voidedSales)}
+                    {yenTaxExcl(voidedSales)}
                   </Td>
                   <Td>{null}</Td>
                   <Td>{null}</Td>

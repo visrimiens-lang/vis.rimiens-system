@@ -15,19 +15,7 @@ import {
   type OrderWithReward,
 } from "@/lib/orders";
 import type { Agency } from "@/lib/types";
-import {
-  Card,
-  EmptyState,
-  Notice,
-  PageHeader,
-  StatTile,
-  Table,
-  Td,
-  Th,
-  jpDate,
-  jpMonthLabel,
-  yen,
-} from "@/components/ui";
+import { Card, EmptyState, jpDate, jpMonthLabel, Notice, PageHeader, StatTile, Table, Td, Th, yen, yenTaxExcl } from "@/components/ui";
 import {
   ALL,
   buildListHref,
@@ -483,15 +471,15 @@ export default async function RewardsPage({
 
       {/*
         3次（販売代理店）と取次店へのお支払いは、本部ではなく上位のエリア統括代理店から。
-        この画面の報酬額は商品マスタの税込単価で出した目安なので、
-        実際に受け取る額（上位が決める・税抜）とは基準が違う。
+        この画面の報酬額は商品マスタの単価（税別）で出した目安なので、
+        実際に受け取る額（上位が決める・税別）とは基準が違う。
         黙っていると「画面より5,000円少ない」という行き違いが起きるため、先に断っておく。
       */}
       {showReward && (rewardRank === "販売代理店" || rewardRank === "取次店") ? (
         <Notice tone="info">
-          この画面の報酬額は、商品マスタの税込単価で計算した目安です。
+          この画面の報酬額は、商品マスタの単価（税別）で計算した目安です。
           実際のお支払いは上位の代理店からとなり、1台あたりの金額は
-          上位の代理店が決めます（税抜。ご不明な場合は上位の代理店にご確認ください）。
+          上位の代理店が決めます（税別。ご不明な場合は上位の代理店にご確認ください）。
         </Notice>
       ) : null}
 
@@ -561,10 +549,14 @@ export default async function RewardsPage({
           unit="台"
           hint={`受注 ${shown.length.toLocaleString("ja-JP")} 件分`}
         />
-        <StatTile label="売上合計" value={yen(salesTotal)} hint="配達完了分の販売金額" />
+        <StatTile
+          label="売上合計（税別）"
+          value={yenTaxExcl(salesTotal)}
+          hint="配達完了分の販売金額（税別）"
+        />
         {showReward ? (
           <StatTile
-            label="報酬合計"
+            label="報酬合計（税別）"
             value={yen(rewardTotal)}
             tone="gold"
             hint={
@@ -601,7 +593,7 @@ export default async function RewardsPage({
         <Notice tone="warn">
           支払額を出せない担当が {missingPayUnit.length} 名います（
           {missingPayUnit.map((g) => g.name || g.code).join("、")}）。
-          「スタッフ一覧」でその方の支払額（1台あたり・税抜）を入れると、お支払額と合計が出ます。
+          「スタッフ一覧」でその方の支払額（1台あたり・税別）を入れると、お支払額と合計が出ます。
           入るまで、お支払額の合計は出しません。
         </Notice>
       ) : null}
@@ -647,7 +639,7 @@ export default async function RewardsPage({
                 />
                 <SortableTh
                   column="amount"
-                  label="販売金額"
+                  label="販売金額（税別）"
                   sort={sort}
                   basePath={BASE}
                   params={params}
@@ -666,7 +658,7 @@ export default async function RewardsPage({
                 {showReward ? (
                   <SortableTh
                     column="reward"
-                    label="報酬額"
+                    label="報酬額（税別）"
                     sort={sort}
                     basePath={BASE}
                     params={params}
@@ -696,7 +688,7 @@ export default async function RewardsPage({
                     {(r.quantity || 1).toLocaleString("ja-JP")}
                   </Td>
                   <Td numeric align="right">
-                    {yen(r.amount)}
+                    {yenTaxExcl(r.amount)}
                   </Td>
                   {showReward ? (
                     <Td numeric align="right">
@@ -721,7 +713,7 @@ export default async function RewardsPage({
                   {units.toLocaleString("ja-JP")}
                 </Td>
                 <Td numeric align="right" className="font-semibold text-ink-100">
-                  {yen(salesTotal)}
+                  {yenTaxExcl(salesTotal)}
                 </Td>
                 {showReward ? <Td>{null}</Td> : null}
                 {showReward ? (
@@ -748,10 +740,10 @@ export default async function RewardsPage({
                 <Th>会社・担当コード</Th>
                 <Th>名前</Th>
                 <Th align="right">台数</Th>
-                {showReward ? <Th align="right">報酬額</Th> : null}
+                {showReward ? <Th align="right">報酬額（税別）</Th> : null}
                 {/* スタッフにいくら払うか。単価はスタッフ一覧で変更できる（個別 or ランクの既定） */}
-                {showReward ? <Th align="right">支払単価（税抜）</Th> : null}
-                {showReward ? <Th align="right">お支払額（税抜）</Th> : null}
+                {showReward ? <Th align="right">支払単価（税別）</Th> : null}
+                {showReward ? <Th align="right">お支払額（税別）</Th> : null}
               </tr>
             </thead>
             <tbody>

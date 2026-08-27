@@ -30,20 +30,7 @@ import {
   type OrderWithReward,
 } from "@/lib/orders";
 import type { Agency } from "@/lib/types";
-import {
-  Badge,
-  Card,
-  EmptyState,
-  Notice,
-  PageHeader,
-  StatTile,
-  Table,
-  Td,
-  Th,
-  jpDate,
-  jpMonthLabel,
-  yen,
-} from "@/components/ui";
+import { Badge, Card, EmptyState, jpDate, jpMonthLabel, Notice, PageHeader, StatTile, Table, Td, Th, yen, yenTaxExcl } from "@/components/ui";
 import { Progress } from "@/components/Progress";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { rankLabel } from "@/lib/labels";
@@ -281,12 +268,12 @@ export default async function DashboardPage() {
           }`}
         />
         <StatTile
-          label="今月の売上"
-          value={yen(summary.salesTotal)}
+          label="今月の売上（税別）"
+          value={yenTaxExcl(summary.salesTotal)}
           hint={
             stoppedCount > 0
-              ? "ご自身とスタッフの販売金額の合計（中止分を除く）"
-              : "ご自身とスタッフの販売金額の合計"
+              ? "ご自身とスタッフの販売金額の合計（税別・中止分を除く）"
+              : "ご自身とスタッフの販売金額の合計（税別）"
           }
         />
         {showReward ? (
@@ -445,7 +432,7 @@ export default async function DashboardPage() {
                     {o.ownerCode || "—"}
                   </Td>
                   <Td numeric align="right">
-                    {yen(o.amount)}
+                    {yenTaxExcl(o.amount)}
                   </Td>
                   <Td>
                     <Progress

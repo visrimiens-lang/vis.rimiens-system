@@ -127,12 +127,12 @@ function Fields({ product, disabled }: { product?: Product; disabled?: boolean }
 
       <MoneyField
         name="price"
-        label="販売単価（税込）"
+        label="販売単価（税別）"
         defaultValue={product?.price}
         required
         disabled={disabled}
         max={9_999_999}
-        hint="お客様のお支払額です。報酬額の計算には使いません。"
+        hint="お客様のお支払額です（税別）。報酬額の計算には使いません。"
       />
 
       <div className="space-y-3 rounded-lg border border-ink-800 bg-ink-950/60 px-4 py-3.5">

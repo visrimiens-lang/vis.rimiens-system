@@ -19,6 +19,8 @@ export type DemoMachine = {
   holderCode: string;
   /** 保有している代理店の名前 */
   holderName: string;
+  /** 申込のときに名乗った会社名（デモ機登録フォームの「自社会社名」） */
+  ownerCompany: string;
   /** 製造番号（シリアル） */
   serial: string;
   model: string;
@@ -51,6 +53,7 @@ function toDemoMachine(r: Row): DemoMachine {
     recordId: s_(r, "id"),
     holderCode: s_(r, "holder_code"),
     holderName: s_(r, "holder_name"),
+    ownerCompany: s_(r, "owner_company"),
     serial: s_(r, "serial_no"),
     model: s_(r, "model"),
     condition: s_(r, "state"),

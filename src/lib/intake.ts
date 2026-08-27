@@ -1587,6 +1587,12 @@ export type DemoApplication = {
   acquiredOn?: string;
   holderCode?: string;
   holderName?: string;
+  /**
+   * 申込者が名乗った会社名（デモ機登録フォームの「自社会社名」）。
+   * 保有代理店の名前とは別物で、エリア統括や個人販売代理店のように
+   * 自分のコードを持たない申込では、ここにしか名前が残らない。
+   */
+  ownerCompany?: string;
   purpose?: string;
   note?: string;
 };
@@ -1657,6 +1663,7 @@ export async function registerDemoMachine(app: DemoApplication): Promise<IntakeR
       state: "在庫",
       holder_code: app.holderCode || null,
       holder_name: holderName || null,
+      owner_company: app.ownerCompany || null,
       purpose: app.purpose || null,
       note: app.note || null,
     },

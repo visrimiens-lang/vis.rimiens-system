@@ -29,6 +29,8 @@ export type DemoView = {
   holderCode: string;
   /** 保有者（責任者）の名前。 */
   holderName: string;
+  /** 申込者が名乗った会社名（デモ機登録フォームの「自社会社名」）。 */
+  ownerCompany: string;
   customerName: string;
   lendTo: string;
   lendOn: string;
@@ -214,6 +216,23 @@ function DetailFields({
         </label>
 
         <label className="block">
+          <span className={labelCls}>自社会社名</span>
+          <input
+            type="text"
+            name="ownerCompany"
+            maxLength={100}
+            defaultValue={machine?.ownerCompany ?? ""}
+            disabled={disabled}
+            placeholder="例）個人代理店キャプテン"
+            className={inputCls}
+          />
+          <span className={hintCls}>
+            デモ機登録フォームの「自社会社名」です。自分のコードを持たない
+            エリア統括代理店・個人販売代理店は、ここに名乗った名前しか残りません。
+          </span>
+        </label>
+
+        <label className="block">
           <span className={labelCls}>設置先のお客様名</span>
           <input
             type="text"
@@ -375,6 +394,9 @@ export function DemoRow({
           ) : (
             <span className="text-ink-500">未設定</span>
           )}
+        </Td>
+        <Td>
+          <div className="min-w-0 truncate text-ink-200">{machine.ownerCompany || "—"}</div>
         </Td>
         <Td>
           <div className="min-w-0 truncate text-ink-200">{machine.holderName || "—"}</div>

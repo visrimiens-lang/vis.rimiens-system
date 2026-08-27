@@ -50,7 +50,7 @@ export const metadata = { title: "デモ機管理（本部）｜VIS 代理店ポ
  * ------------------------------------------------------------------ */
 
 /** 表の列数。入力欄を表いっぱいに広げるのに使う。 */
-const COLUMN_COUNT = 9;
+const COLUMN_COUNT = 10;
 
 /** 台数のタイルに並べる状態。保存先の設定と同じ並びにしてある。 */
 const STATES = ["在庫", "設置済", "貸出中", "返却済", "故障・修理", "廃棄"];
@@ -72,6 +72,7 @@ function toDemo(r: Row): DemoView {
     state: s_(r, "state"),
     holderCode: s_(r, "holder_code"),
     holderName: s_(r, "holder_name"),
+    ownerCompany: s_(r, "owner_company"),
     customerName: s_(r, "customer_name"),
     lendTo: s_(r, "lend_to"),
     lendOn: s_(r, "lend_on"),
@@ -121,6 +122,7 @@ const SORT_COLUMNS = [
   "acquired",
   "state",
   "holderCode",
+  "ownerCompany",
   "holder",
   "lendTo",
   "returnDue",
@@ -231,6 +233,7 @@ export default async function AdminDemoPage({
       m.model,
       m.holderName,
       m.holderCode,
+      m.ownerCompany,
       m.lendTo,
       m.customerName,
     ]);
@@ -247,6 +250,7 @@ export default async function AdminDemoPage({
       return i < 0 ? null : i;
     },
     holderCode: (m) => m.holderCode,
+    ownerCompany: (m) => m.ownerCompany,
     holder: (m) => m.holderName || m.holderCode,
     lendTo: (m) => m.lendTo,
     returnDue: (m) => m.returnDueOn,
@@ -375,6 +379,7 @@ export default async function AdminDemoPage({
                 <SortableTh column="acquired" label="取得区分" sort={sort} basePath={BASE} params={params} />
                 <SortableTh column="state" label="状態" sort={sort} basePath={BASE} params={params} />
                 <SortableTh column="holderCode" label="保有代理店コード" sort={sort} basePath={BASE} params={params} />
+                <SortableTh column="ownerCompany" label="自社会社名" sort={sort} basePath={BASE} params={params} />
                 <SortableTh column="holder" label="保有者（責任者）" sort={sort} basePath={BASE} params={params} />
                 <SortableTh column="lendTo" label="貸出先" sort={sort} basePath={BASE} params={params} />
                 <SortableTh column="returnDue" label="返却予定日" sort={sort} basePath={BASE} params={params} />
@@ -405,6 +410,10 @@ export default async function AdminDemoPage({
         「保有代理店コード」は、その台を持っている代理店のコードです。
         「保有者（責任者）」は、その台を預かって管理している方のお名前です（デモ機登録フォームの
         「使用者名」にあたります）。同じ苗字の方がいても、コードを見ればどちらの代理店の台か分かります。
+        <br />
+        「自社会社名」は、申込のときにご本人が名乗った会社名です。エリア統括代理店や
+        個人販売代理店のように自分のコードをお持ちでない場合、保有代理店コードは所属先のものになるため、
+        どなたの台かはこの欄で見分けます。
         <br />
         「取得区分」は、登録欄の「取得のしかた」と同じ項目です（個人購入／デモ機購入／無料貸与）。
         無料貸与の台は本部からお預けしているものなので、返却のご連絡が必要になります。

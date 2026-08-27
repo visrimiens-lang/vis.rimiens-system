@@ -62,6 +62,7 @@ const SORT_COLUMNS = [
   "model",
   "state",
   "holderCode",
+  "ownerCompany",
   "acquired",
   "lentTo",
   "due",
@@ -165,6 +166,7 @@ export default async function DemoMachinesPage({
       m.model,
       m.holderName,
       m.holderCode,
+      m.ownerCompany,
       m.lentTo,
       m.customerName,
     ]),
@@ -180,6 +182,7 @@ export default async function DemoMachinesPage({
       return i < 0 ? null : i;
     },
     holderCode: (m) => m.holderCode,
+    ownerCompany: (m) => m.ownerCompany,
     acquired: (m) => m.acquiredOn,
     lentTo: (m) => m.lentTo,
     due: (m) => m.dueOn,
@@ -332,6 +335,13 @@ export default async function DemoMachinesPage({
                   basePath={BASE}
                   params={params}
                 />
+                <SortableTh
+                  column="ownerCompany"
+                  label="自社会社名"
+                  sort={sort}
+                  basePath={BASE}
+                  params={params}
+                />
                 <Th>取得区分</Th>
                 <SortableTh
                   column="acquired"
@@ -395,6 +405,9 @@ export default async function DemoMachinesPage({
                         {m.holderName || "保有代理店名なし"}
                       </div>
                     </Td>
+                    <Td>
+                      <div className="min-w-0 truncate">{m.ownerCompany || "—"}</div>
+                    </Td>
                     <Td>{m.acquisition || "—"}</Td>
                     <Td numeric>{fullDate(m.acquiredOn)}</Td>
                     <Td>
@@ -428,6 +441,7 @@ export default async function DemoMachinesPage({
       </Card>
 
       <Notice tone="info">
+        「自社会社名」は、デモ機登録フォームでご自身が名乗った会社名です。
         「保有代理店コード」は、その台を持っている代理店のコードです（金色はご自身の分）。
         この一覧はデモ機登録フォームから申請された内容をもとにしています。製造番号や貸出先の記載に誤りがある場合、
         ポータルからは直せません。本部までご連絡ください。

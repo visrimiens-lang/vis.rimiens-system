@@ -24,8 +24,16 @@
  */
 export const QR1_BASE_URL = "https://lin.ee/nJTVC5A";
 
-/** QR2（ご契約・お支払いのご案内）。決済フォーム。 */
-export const QR2_BASE_URL = "https://line.metore0403.com/p/fXEUN6pjHMRW";
+/**
+ * QR2（ご契約・お支払いのご案内）。
+ *
+ * 2026-08-27 から、決済フォーム直行ではなく「ご購入メニュー」
+ * （新規購入／パット追加購入(１年分) の選択ページ）を入り口にする。
+ * ?ref= の代理店コードは、メニューページに入れた引き継ぎの仕掛けが
+ * そのまま次のページへ運ぶので、紹介元の記録はこれまでどおり残る。
+ * 旧URL: https://line.metore0403.com/p/fXEUN6pjHMRW（決済フォーム直行）
+ */
+export const QR2_BASE_URL = "https://line.metore0403.com/p/gjC5XREoMWMs";
 
 /**
  * 取次パートナーにご案内する共通の公式LINE。

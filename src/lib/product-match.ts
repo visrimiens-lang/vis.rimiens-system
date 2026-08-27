@@ -83,11 +83,24 @@ export type ProductMatch = {
  * @param products 商品マスタの行。PRODUCT_COLUMNS で取ったもの。
  *   `active` を含めておくと、分解の候補を取扱中のものだけに絞る。
  */
+/**
+ * 名前の照合用に、空白（半角・全角）をすべて取り除く。
+ *
+ * UTAGE はオーダーバンプ付きの決済を「本体名 ／ バンプ名」と
+ * 空白入りの「 ／ 」でつないで通知してくる。商品マスタ側は
+ * 「VIS本体／事務手数料／OP①(２年目ジェルパット)」のように空白なしで
+ * 持っているため、文字どおりの完全一致だと同じ商品が別物になる。
+ * 空白だけの違いで報酬が0円になるのを防ぐ。
+ */
+function keyOf(name: string): string {
+  return (name || "").replace(/[\s\u3000]+/g, "");
+}
+
 export function buildProductMatcher(
   products: Row[],
 ): (productName: string, amount: number, quantity?: number) => ProductMatch | null {
   const exact = new Map<string, Row>();
-  for (const p of products) exact.set(s_(p, "name"), p);
+  for (const p of products) exact.set(keyOf(s_(p, "name")), p);
 
   /*
    * 分解の候補は取扱中のものだけにする。
@@ -101,7 +114,7 @@ export function buildProductMatcher(
     .sort((a, b) => s_(b, "name").length - s_(a, "name").length);
 
   return (productName, amount, quantity = 1) => {
-    const name = (productName || "").trim();
+    const name = keyOf(productName);
     if (!name) return null;
 
     const hit = exact.get(name);
@@ -112,11 +125,13 @@ export function buildProductMatcher(
     /*
      * 拾った場所は、他の名前に当たらない文字で塗り潰してから次を探す。
      * 消してしまうと前後がくっついて、元の文字列には無かった並びが生まれる。
+     * こちらも空白抜きの形どうしで探す（上の keyOf の説明を参照）。
      */
     let rest = name;
     const used: Row[] = [];
     for (const p of candidates) {
-      const pname = s_(p, "name");
+      const pname = keyOf(s_(p, "name"));
+      if (!pname) continue;
       const at = rest.indexOf(pname);
       if (at < 0) continue;
       rest = rest.slice(0, at) + " ".repeat(pname.length) + rest.slice(at + pname.length);

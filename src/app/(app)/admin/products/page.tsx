@@ -225,7 +225,7 @@ export default async function AdminProductsPage({
           }
         />
         <StatTile
-          label="いちばん高い単価"
+          label="いちばん高い単価（税込）"
           value={highest > 0 ? yen(highest) : "—"}
           tone="gold"
           hint="取扱中の商品の税込単価"

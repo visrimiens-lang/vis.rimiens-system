@@ -564,7 +564,7 @@ export default async function RewardsPage({
         <StatTile label="売上合計（税込）" value={yen(salesTotal)} hint="配達完了分の販売金額（税込）" />
         {showReward ? (
           <StatTile
-            label="報酬合計"
+            label="報酬合計（税込）"
             value={yen(rewardTotal)}
             tone="gold"
             hint={
@@ -666,7 +666,7 @@ export default async function RewardsPage({
                 {showReward ? (
                   <SortableTh
                     column="reward"
-                    label="報酬額"
+                    label="報酬額（税込）"
                     sort={sort}
                     basePath={BASE}
                     params={params}
@@ -748,7 +748,7 @@ export default async function RewardsPage({
                 <Th>会社・担当コード</Th>
                 <Th>名前</Th>
                 <Th align="right">台数</Th>
-                {showReward ? <Th align="right">報酬額</Th> : null}
+                {showReward ? <Th align="right">報酬額（税込）</Th> : null}
                 {/* スタッフにいくら払うか。単価はスタッフ一覧で変更できる（個別 or ランクの既定） */}
                 {showReward ? <Th align="right">支払単価（税抜）</Th> : null}
                 {showReward ? <Th align="right">お支払額（税抜）</Th> : null}

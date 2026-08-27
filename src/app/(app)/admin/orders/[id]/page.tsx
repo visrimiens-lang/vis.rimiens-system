@@ -379,7 +379,7 @@ export default async function AdminOrderDetailPage({
           }
         />
         <StatTile
-          label="確定した報酬"
+          label="確定した報酬（税込）"
           value={yen(confirmed)}
           tone={voided ? "warn" : "default"}
           hint={
@@ -652,7 +652,7 @@ export default async function AdminOrderDetailPage({
                 <Th>ランク</Th>
                 <Th>種別</Th>
                 <Th>対象月</Th>
-                <Th align="right">金額</Th>
+                <Th align="right">金額（税込）</Th>
                 <Th>状態</Th>
                 <Th>確定日</Th>
                 <Th>支払日</Th>

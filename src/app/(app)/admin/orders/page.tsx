@@ -816,7 +816,7 @@ export default async function AdminOrdersPage({
                 <Th align="right">件数</Th>
                 <Th align="right">台数</Th>
                 <Th align="right">売上（税込）</Th>
-                <Th align="right">支払対象額</Th>
+                <Th align="right">支払対象額（税抜）</Th>
                 <Th align="right">取消（集計外）</Th>
               </tr>
             </thead>

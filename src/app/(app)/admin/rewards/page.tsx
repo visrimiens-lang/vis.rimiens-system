@@ -1187,22 +1187,22 @@ export default async function AdminRewardsPage({
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatTile
-          label="未確定合計"
+          label="未確定合計（税込）"
           value={yen(totals.pending)}
           hint="配送の完了待ち。まだ支払えません"
         />
         <StatTile
-          label="確定合計"
+          label="確定合計（税込）"
           value={yen(totals.confirmed)}
           hint="支払済の分を含む、確定した報酬の合計"
         />
         <StatTile
-          label="支払済合計"
+          label="支払済合計（税込）"
           value={yen(totals.paid)}
           hint={`${jpMonthLabel(month)}分として振込を記録した額`}
         />
         <StatTile
-          label="支払い待ち"
+          label="支払い待ち（税込）"
           value={yen(totals.awaiting)}
           tone="gold"
           hint={
@@ -1437,7 +1437,7 @@ export default async function AdminRewardsPage({
                                   <Th>注文者</Th>
                                   <Th>商品</Th>
                                   <Th>種別</Th>
-                                  <Th align="right">金額</Th>
+                                  <Th align="right">金額（税込）</Th>
                                   <Th>状態</Th>
                                   <Th>確定日</Th>
                                   <Th>支払日</Th>

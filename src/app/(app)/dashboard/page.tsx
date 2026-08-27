@@ -291,7 +291,7 @@ export default async function DashboardPage() {
         />
         {showReward ? (
           <StatTile
-            label="今月の報酬見込み"
+            label="今月の報酬見込み（税込）"
             value={rewardTotal === null ? "—" : yen(rewardTotal)}
             tone="gold"
             hint={

@@ -1595,10 +1595,40 @@ export async function registerDemoMachine(app: DemoApplication): Promise<IntakeR
   const serial = (app.serialNo || "").trim();
   if (!serial) return { ok: false, message: "製品番号（シリアル）が入っていません。" };
 
+  /*
+   * 同じ製品番号がすでにあったとき。
+   *
+   * 同じ代理店から同じ番号が届くのは、フォームの再送か本人の出し直しなので、
+   * これまでどおり黙って通す。
+   *
+   * ところが別の代理店から届いたぶんまで「登録済み」で成功として返しており、
+   * 受信箱には取り込めた扱いで残っていた。実際 2026-08-27 の
+   * 「個人代理店キャプテン（CAPE）」の申込は、前日に SASA が出した
+   * VIS0000-0000 とぶつかって捨てられたのに、本部の受信箱からは
+   * 取り込めたようにしか見えず、デモ機一覧にも出てこなかった。
+   *
+   * 番号の打ち間違いなのか、本当に別の機体で番号を取り違えているのかは
+   * 本部でないと分からない。勝手に上書きも二重登録もせず、
+   * 取り込まずに理由を添えて受信箱へ残す。
+   */
   const dup = await selectOne<Row>(
-    `demo_machines?select=id&serial_no=eq.${encodeURIComponent(serial)}`,
+    `demo_machines?select=id,holder_code,holder_name&serial_no=eq.${encodeURIComponent(serial)}`,
   );
-  if (dup) return { ok: true, code: serial, message: "この製品番号は登録済みです。" };
+  if (dup) {
+    const incoming = (app.holderCode || "").trim();
+    const existing = s_(dup, "holder_code").trim();
+    if (!incoming || !existing || incoming === existing) {
+      return { ok: true, code: serial, message: "この製品番号は登録済みです。" };
+    }
+    const owner = s_(dup, "holder_name").trim() || existing;
+    return {
+      ok: false,
+      message:
+        `製品番号 ${serial} は、すでに ${owner}（${existing}）のデモ機として登録されています。` +
+        `${incoming} からの申込は取り込んでいません。` +
+        `製品番号の打ち間違いか、どちらの代理店の機体かをご確認ください。`,
+    };
+  }
 
   // 保有代理店の名前を補う
   let holderName = app.holderName || "";

@@ -1,6 +1,7 @@
 import "server-only";
 import { audit, insert, inList, select, selectAll, selectOne, update } from "./db";
 import { todayInJapan } from "./jst";
+import { payoutForOrder, type PayUnits } from "./pay-defaults";
 import { AMOUNT_COLUMNS, PRODUCT_COLUMNS, buildProductMatcher, type MatchHow } from "./product-match";
 
 /**
@@ -33,6 +34,17 @@ const n_ = (r: Row | null, k: string): number => {
   if (!r) return 0;
   const v = r[k];
   return typeof v === "number" ? v : Number(v ?? 0) || 0;
+};
+/*
+ * 「未設定」と「0円」を混ぜない読み方。
+ * 列がまだ無いうちは undefined で来るので、そちらも未設定として扱う。
+ */
+const num_ = (r: Row | null, k: string): number | null => {
+  if (!r) return null;
+  const v = r[k];
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
 };
 
 /** rewards.status に入る値（保存先の制約と同じ。これ以外は入れない）。 */
@@ -247,12 +259,20 @@ export async function accrueRewards(
    * 列がまだ無いうちに動いても報酬計算が止まらないよう、失敗したら既定の単価だけで進む。
    * （マイグレーション supabase/migrations/2026-08-19_agency_pay_unit.sql を流すと効き始める）
    */
-  const payUnit = new Map<string, number>();
+  const payUnit = new Map<string, PayUnits>();
   try {
-    const rows = await select<Row>(`agencies?select=code,pay_unit&code=${inList(unique)}`);
+    const rows = await select<Row>(
+      `agencies?select=code,pay_unit,pay_unit_op1,pay_unit_op2,pay_unit_pad_yearly&code=${inList(unique)}`,
+    );
     for (const r of rows) {
-      const v = n_(r, "pay_unit");
-      if (v > 0) payUnit.set(s_(r, "code"), v);
+      const body = num_(r, "pay_unit");
+      if (body === null || body <= 0) continue;
+      payUnit.set(s_(r, "code"), {
+        body,
+        op1: num_(r, "pay_unit_op1"),
+        op2: num_(r, "pay_unit_op2"),
+        padYearly: num_(r, "pay_unit_pad_yearly"),
+      });
     }
   } catch {
     // 列がまだ無い。既定の単価で進む。
@@ -296,10 +316,21 @@ export async function accrueRewards(
         : s_(a, "rank");
     const col = amountColumn(rank);
     if (!col) continue;
-    // 上位が決めた額があればそれを使う。無ければランク別の単価。
-    const override = payUnit.get(s_(a, "code")) ?? 0;
-    const unit = override > 0 ? override : (basis.unit[col] ?? 0);
-    if (unit <= 0) continue;
+    /*
+     * 上位が決めた額があればそれを使う。無ければランク別の単価。
+     *
+     * 2026-08-27 に支払額を品目ごとに分けたので、決めてある相手には
+     * 受注に含まれる品目（本体価格・OP①・OP②・1年後定期）を足して計上する。
+     * 決めていない相手はこれまでどおり商品マスタの単価 × 台数。
+     */
+    const override = payUnit.get(s_(a, "code"));
+    const overrideAmount = override
+      ? payoutForOrder(override, s_(order, "product_name"), quantity)
+      : null;
+    const unit = basis.unit[col] ?? 0;
+    if (overrideAmount === null && unit <= 0) continue;
+    const amount = overrideAmount !== null ? overrideAmount : unit * quantity;
+    if (amount <= 0) continue;
 
     const kind = s_(a, "code") === s_(order, "referrer_code") ? "紹介報酬" : "販売報酬";
     /*
@@ -317,7 +348,7 @@ export async function accrueRewards(
       agency_code: s_(a, "code"),
       agency_rank: rank,
       month,
-      amount: unit * quantity,
+      amount,
       kind,
       status: "未確定",
     });

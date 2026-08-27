@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import { listAllAgencies } from "@/lib/agencies";
+import { effectivePayUnits, payoutForOrder } from "@/lib/pay-defaults";
 import { select } from "@/lib/db";
 import { agencyTypeOf, companyNameOf, rankLabel } from "@/lib/labels";
 import { PRODUCT_COLUMNS, buildProductMatcher } from "@/lib/product-match";
@@ -469,6 +470,25 @@ export default async function AdminOrdersPage({
 
   const nameByCode = new Map(agencies.map((a) => [a.code, a.name]));
   const agencyByCode = new Map(agencies.map((a) => [a.code, a]));
+
+  /*
+   * 支払対象額は「その支払先に実際に払う額」を出す。
+   *
+   * これまでは商品マスタの「2次代理店」単価 × 台数で一律に出していたが、
+   * 上位が「金額修正」で本体価格・OP①・OP②・1年後定期を決めている相手には、
+   * その額が実際の支払額になる（2026-08-27）。決めていない相手は
+   * これまでどおり商品マスタから出す。
+   *
+   * 受注を読んだ時点では支払先が誰か分からないので、代理店が揃ってから付け直す。
+   */
+  periodOrders = periodOrders.map((o) => {
+    const payee = agencyByCode.get(payeeCodeOf(o));
+    if (!payee) return o;
+    const qty = o.quantity || 1;
+    const paid = payoutForOrder(effectivePayUnits(payee), o.productName, qty);
+    if (paid === null) return o;
+    return { ...o, secondaryUnit: qty > 0 ? Math.round(paid / qty) : null, secondaryTotal: paid };
+  });
 
   /**
    * 担当スタッフの下に出す「どこの会社の、どの立場の人か」。
@@ -1117,7 +1137,9 @@ export default async function AdminOrdersPage({
       <Notice tone="info">
         代理店は、受注に記録された集計用の{rankLabel("2次代理店")}コードです。入っていない受注は、受注に記録された代理店コードでまとめています。
         担当コードは、取次の紹介コードがある受注ではそのコード、無い受注では代理店コードです。
-        支払対象額は「{rankLabel("2次代理店")}分の1台あたりの金額 × 台数」で計算しています。
+        支払対象額は、支払先に「金額修正」で決めてある額があればそちら（受注に含まれる
+        本体価格・OP①・OP②・1年後定期を足して台数を掛けた額）、決めていなければ
+        「{rankLabel("2次代理店")}分の1台あたりの金額 × 台数」で計算しています。
         キャンセルと審査否決の受注は、売上・台数・支払対象額のどれにも数えていません（表では行の色を変えて残しています）。
         送り状番号を押すと、ヤマト運輸の追跡ページが別のタブで開きます。
       </Notice>

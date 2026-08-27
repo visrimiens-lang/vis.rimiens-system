@@ -18,6 +18,7 @@ import {
 import { listAllAgencies } from "@/lib/agencies";
 import { select } from "@/lib/db";
 import { SlotBreakdown } from "@/components/SlotBreakdown";
+import { effectivePayUnits } from "@/lib/pay-defaults";
 import {
   attachRewards,
   canComputeReward,
@@ -128,7 +129,15 @@ async function load(code: string, month: string): Promise<Loaded | null> {
 
   // 今月ぶんの集計は、キャンセルと審査否決を除いた受注だけで行う。
   const live = thisMonth.raw.filter((r) => !isStopped(r));
-  const orders = attachRewards(live, effectiveRank(self));
+  /*
+   * 報酬見込みは「実際に受け取る額」を出す。
+   *
+   * 3次・取次・スタッフが受け取るのは、上位が「金額修正」で決めた額であって
+   * 商品マスタの単価ではない。上位が額を決めていないとき、また総販・2次のように
+   * 上位からの支払額を持たないランクでは、これまでどおり商品マスタから出る。
+   */
+  const selfPayUnits = effectivePayUnits(self);
+  const orders = attachRewards(live, effectiveRank(self), selfPayUnits);
 
   // 審査結果とお客様の紐づけは Order には入っていないので、
   // 元の行から拾って進み具合の判定に回す。
@@ -142,7 +151,7 @@ async function load(code: string, month: string): Promise<Loaded | null> {
     if (customerId) customerIdByOrder.set(id, customerId);
   }
 
-  const latest = attachRewards(allTime.raw, effectiveRank(self)).slice(0, 5);
+  const latest = attachRewards(allTime.raw, effectiveRank(self), selfPayUnits).slice(0, 5);
 
   // 配達が終わった日は顧客台帳のほうに入っている。
   // 顧客一覧と同じ進み具合になるよう、ここでも引いてくる。
@@ -241,6 +250,9 @@ export default async function DashboardPage() {
 
   const { self, summary, stoppedCount, slot, breakdown, slotUnit, showSlots, recent } = data;
 
+  // 上位が「金額修正」で決めた額。load 側の集計と同じものを見る。
+  const selfPayUnits = effectivePayUnits(self);
+
   // スタッフ（コード区分 02）には報酬の金額を出さない。
   // 2026-04-23 の打ち合わせで「金額が見えるのは親アカウントだけ」と決まっている。
   const isStaff = self.codeKind === "02";
@@ -248,7 +260,8 @@ export default async function DashboardPage() {
 
   // 自分のランクに対応する単価が App10 にあるかどうか。
   // 「販売代理店」ぶんのフィールドは未整備のため null が返る。
-  const rewardAvailable = canComputeReward(self);
+  // 上位が支払額を決めていれば、商品マスタに単価が無いランクでも金額を出せる。
+  const rewardAvailable = canComputeReward(self) || selfPayUnits.body !== null;
   const rankMissing = effectiveRank(self) === "";
   const rewardTotal = rewardAvailable ? summary.rewardTotal : null;
 
@@ -291,13 +304,24 @@ export default async function DashboardPage() {
         />
         {showReward ? (
           <StatTile
-            label="今月の報酬見込み（税込）"
+            /*
+             * 見出しの税の書き方を、金額の出どころに合わせる。
+             * 商品マスタの単価は税込、上位が決めた支払額は税抜で持っているため、
+             * 一方に合わせて固定すると、どちらかが必ず食い違う。
+             */
+            label={
+              selfPayUnits.body !== null
+                ? "今月の報酬見込み（税別）"
+                : "今月の報酬見込み（税込）"
+            }
             value={rewardTotal === null ? "—" : yen(rewardTotal)}
             tone="gold"
             hint={
-              rewardAvailable
-                ? `${rewardRankText}としての単価 × 台数。確定額は本部の締め後に確定します。`
-                : "単価が未設定のため計算できません"
+              selfPayUnits.body !== null
+                ? "上位の代理店が決めた本体価格・OP①・OP②・1年後定期から、受注ごとに計算しています（税別）。消費税を加えた額が支払通知書のお支払金額です。"
+                : rewardAvailable
+                  ? `${rewardRankText}としての単価 × 台数。確定額は本部の締め後に確定します。`
+                  : "単価が未設定のため計算できません"
             }
           />
         ) : (

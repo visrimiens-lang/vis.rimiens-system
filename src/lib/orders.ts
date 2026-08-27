@@ -1,4 +1,6 @@
 import "server-only";
+
+import { payoutForOrder, type PayUnits } from "./pay-defaults";
 import { select } from "./db";
 import { PRODUCT_COLUMNS, buildProductMatcher } from "./product-match";
 import type { Agency, Order } from "./types";
@@ -159,18 +161,39 @@ export async function listOrders(
   return { orders: matched.map(toOrder) as OrderWithReward[], raw: matched };
 }
 
-/** 受注一覧に、指定ランクでの報酬額を付ける。 */
+/**
+ * 受注一覧に報酬額を付ける。
+ *
+ * 既定は商品マスタのランク別単価。これは「本部から見た報酬」で、
+ * 総販売代理店・2次代理店に払うぶんがここから出る。
+ *
+ * payUnits を渡すと、そちらを先に使う（2026-08-27）。
+ * 3次・取次・スタッフが実際に受け取るのは、上位が「金額修正」で決めた額であって
+ * 商品マスタの単価ではない。渡さなかったとき、また上位が額を決めていないときは
+ * これまでどおり商品マスタから出す（総販・2次には既定を置いていないため、
+ * その2ランクは渡しても商品マスタのままになる）。
+ */
 export function attachRewards(
   raw: Row[],
   rank: string,
+  payUnits?: PayUnits,
 ): OrderWithReward[] {
   return raw.map((r) => {
     const o = toOrder(r);
+    const qty = o.quantity || 1;
+
+    if (payUnits) {
+      const paid = payoutForOrder(payUnits, o.productName, qty);
+      if (paid !== null) {
+        return { ...o, unitReward: qty > 0 ? Math.round(paid / qty) : null, reward: paid };
+      }
+    }
+
     const unit = unitRewardFor(r, rank);
     return {
       ...o,
       unitReward: unit,
-      reward: unit === null ? null : unit * (o.quantity || 1),
+      reward: unit === null ? null : unit * qty,
     };
   });
 }

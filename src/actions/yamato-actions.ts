@@ -11,6 +11,7 @@ import {
   buildShipment,
   type OutboundOrder,
 } from "@/lib/yamato";
+import { parseTracking } from "@/lib/yamato-csv";
 
 /**
  * ヤマトB2クラウドで送り状を発行する（本部専用）。
@@ -265,4 +266,113 @@ function reason(e: unknown): string {
 function b2reason(e: unknown): string {
   if (e instanceof B2Error) return e.message;
   return `B2クラウドとの通信に失敗しました。${reason(e)}`;
+}
+
+
+/* ══════════════════ 発行結果の取り込み（CSV運用） ══════════════════ */
+
+export type TrackingState = {
+  error?: string;
+  ok?: string;
+  /** 入れられなかった行の説明。何が起きたかを画面でそのまま見せる */
+  problems?: string[];
+};
+
+/**
+ * B2クラウドで発行した伝票番号を、受注に入れる。
+ *
+ * APIの認証キーが揃うまでの流れ:
+ *   1. 送り状発行の画面から取込用CSVを書き出す
+ *   2. B2クラウドの「送り状発行データ取込」で読ませて発行する
+ *   3. 発行結果（お客様管理番号と送り状番号）をここに貼る
+ *
+ * 貼る形は決め打ちにしない。B2の出力をそのまま貼っても、
+ * 「受注ID,伝票番号」の2列だけを貼っても通す（lib/yamato-csv.ts）。
+ *
+ * すでに別の伝票番号が入っている受注は、上書きせずに知らせる。
+ * 二重発行に気づかないまま番号だけ書き換わるのが一番まずいため。
+ */
+export async function importTrackingAction(
+  _prev: TrackingState,
+  formData: FormData,
+): Promise<TrackingState> {
+  const viewer = await currentViewer();
+  if (!viewer || viewer.kind !== "hq") {
+    return { error: "この操作は本部のアカウントでのみ行えます。" };
+  }
+
+  const text = String(formData.get("tracking") ?? "");
+  const { pairs, skipped } = parseTracking(text);
+  if (pairs.length === 0) {
+    return {
+      error:
+        "受注IDと伝票番号の組が読み取れませんでした。" +
+        "B2クラウドの発行結果をそのまま貼るか、「受注ID,伝票番号」の形で貼ってください。",
+      problems: skipped.slice(0, 10),
+    };
+  }
+
+  const problems: string[] = skipped.map((l) => `読み取れなかった行：${l}`);
+  let done = 0;
+
+  for (const p of pairs) {
+    let rows: Row[];
+    try {
+      rows = await select<Row>(
+        `orders?select=id,customer_id,customer_name,tracking_no,ship_status` +
+          `&id=eq.${encodeURIComponent(p.orderId)}`,
+      );
+    } catch (e) {
+      problems.push(`受注${p.orderId}：読み込めませんでした。${reason(e)}`);
+      continue;
+    }
+    const o = rows[0];
+    if (!o) {
+      problems.push(`受注${p.orderId}：この番号の受注がありません。`);
+      continue;
+    }
+    const already = s_(o, "tracking_no");
+    if (already && already !== p.trackingNo) {
+      problems.push(
+        `受注${p.orderId}（${s_(o, "customer_name")}）：すでに ${already} が入っているため、` +
+          `${p.trackingNo} は入れませんでした。二重発行でないかご確認ください。`,
+      );
+      continue;
+    }
+    if (already === p.trackingNo) {
+      done += 1; // 同じ番号の貼り直しは、そのまま済みとして数える
+      continue;
+    }
+    try {
+      await update(`orders?id=eq.${encodeURIComponent(p.orderId)}`, {
+        tracking_no: p.trackingNo,
+        ...(s_(o, "ship_status") === "出荷待ち" ? { ship_status: "出荷手配中" } : {}),
+      });
+      const customerId = s_(o, "customer_id");
+      if (customerId) {
+        // お客様マイページは顧客台帳の送り状番号を見るので、そちらにも写す
+        await update(`customers?id=eq.${encodeURIComponent(customerId)}`, {
+          tracking_no: p.trackingNo,
+        });
+      }
+      done += 1;
+    } catch (e) {
+      problems.push(`受注${p.orderId}：入れられませんでした。${reason(e)}`);
+    }
+  }
+
+  await audit("hq", "ヤマト伝票番号の取り込み", { type: "yamato", key: "csv" }, {
+    入れた件数: done,
+    問題: problems.length > 0 ? problems.slice(0, 20) : null,
+  });
+
+  revalidatePath("/admin/shipping");
+  revalidatePath("/admin/orders");
+  revalidatePath("/customers");
+
+  return {
+    ok: done > 0 ? `${done} 件の伝票番号を受注に入れました。` : undefined,
+    error: done === 0 ? "受注に入れられた伝票番号はありませんでした。" : undefined,
+    problems: problems.length > 0 ? problems : undefined,
+  };
 }

@@ -1,9 +1,10 @@
 import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import { select } from "@/lib/db";
-import { b2Config } from "@/lib/yamato";
+import { b2Config, shipperConfig } from "@/lib/yamato";
 import { Card, Notice, PageHeader, jpDate } from "@/components/ui";
 import { IssueForm, type ShippingRow } from "./IssueForm";
+import { TrackingForm } from "./TrackingForm";
 
 /**
  * 送り状発行（ヤマトB2クラウド・本部専用）。
@@ -29,6 +30,7 @@ export default async function ShippingPage() {
   if (viewer.kind !== "hq") redirect("/dashboard");
 
   const { config, missing } = b2Config();
+  const shipper = shipperConfig();
 
   /* 対象：送り状番号がまだ無く、止まっていない受注。 */
   let orders: Row[] = [];
@@ -92,19 +94,45 @@ export default async function ShippingPage() {
 
       {!config ? (
         <Notice tone="warn">
-          <span className="font-semibold">B2クラウドの接続情報がまだ設定されていません。</span>
+          <span className="font-semibold">
+            ボタンひとつでの発行（API連携）は、まだ使えません。
+          </span>
           <br />
           不足している設定：{missing.join("、")}
           <br />
-          APIアクセス認証キーは、ヤマトビジネスメンバーズ →
-          B2クラウド →「外部システムとの連携」で取得できます。API連携会社コードは
-          ヤマトとのAPI利用契約時に発行されるものです。取得できたら担当者にお渡しください。
-          設定が済むまで、送り状の発行はこれまでどおりB2クラウドの画面から行えます。
+          APIアクセス認証キーはヤマトビジネスメンバーズ → B2クラウド →
+          「外部システムとの連携」で、API連携会社コードはヤマトとのAPI利用契約時に
+          発行されます。取得できたら担当者にお渡しください。
+          <br />
+          <span className="font-semibold">
+            それまでは、下の手順で今までどおり送り状を出せます。
+          </span>
+          <br />
+          ① 発行したい受注にチェックを付けて「B2クラウド取込用のCSVを出す」を押す　→　
+          ② B2クラウドの「送り状発行データ取込」でそのCSVを読ませて発行する　→　
+          ③ 発行結果（お客様管理番号と送り状番号）を、この画面の
+          「発行した伝票番号を受注に入れる」に貼る。
+        </Notice>
+      ) : null}
+
+      {!shipper.config ? (
+        <Notice tone="bad">
+          送り主・請求先の設定が足りないため、CSVも出せません。不足している設定：
+          {shipper.missing.join("、")}
         </Notice>
       ) : null}
 
       <Card title={`送り状が必要な受注　${rows.length} 件`}>
-        <IssueForm rows={rows} />
+        <IssueForm rows={rows} canIssue={Boolean(config)} />
+      </Card>
+
+      <Card title="発行した伝票番号を受注に入れる">
+        <div className="border-b border-ink-850 px-5 pt-4 text-xs leading-relaxed text-ink-400">
+          B2クラウドの画面で発行したときは、その結果をここに貼ると、受注とお客様の
+          台帳に伝票番号が入ります（荷物追跡もそのまま使えるようになります）。
+          B2の発行結果をそのまま貼っても、「受注ID,伝票番号」の2列だけを貼っても読み取れます。
+        </div>
+        <TrackingForm />
       </Card>
 
       <Card title="発行の控え（直近10回）">

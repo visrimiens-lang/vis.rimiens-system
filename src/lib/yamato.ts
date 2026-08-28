@@ -54,11 +54,20 @@ export type B2Config = {
  * キー自体はヤマトとの契約とB2画面でしか手に入らないので、
  * 未設定のままでも画面が壊れないよう、呼び出し側で出し分ける。
  */
-export function b2Config(): { config: B2Config | null; missing: string[] } {
-  const read = (k: string) => (process.env[k] ?? "").trim();
+const read = (k: string) => (process.env[k] ?? "").trim();
+
+/** APIを使わない書き出し（CSV）でも要る、送り主と請求先の情報だけ。 */
+export type ShipperConfig = Omit<B2Config, "baseUrl" | "accessKey" | "apiUserId">;
+
+/**
+ * 送り主・請求先の設定。
+ *
+ * APIの認証キー（YAMATO_B2_ACCESS_KEY・YAMATO_B2_API_USER_ID）はヤマトとの
+ * API利用契約が要るため、手に入るまで時間がかかる。ここはキー抜きでも読めるので、
+ * その間はB2クラウド画面へのCSV取込で送り状を出せる。
+ */
+export function shipperConfig(): { config: ShipperConfig | null; missing: string[] } {
   const required = [
-    "YAMATO_B2_ACCESS_KEY",
-    "YAMATO_B2_API_USER_ID",
     "YAMATO_B2_INVOICE_CODE",
     "YAMATO_SHIPPER_NAME",
     "YAMATO_SHIPPER_ZIP",
@@ -69,9 +78,6 @@ export function b2Config(): { config: B2Config | null; missing: string[] } {
   if (missing.length > 0) return { config: null, missing };
   return {
     config: {
-      baseUrl: read("YAMATO_B2_BASE_URL") || "https://newb2web.kuronekoyamato.co.jp",
-      accessKey: read("YAMATO_B2_ACCESS_KEY"),
-      apiUserId: read("YAMATO_B2_API_USER_ID"),
       invoiceCode: read("YAMATO_B2_INVOICE_CODE"),
       invoiceCodeExt: read("YAMATO_B2_INVOICE_CODE_EXT"),
       invoiceFreightNo: read("YAMATO_B2_INVOICE_FREIGHT_NO") || "01",
@@ -82,6 +88,22 @@ export function b2Config(): { config: B2Config | null; missing: string[] } {
         tel: read("YAMATO_SHIPPER_TEL"),
       },
       itemName: read("YAMATO_ITEM_NAME") || "眼筋トレーニングマシンVIS",
+    },
+    missing: [],
+  };
+}
+
+export function b2Config(): { config: B2Config | null; missing: string[] } {
+  const base = shipperConfig();
+  const keys = ["YAMATO_B2_ACCESS_KEY", "YAMATO_B2_API_USER_ID"].filter((k) => !read(k));
+  const missing = [...keys, ...base.missing];
+  if (missing.length > 0 || !base.config) return { config: null, missing };
+  return {
+    config: {
+      ...base.config,
+      baseUrl: read("YAMATO_B2_BASE_URL") || "https://newb2web.kuronekoyamato.co.jp",
+      accessKey: read("YAMATO_B2_ACCESS_KEY"),
+      apiUserId: read("YAMATO_B2_API_USER_ID"),
     },
     missing: [],
   };

@@ -1,7 +1,7 @@
 "use client";
 
-import { useActionState } from "react";
-import { Truck } from "lucide-react";
+import { useActionState, useRef } from "react";
+import { Download, Truck } from "lucide-react";
 import { issueYamatoAction, type YamatoState } from "@/actions/yamato-actions";
 import { Badge, Notice, Table, Td, Th } from "@/components/ui";
 
@@ -29,12 +29,34 @@ export type ShippingRow = {
  * 発行には B2クラウドとのやり取り（データチェック → 発行 → 印刷待ち →
  * 伝票番号の受け取り）が入るので、押してから十数秒かかることがある。
  */
-export function IssueForm({ rows }: { rows: ShippingRow[] }) {
+export function IssueForm({
+  rows,
+  canIssue,
+}: {
+  rows: ShippingRow[];
+  /** APIの認証キーが揃っているか。揃うまではCSVでの発行になる */
+  canIssue: boolean;
+}) {
   const [state, run, pending] = useActionState(issueYamatoAction, initial);
   const ready = rows.filter((r) => !r.problem);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  /* チェックの付いた受注だけをCSVに出す。 */
+  function downloadCsv() {
+    const form = formRef.current;
+    if (!form) return;
+    const ids = Array.from(
+      form.querySelectorAll<HTMLInputElement>('input[name="order"]:checked'),
+    ).map((el) => el.value);
+    if (ids.length === 0) {
+      window.alert("CSVに出す受注を選んでください。");
+      return;
+    }
+    window.location.href = `/api/yamato/csv?ids=${ids.join(",")}`;
+  }
 
   return (
-    <form action={run}>
+    <form action={run} ref={formRef}>
       {rows.length === 0 ? (
         <div className="px-5 py-6 text-sm text-ink-300">
           送り状が必要な受注はありません（出荷待ち・送り状番号なしの受注が対象です）。
@@ -106,17 +128,39 @@ export function IssueForm({ rows }: { rows: ShippingRow[] }) {
       )}
 
       <div className="space-y-3 border-t border-ink-800 px-5 py-4">
-        <div className="flex flex-wrap items-center gap-4">
+        <div className="flex flex-wrap items-center gap-3">
+          {canIssue ? (
+            <button
+              type="submit"
+              disabled={pending || ready.length === 0}
+              className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-on-gold transition hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Truck className="h-4 w-4" />
+              {pending ? "発行しています…（十数秒かかります）" : "選んだ受注の送り状を発行する"}
+            </button>
+          ) : null}
+          {/*
+            APIの認証キーが揃うまでの発行手段。キーが揃ってからも、
+            B2クラウドの画面で出したい場面（1件だけ出し直す等）に使える。
+          */}
           <button
-            type="submit"
+            type="button"
+            onClick={downloadCsv}
             disabled={pending || ready.length === 0}
-            className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-on-gold transition hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-60"
+            className={
+              (canIssue
+                ? "border border-ink-700 bg-ink-900 text-ink-100 hover:bg-ink-850"
+                : "bg-brand text-on-gold hover:bg-brand-strong") +
+              " inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
+            }
           >
-            <Truck className="h-4 w-4" />
-            {pending ? "発行しています…（十数秒かかります）" : "選んだ受注の送り状を発行する"}
+            <Download className="h-4 w-4" />
+            B2クラウド取込用のCSVを出す
           </button>
           <span className="text-xs text-ink-400">
-            発行すると伝票番号が採番され、受注とお客様の台帳に自動で入ります。
+            {canIssue
+              ? "発行すると伝票番号が採番され、受注とお客様の台帳に自動で入ります。"
+              : "CSVをB2クラウドの「送り状発行データ取込」で読ませて発行し、伝票番号を下の欄に貼ってください。"}
           </span>
         </div>
 

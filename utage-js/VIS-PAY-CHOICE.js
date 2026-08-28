@@ -27,11 +27,19 @@
  * もとは VIS-TOTAL-ROW が「購入商品」の下に合計を足していた。同じ役目を
  * このスクリプトが引き受けるので、VIS-TOTAL-ROW は外すこと（残すと二重に出る）。
  *
- * ■ OP①・OP② について
+ * ■ OP① について
  *
- * どちらもクレジットカード払いのオーダーバンプなので、銀行振込・アプラスを
+ * OP① はクレジットカード払いのオーダーバンプなので、銀行振込・アプラスを
  * 選ぶと UTAGE が自動で引っ込める。黙って消えると
  * 「さっきあったチェックが無くなった」と見えるので、消える代わりに理由を出す。
+ *
+ * ■ OP②（延長保証）について
+ *
+ * UTAGE のオーダーバンプは1つの決済フォームに1つしか出せない。OP① で
+ * 埋まっているので、OP② は「本体＋OP②」の商品行に差し替えることで足す
+ * （もともと vis-op2 がやっていたのと同じやり方）。
+ * 差し替え先はクレジットカード払いの行しか無いので、OP② もクレジットの
+ * ときだけ出す。行の中の文字には触らず、行を押すだけ。
  */
 (function () {
   "use strict";
@@ -290,8 +298,38 @@
     return lab;
   }
 
+  /** 「本体＋OP②（３年延長保証）」の行。無いページでは null。 */
+  function op2Radio() {
+    var hit = null;
+    radios().forEach(function (r) {
+      if (!hit && /OP②|３年延長保証|3年延長保証/.test(textOf(r))) hit = r;
+    });
+    return hit;
+  }
+
+  /** OP② を付けずに買うときの、クレジットカード払いの行。 */
+  function cardRadio() {
+    var op2 = op2Radio();
+    var hit = null;
+    radios().forEach(function (r) {
+      if (hit || r === op2) return;
+      if (KINDS[0].match(textOf(r))) hit = r;
+    });
+    return hit;
+  }
+
+  function op2On() {
+    var r = op2Radio();
+    return Boolean(r && r.checked);
+  }
+
   /** 選ばれた支払方法に対応する UTAGE の行を押す。 */
   function pick(key) {
+    /* クレジットのままOP②を付けているときに、もう一度クレジットを押しても外れないように。 */
+    if (key === "card" && op2On()) {
+      repaintSoon();
+      return;
+    }
     var cs = choices();
     for (var i = 0; i < cs.length; i++) {
       if (cs[i].kind.key !== key) continue;
@@ -299,6 +337,73 @@
       break;
     }
     repaintSoon();
+  }
+
+  /**
+   * OP②（延長保証）のチェック欄。
+   * OP①のバンプのすぐ下に置いて、2つのオプションが並んで見えるようにする。
+   * バンプは支払方法を変えると UTAGE が消して作り直すので、
+   * 置き場所が無くなっていないかを毎回みて、必要なら置き直す。
+   */
+  function buildOp2(wrap) {
+    if (!op2Radio()) return null;
+    if (wrap._op2) {
+      var anchor0 = document.querySelector(".oredr-bunmp");
+      if (anchor0 && wrap._op2.previousSibling !== anchor0) {
+        anchor0.parentNode.insertBefore(wrap._op2, anchor0.nextSibling);
+      }
+      return wrap._op2;
+    }
+
+    var box = el(
+      "div",
+      "display:none;margin-top:12px;border:1px dashed " +
+        C.gold +
+        ";border-radius:8px;padding:13px 15px;background:rgba(201,169,106,.05)"
+    );
+    var lab = el("label", "display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin:0");
+    var input = document.createElement("input");
+    input.type = "checkbox";
+    input.style.cssText = "margin:3px 0 0;flex:0 0 auto;accent-color:" + C.gold;
+    var body = el("div", "flex:1 1 auto;min-width:0");
+    body.appendChild(
+      el(
+        "div",
+        "font-size:14px;font-weight:700;color:" + C.text,
+        "OP② 延長保証を追加する（メーカー保証1年 → 3年）　＋11,000円"
+      )
+    );
+    body.appendChild(
+      el(
+        "div",
+        "font-size:11.5px;line-height:1.6;color:" + C.dim + ";margin-top:3px",
+        "一回のお支払いのみで、以降の追加費用はありません（税込）"
+      )
+    );
+    lab.appendChild(input);
+    lab.appendChild(body);
+    box.appendChild(lab);
+
+    lab.addEventListener("click", function (e) {
+      if (e.target !== input) {
+        e.preventDefault();
+        input.checked = !input.checked;
+      }
+      var want = input.checked;
+      var target = want ? op2Radio() : cardRadio();
+      if (target && !target.checked) target.click();
+      repaintSoon();
+    });
+
+    var anchor = document.querySelector(".oredr-bunmp");
+    if (anchor) {
+      anchor.parentNode.insertBefore(box, anchor.nextSibling);
+    } else {
+      wrap.appendChild(box);
+    }
+    wrap._op2 = box;
+    wrap._op2Input = input;
+    return box;
   }
 
   /** いま UTAGE 側で選ばれている支払方法の種類。 */
@@ -432,6 +537,14 @@
       wrap._note.style.display = "";
     } else {
       wrap._note.style.display = "none";
+    }
+
+    /* OP② はクレジットカード払いの行にしか無いので、クレジットのときだけ出す。 */
+    var op2 = buildOp2(wrap);
+    if (op2) {
+      var show = key === "card";
+      op2.style.display = show ? "" : "none";
+      if (wrap._op2Input.checked !== op2On()) wrap._op2Input.checked = op2On();
     }
 
     paintSummary(totalYen());

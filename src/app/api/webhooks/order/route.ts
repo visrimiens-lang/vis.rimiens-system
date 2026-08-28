@@ -206,6 +206,27 @@ function toAmount(v: string): number {
   return Number.isFinite(n) ? Math.round(n) : 0;
 }
 
+/*
+ * 決済方法。
+ *
+ * QR2 の決済ページで銀行振込・アプラスを選べるようにしたので、
+ * 受注のお支払いステータス（着金待ち／決済完了）はここで決まる。
+ * ところが通知に「決済方法」の欄が無いことがあり、そのときは既定の
+ * Stripe＝決済完了になってしまう。振込やローンはまだ入金していないので、
+ * これでは本部が入金確認をする対象から漏れる。
+ *
+ * UTAGE の商品詳細名には【銀行振込】【アプラス（ローン）】が入っているので、
+ * 欄が無いときは商品名から読む。どちらも読めなければ、これまでどおり Stripe。
+ */
+function paymentMethodOf(given: string, productName: string): string {
+  const m = given.trim();
+  if (m) return m;
+  const p = productName ?? "";
+  if (/アプラス|ローン/.test(p)) return "アプラス";
+  if (/銀行振込|振込/.test(p)) return "振込";
+  return "Stripe";
+}
+
 async function readPayload(req: NextRequest): Promise<Record<string, unknown>> {
   const type = req.headers.get("content-type") ?? "";
   if (type.includes("application/json")) {
@@ -283,6 +304,8 @@ export async function POST(req: NextRequest) {
     : await refFromClaim(email, phone);
   const agencyCode = agencyFromWebhook || claim.ref;
 
+  const product = pick(data, "product", "商品", "item");
+
   try {
     const r = await registerOrder({
       customerName: pick(data, "customer_name", "注文者名", "お名前", "氏名", "name"),
@@ -291,10 +314,10 @@ export async function POST(req: NextRequest) {
       zip: pick(data, "zipcode", "zip", "郵便"),
       address: pick(data, "address", "住所"),
       building: pick(data, "building", "建物"),
-      productName: pick(data, "product", "商品", "item"),
+      productName: product,
       amount: toAmount(pick(data, "amount", "price", "金額", "total")),
       quantity: Number(pick(data, "quantity", "数量")) || 1,
-      paymentMethod: pick(data, "payment_method", "決済方法") || "Stripe",
+      paymentMethod: paymentMethodOf(pick(data, "payment_method", "決済方法"), product),
       agencyCode: agencyCode || undefined,
       staffCode: staff.code || undefined,
       stripePaymentId: paymentId ?? undefined,

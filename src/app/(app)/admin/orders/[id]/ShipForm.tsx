@@ -7,6 +7,7 @@ import {
   type OrderActionState,
 } from "@/actions/order-actions";
 import { Card, Notice } from "@/components/ui";
+import { jpDateTime } from "@/lib/jst";
 import {
   PAYMENT_STATUSES,
   isLoanMethod,
@@ -397,7 +398,7 @@ function ReviewSection({
               </select>
               <span className={hintCls}>
                 {aplusUrlSentAt
-                  ? `${aplusUrlSentAt.slice(0, 16).replace("T", " ")} に送付済みです。`
+                  ? `${jpDateTime(aplusUrlSentAt)} に送付済みです。`
                   : "お客様へ申込URLをメールでお送りしたら、送付済みにしてください。"}
                 　送るまで審査は始まりません。
               </span>

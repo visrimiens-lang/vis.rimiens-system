@@ -26,3 +26,29 @@ export function todayInJapan(now: Date = new Date()): string {
 export function thisMonthInJapan(now: Date = new Date()): string {
   return todayInJapan(now).slice(0, 7);
 }
+
+/**
+ * 日本時間での日時（"2026-08-28 19:08" の形）。
+ *
+ * データベースの timestamptz は世界標準時の文字列で返る。
+ * そのまま先頭16文字を切って画面に出すと9時間ずれた時刻になるので、
+ * 「いつ操作したか」を見せるときは必ずここを通す。
+ * 読めない値が来たら、そのまま返して画面を壊さない。
+ */
+const JST_DATETIME = new Intl.DateTimeFormat("ja-JP", {
+  timeZone: "Asia/Tokyo",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+export function jpDateTime(value: string | null | undefined): string {
+  const v = (value ?? "").trim();
+  if (!v) return "";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return v;
+  return JST_DATETIME.format(d).replace(/\//g, "-");
+}

@@ -55,7 +55,22 @@ function cell(v: string): string {
   return /[",]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s;
 }
 
-export type CsvOrder = OutboundOrder & { quantity: number };
+export type CsvOrder = OutboundOrder & { quantity: number; productName: string };
+
+/**
+ * 送り状に印字する品名。
+ *
+ * 中身と違う品名が付いていると、受け取った方が「頼んだものと違う」と思うし、
+ * 事故があったときの照会もできない。パッドだけの買い足しに
+ * 「眼筋トレーニングマシンVIS」と印字しないよう、商品名から出し分ける。
+ * 全角25文字までという決まりがあるので、長い名前はそこで切る。
+ */
+export function itemNameFor(cfg: ShipperConfig, productName: string): string {
+  const p = productName || "";
+  const isPadOnly = /パッド|パット/.test(p) && !/本体/.test(p);
+  const name = isPadOnly ? "ジェルパッド1年分" : cfg.itemName;
+  return name.slice(0, 25);
+}
 
 /**
  * B2クラウド取込用のCSVを作る（Shift_JIS・CRLF）。
@@ -84,7 +99,7 @@ export function buildB2Csv(
         cfg.shipper.zip,
         cfg.shipper.address,
         cfg.shipper.name,
-        cfg.itemName,
+        itemNameFor(cfg, o.productName),
         String(o.quantity > 0 ? o.quantity : 1),
         cfg.invoiceCode,
         cfg.invoiceCodeExt,

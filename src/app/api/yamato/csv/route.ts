@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
   };
 
   const rows = await select<Row>(
-    `orders?select=id,customer_name,phone,zip,address,building,quantity` +
+    `orders?select=id,customer_name,phone,zip,address,building,quantity,product_name` +
       `&id=in.(${ids.join(",")})&order=id.asc`,
   );
 
@@ -61,6 +61,7 @@ export async function GET(req: NextRequest) {
       zip: s_(o, "zip"),
       address: `${s_(o, "address")}${s_(o, "building")}`,
       quantity: Number(o["quantity"] ?? 1) || 1,
+      productName: s_(o, "product_name"),
     }));
 
   if (orders.length === 0) {

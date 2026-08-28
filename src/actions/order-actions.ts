@@ -620,6 +620,19 @@ export async function updateOrderAction(
     return { error: "お支払いは「着金待ち」「決済完了」から選んでください。" };
   }
 
+  /*
+   * アプラスの申込URLを送ったかどうか。2026-08-27 会議で追加。
+   *
+   * アプラスはAPIで連携できないので、担当者がお客様へ申込URLをメールで送る。
+   * 送ったつもりで送れていないと、審査が始まらないまま受注が着金待ちで止まり、
+   * 誰も気づかない。送った日時を残して、一覧から見えるようにする。
+   * 「送った」「取り消す」のどちらでもないときは空で届くので、その場合は触らない。
+   */
+  const aplusSent = text(formData, "aplusUrlSent");
+  if (aplusSent && aplusSent !== "sent" && aplusSent !== "clear") {
+    return { error: "アプラスの申込URLの状態を読み取れませんでした。" };
+  }
+
   const referrer = text(formData, "referrerCode");
   if (referrer && !/^[A-Za-z0-9-]{1,20}$/.test(referrer)) {
     return {
@@ -773,6 +786,20 @@ export async function updateOrderAction(
         }
       } catch {
         // 列がまだ無い。supabase/migrations の payment_status を流すと保存できる。
+      }
+    }
+
+    /*
+     * アプラスの申込URLの送付記録も別枠で保存する。
+     * こちらも列がまだ無い環境で、審査・照合の保存を巻き添えにしないため。
+     */
+    if (aplusSent) {
+      try {
+        await update(`orders?id=eq.${id}`, {
+          aplus_url_sent_at: aplusSent === "sent" ? new Date().toISOString() : null,
+        });
+      } catch {
+        // 列がまだ無い。supabase/migrations の aplus_url_sent を流すと保存できる。
       }
     }
   } catch (e) {

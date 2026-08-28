@@ -613,6 +613,7 @@ export default async function AdminOrderDetailPage({
         staffOptions={staffOptions}
         paymentMethod={str(order, "payment_method")}
         paymentStatus={str(order, "payment_status")}
+        aplusUrlSentAt={str(order, "aplus_url_sent_at")}
       />
 
       <Card

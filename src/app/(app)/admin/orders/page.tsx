@@ -4,7 +4,12 @@ import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import { listAllAgencies } from "@/lib/agencies";
 import { effectivePayUnits, payTaxIncl, payoutForOrder } from "@/lib/pay-defaults";
-import { paymentMethodLabel, paymentStatusOf, reviewStatusLabel } from "@/lib/payment-status";
+import {
+  aplusUrlPending,
+  paymentMethodLabel,
+  paymentStatusOf,
+  reviewStatusLabel,
+} from "@/lib/payment-status";
 import { select } from "@/lib/db";
 import { agencyTypeOf, companyNameOf, rankLabel } from "@/lib/labels";
 import { PRODUCT_COLUMNS, buildProductMatcher } from "@/lib/product-match";
@@ -182,6 +187,8 @@ type AdminOrder = Order & {
   staffCode: string;
   /** 信販の審査結果（承認／否決／電話確認待ち） */
   reviewResult: string;
+  /** アプラスの申込URLを送った日時。未送付は空 */
+  aplusUrlSentAt: string;
   /** キャンセル・審査否決。売上にも報酬にも数えない受注。 */
   voided: boolean;
   /** エリア統括代理店（データベース上の2次代理店）に支払う1台あたりの金額。受注に入っていなければ null。 */
@@ -223,6 +230,7 @@ function toAdminOrder(r: Row): AdminOrder {
     paymentMethod: str(r, "payment_method"),
     matchStatus: str(r, "match_status"),
     paymentStatus: str(r, "payment_status"),
+    aplusUrlSentAt: str(r, "aplus_url_sent_at"),
     agencyCode,
     secondaryCode: str(r, "niji_code"),
     referrerCode: referrer,
@@ -1029,9 +1037,15 @@ export default async function AdminOrdersPage({
                     <Td className="whitespace-nowrap">
                       {paymentMethodLabel(o.paymentMethod) || <span className="text-ink-400">—</span>}
                     </Td>
-                    {/* 審査：アプラス（信販）だけ審査がある。銀行振込・クレカは自動で完了。 */}
+                    {/* 審査：アプラス（信販）だけ審査がある。銀行振込・クレカは自動で完了。
+                        申込URLを送るまで審査は始まらないので、未送付なら目印を出す。 */}
                     <Td className="whitespace-nowrap">
                       <StatusBadge status={reviewStatusLabel(o.paymentMethod, o.reviewResult)} />
+                      {!o.voided && aplusUrlPending(o.paymentMethod, o.aplusUrlSentAt) ? (
+                        <span className="ml-1.5 align-middle text-xs text-warn-500">
+                          URL未送付
+                        </span>
+                      ) : null}
                     </Td>
                     {/* お支払い：着金待ち／決済完了。変更は受注詳細から。 */}
                     <Td className="whitespace-nowrap">

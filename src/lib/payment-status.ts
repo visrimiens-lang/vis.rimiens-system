@@ -80,3 +80,18 @@ export function reviewStatusLabel(
   if (r === "電話確認待ち") return "審査中";
   return isLoanMethod(method) ? "審査中" : "審査完了";
 }
+
+/**
+ * アプラスの申込URLがまだ送られていないか。
+ *
+ * アプラスはAPIで連携できないので、担当者がお客様へ申込URLをメールで送る。
+ * 送れていないと、審査が始まらないまま受注が着金待ちで止まり、
+ * 誰も気づかないまま日にちだけが過ぎる。一覧で目印を出すために使う。
+ * アプラス以外の決済方法では、そもそも送るものが無いので false。
+ */
+export function aplusUrlPending(
+  method: string | null | undefined,
+  sentAt: string | null | undefined,
+): boolean {
+  return isLoanMethod(method) && !(sentAt ?? "").trim();
+}

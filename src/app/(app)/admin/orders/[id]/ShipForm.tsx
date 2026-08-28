@@ -7,7 +7,12 @@ import {
   type OrderActionState,
 } from "@/actions/order-actions";
 import { Card, Notice } from "@/components/ui";
-import { PAYMENT_STATUSES, paymentMethodLabel, paymentStatusOf } from "@/lib/payment-status";
+import {
+  PAYMENT_STATUSES,
+  isLoanMethod,
+  paymentMethodLabel,
+  paymentStatusOf,
+} from "@/lib/payment-status";
 
 const initial: OrderActionState = {};
 
@@ -47,6 +52,7 @@ export function ShipForm({
   staffOptions,
   paymentMethod = "",
   paymentStatus = "",
+  aplusUrlSentAt = "",
 }: {
   orderId: string;
   shipStatus: string;
@@ -59,6 +65,8 @@ export function ShipForm({
   matchStatus: string;
   /** 決済方法（Stripe / 振込 / アプラス など）。お支払い欄の説明に使う。 */
   paymentMethod?: string;
+  /** アプラスの申込URLを送った日時。未送付は空 */
+  aplusUrlSentAt?: string;
   /** お支払いの状況（着金待ち / 決済完了）。列ができる前の受注は空。 */
   paymentStatus?: string;
   referrerCode: string;
@@ -82,6 +90,7 @@ export function ShipForm({
         reviewResult={reviewResult}
         paymentMethod={paymentMethod}
         paymentStatus={paymentStatus}
+        aplusUrlSentAt={aplusUrlSentAt}
         creditRefNo={creditRefNo}
         matchStatus={matchStatus}
         referrerCode={referrerCode}
@@ -269,6 +278,7 @@ function ReviewSection({
   reviewResult,
   paymentMethod,
   paymentStatus,
+  aplusUrlSentAt,
   creditRefNo,
   matchStatus,
   referrerCode,
@@ -280,6 +290,7 @@ function ReviewSection({
   reviewResult: string;
   paymentMethod: string;
   paymentStatus: string;
+  aplusUrlSentAt: string;
   creditRefNo: string;
   matchStatus: string;
   referrerCode: string;
@@ -363,6 +374,35 @@ function ReviewSection({
               クレジットカードは自動で決済完了になります。
             </span>
           </label>
+
+          {/*
+            アプラスの申込URLを送ったかどうか。
+            アプラスはAPIで連携できず、担当者がお客様へURLをメールで送る手作業になる。
+            送ったつもりで送れていないと、審査が始まらないまま着金待ちで止まってしまうため、
+            送ったことをここに残して、受注一覧からも見えるようにする。
+            アプラス以外のご注文では出さない（関係のない欄を増やさない）。
+          */}
+          {isLoanMethod(paymentMethod) ? (
+            <label className="block">
+              <span className={labelCls}>アプラスの申込URL</span>
+              <select
+                name="aplusUrlSent"
+                defaultValue={aplusUrlSentAt ? "sent" : ""}
+                disabled={pending}
+                className={inputCls}
+              >
+                <option value="">未送付</option>
+                <option value="sent">送付済みにする</option>
+                {aplusUrlSentAt ? <option value="clear">未送付に戻す</option> : null}
+              </select>
+              <span className={hintCls}>
+                {aplusUrlSentAt
+                  ? `${aplusUrlSentAt.slice(0, 16).replace("T", " ")} に送付済みです。`
+                  : "お客様へ申込URLをメールでお送りしたら、送付済みにしてください。"}
+                　送るまで審査は始まりません。
+              </span>
+            </label>
+          ) : null}
 
           <label className="block">
             <span className={labelCls}>信販受付番号</span>

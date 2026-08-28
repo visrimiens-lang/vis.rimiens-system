@@ -400,6 +400,17 @@ body {
   margin-right: 3mm;
 }
 
+/*
+  インボイスの但し書き。書面の最後に小さく添える。
+  印刷したときに集計表と離れすぎないよう、余白は控えめにしている。
+*/
+.notice-terms {
+  margin: 4mm 0 0;
+  font-size: 7.5pt;
+  line-height: 1.7;
+  color: #555;
+}
+
 @media print {
   .notice-doc {
     box-shadow: none;

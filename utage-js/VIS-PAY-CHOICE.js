@@ -1,45 +1,47 @@
 /*
- * VIS-PAY-CHOICE : 商品の欄の下に「お支払い方法」の項目を足す
+ * VIS-PAY-CHOICE : 商品の欄の下に「お支払い方法」と「オプション」を出す
  * 2026-08-28
  *
  * ■ なぜ要るか
  *
  * UTAGE は「商品詳細（価格ラインナップ）」の行がそのままラジオボタンになる。
- * クレジット・銀行振込・アプラスを出すには同じ本体商品を3行ぶら下げるしかなく、
- * お客様には「同じ商品が3つ並んでいて、どれを選べばよいか分からない」画面になる。
- * 金額も3行とも 188,300円 で、末尾の【銀行振込】だけが違うので、なおさら分かりにくい。
+ * 支払方法とオプションの組み合わせぶん行を用意するので、そのまま出すと
+ * 同じ商品が12行並ぶ画面になり、お客様にはどれを選べばよいか分からない。
  *
  * そこで
- *   ・商品の欄は、いま選ばれている1行だけを出す（もとの見た目と同じ）
- *   ・その下に「お支払い方法」という独立した項目を足す
- * という形にする。選ばれたものに応じて、裏では対応する UTAGE の行を押す。
- * 商品・OP①・OP② の見せ方はもとのまま。決済の仕組みも UTAGE のまま動く。
+ *   ・商品の欄は、いま選ばれている1行だけを出す
+ *   ・その下に「お支払い方法」（クレジット／銀行振込／アプラス）
+ *   ・さらに OP①・OP② のチェック欄
+ * を出し、選ばれた組み合わせに当たる行を裏で押す。
+ *
+ * ■ 行の見分け方
+ *
+ * 行の表示名に入っている印で判断する。ここを変えるときは商品側の
+ * 「連携フォームでの表記」も合わせること。
+ *   支払方法 … 【銀行振込】【アプラス（ローン）】、印が無ければクレジット
+ *   OP①    … 「OP①」
+ *   OP②    … 「OP②」
  *
  * ■ 触ってよい場所・いけない場所
  *
  * 商品行（table.payment-method の中）の文字は絶対に書き換えない。
- * 書き換えると UTAGE が行を作り直し、選んだ支払方法が先頭に戻る
+ * 書き換えると UTAGE が行を作り直し、選んだ内容が先頭に戻る
  * （2026-08-27 に VIS-BUMP-TOTAL でこの不具合を出した）。
- * ここでやるのは、選ばれていない行を display:none にすることだけ。
+ * ここでやるのは、選ばれていない行を display:none にすることと、
+ * 行を押すことだけ。
+ *
+ * ■ オーダーバンプは使わない
+ *
+ * UTAGE のオーダーバンプは1つの決済フォームに1つしか出せず、しかも
+ * クレジットカード払いの行が選ばれているときしか出ない。OP① をバンプで
+ * 出していたころは、銀行振込・アプラスでオプションが選べなかった。
+ * 組み合わせの行に差し替える方式にしたので、どの支払方法でも選べる。
+ * OP① のバンプ商品は「表示しない」に戻してあること（残すと二重に出る）。
  *
  * ■ お支払い合計
  *
  * もとは VIS-TOTAL-ROW が「購入商品」の下に合計を足していた。同じ役目を
- * このスクリプトが引き受けるので、VIS-TOTAL-ROW は外すこと（残すと二重に出る）。
- *
- * ■ OP① について
- *
- * OP① はクレジットカード払いのオーダーバンプなので、銀行振込・アプラスを
- * 選ぶと UTAGE が自動で引っ込める。黙って消えると
- * 「さっきあったチェックが無くなった」と見えるので、消える代わりに理由を出す。
- *
- * ■ OP②（延長保証）について
- *
- * UTAGE のオーダーバンプは1つの決済フォームに1つしか出せない。OP① で
- * 埋まっているので、OP② は「本体＋OP②」の商品行に差し替えることで足す
- * （もともと vis-op2 がやっていたのと同じやり方）。
- * 差し替え先はクレジットカード払いの行しか無いので、OP② もクレジットの
- * ときだけ出す。行の中の文字には触らず、行を押すだけ。
+ * このスクリプトが引き受けるので、VIS-TOTAL-ROW は外すこと。
  */
 (function () {
   "use strict";
@@ -160,18 +162,64 @@
     return out;
   }
 
-  /** 支払方法の種類ごとに、対応する UTAGE の行を束ねる。 */
+  /**
+   * 行1つぶんの中身。表示名の印から、支払方法とオプションの有無を読む。
+   * 商品側の「連携フォームでの表記」を変えるときは、ここも合わせること。
+   */
+  function rowInfo(r) {
+    var t = textOf(r);
+    var kind = "card";
+    if (/アプラス|ローン/.test(t)) kind = "aplus";
+    else if (/銀行振込|振込/.test(t)) kind = "bank";
+    return { radio: r, kind: kind, op1: /OP①/.test(t), op2: /OP②/.test(t) };
+  }
+
+  function rowsInfo() {
+    return radios().map(rowInfo);
+  }
+
+  /** 支払方法とオプションの組み合わせに当たる行。無ければ null。 */
+  function findRow(kind, op1, op2) {
+    var all = rowsInfo();
+    for (var i = 0; i < all.length; i++) {
+      var x = all[i];
+      if (x.kind === kind && x.op1 === op1 && x.op2 === op2) return x.radio;
+    }
+    return null;
+  }
+
+  /** いま選ばれている行の中身。 */
+  function current() {
+    var r = document.querySelector('input[name="payment-method"]:checked');
+    return r ? rowInfo(r) : null;
+  }
+
+  /** このページに出ている支払方法（行がある種類だけ）。 */
   function choices() {
-    var rs = radios();
+    var seen = [];
+    rowsInfo().forEach(function (x) {
+      if (seen.indexOf(x.kind) < 0) seen.push(x.kind);
+    });
     var out = [];
     KINDS.forEach(function (k) {
-      var hit = null;
-      rs.forEach(function (r) {
-        if (!hit && k.match(textOf(r))) hit = r;
-      });
-      if (hit) out.push({ kind: k, radio: hit });
+      if (seen.indexOf(k.key) >= 0) out.push({ kind: k });
     });
     return out;
+  }
+
+  /**
+   * その組み合わせの行を選ぶ。
+   * ぴったりの行が無ければ、オプションを落として近いものに寄せる
+   * （商品の登録が足りないときに、何も選べなくなるのを防ぐ）。
+   */
+  function select(kind, op1, op2) {
+    var r =
+      findRow(kind, op1, op2) ||
+      findRow(kind, op1, false) ||
+      findRow(kind, false, op2) ||
+      findRow(kind, false, false);
+    if (r && !r.checked) r.click();
+    repaintSoon();
   }
 
   function el(tag, css, text) {
@@ -298,66 +346,30 @@
     return lab;
   }
 
-  /** 「本体＋OP②（３年延長保証）」の行。無いページでは null。 */
-  function op2Radio() {
-    var hit = null;
-    radios().forEach(function (r) {
-      if (!hit && /OP②|３年延長保証|3年延長保証/.test(textOf(r))) hit = r;
-    });
-    return hit;
-  }
-
-  /** OP② を付けずに買うときの、クレジットカード払いの行。 */
-  function cardRadio() {
-    var op2 = op2Radio();
-    var hit = null;
-    radios().forEach(function (r) {
-      if (hit || r === op2) return;
-      if (KINDS[0].match(textOf(r))) hit = r;
-    });
-    return hit;
-  }
-
-  function op2On() {
-    var r = op2Radio();
-    return Boolean(r && r.checked);
-  }
-
-  /** 選ばれた支払方法に対応する UTAGE の行を押す。 */
+  /** 選ばれた支払方法に切り替える。オプションはできるだけ持ち越す。 */
   function pick(key) {
-    /* クレジットのままOP②を付けているときに、もう一度クレジットを押しても外れないように。 */
-    if (key === "card" && op2On()) {
-      repaintSoon();
-      return;
-    }
-    var cs = choices();
-    for (var i = 0; i < cs.length; i++) {
-      if (cs[i].kind.key !== key) continue;
-      if (!cs[i].radio.checked) cs[i].radio.click();
-      break;
-    }
-    repaintSoon();
+    var cur = current();
+    select(key, cur ? cur.op1 : false, cur ? cur.op2 : false);
   }
 
-  /**
-   * OP②（延長保証）のチェック欄。
-   * OP①のバンプのすぐ下に置いて、2つのオプションが並んで見えるようにする。
-   * バンプは支払方法を変えると UTAGE が消して作り直すので、
-   * 置き場所が無くなっていないかを毎回みて、必要なら置き直す。
-   */
-  function buildOp2(wrap) {
-    if (!op2Radio()) return null;
-    if (wrap._op2) {
-      var anchor0 = document.querySelector(".oredr-bunmp");
-      if (anchor0 && wrap._op2.previousSibling !== anchor0) {
-        anchor0.parentNode.insertBefore(wrap._op2, anchor0.nextSibling);
-      }
-      return wrap._op2;
-    }
+  /* 画面に出すオプション。行の登録がある分だけ出す。 */
+  var OPTIONS = [
+    {
+      key: "op1",
+      title: "OP① ジェルパッド1年分を追加する　＋13,200円",
+      lead: "通常 年17,500円のところ 13,200円（税込）。今回のお支払いに一度だけ加算されます",
+    },
+    {
+      key: "op2",
+      title: "OP② 延長保証を追加する（メーカー保証1年 → 3年）　＋11,000円",
+      lead: "一回のお支払いのみで、以降の追加費用はありません（税込）",
+    },
+  ];
 
+  function optionBox(o) {
     var box = el(
       "div",
-      "display:none;margin-top:12px;border:1px dashed " +
+      "border:1px dashed " +
         C.gold +
         ";border-radius:8px;padding:13px 15px;background:rgba(201,169,106,.05)"
     );
@@ -366,19 +378,9 @@
     input.type = "checkbox";
     input.style.cssText = "margin:3px 0 0;flex:0 0 auto;accent-color:" + C.gold;
     var body = el("div", "flex:1 1 auto;min-width:0");
+    body.appendChild(el("div", "font-size:14px;font-weight:700;color:" + C.text, o.title));
     body.appendChild(
-      el(
-        "div",
-        "font-size:14px;font-weight:700;color:" + C.text,
-        "OP② 延長保証を追加する（メーカー保証1年 → 3年）　＋11,000円"
-      )
-    );
-    body.appendChild(
-      el(
-        "div",
-        "font-size:11.5px;line-height:1.6;color:" + C.dim + ";margin-top:3px",
-        "一回のお支払いのみで、以降の追加費用はありません（税込）"
-      )
+      el("div", "font-size:11.5px;line-height:1.6;color:" + C.dim + ";margin-top:3px", o.lead)
     );
     lab.appendChild(input);
     lab.appendChild(body);
@@ -389,59 +391,44 @@
         e.preventDefault();
         input.checked = !input.checked;
       }
-      var want = input.checked;
-      var target = want ? op2Radio() : cardRadio();
-      if (target && !target.checked) target.click();
-      repaintSoon();
+      var cur = current();
+      if (!cur) return;
+      var op1 = o.key === "op1" ? input.checked : cur.op1;
+      var op2 = o.key === "op2" ? input.checked : cur.op2;
+      select(cur.kind, op1, op2);
     });
 
-    var anchor = document.querySelector(".oredr-bunmp");
-    if (anchor) {
-      anchor.parentNode.insertBefore(box, anchor.nextSibling);
-    } else {
-      wrap.appendChild(box);
-    }
-    wrap._op2 = box;
-    wrap._op2Input = input;
+    box._input = input;
+    box._key = o.key;
     return box;
+  }
+
+  /** オプションの欄。支払方法の下に置く。 */
+  function buildOptions(wrap) {
+    if (wrap._opts) return wrap._opts;
+    /* オプション付きの行が1つも無いページ（パッド買い足しなど）には出さない。 */
+    var any = rowsInfo().some(function (x) {
+      return x.op1 || x.op2;
+    });
+    if (!any) return null;
+
+    var head2 = head("オプション（ご希望の方のみ）", false);
+    head2.style.marginTop = "22px";
+    var list = el("div", "display:flex;flex-direction:column;gap:8px");
+    OPTIONS.forEach(function (o) {
+      list.appendChild(optionBox(o));
+    });
+    wrap.appendChild(head2);
+    wrap.appendChild(list);
+    wrap._optsHead = head2;
+    wrap._opts = list;
+    return list;
   }
 
   /** いま UTAGE 側で選ばれている支払方法の種類。 */
   function currentKey() {
-    var r = document.querySelector('input[name="payment-method"]:checked');
-    if (!r) return null;
-    var t = textOf(r);
-    for (var i = 0; i < KINDS.length; i++) {
-      if (KINDS[i].match(t)) return KINDS[i].key;
-    }
-    return null;
-  }
-
-  /*
-   * このページにあるオーダーバンプ（OP①・OP②）の名前を覚えておく。
-   * 支払方法を銀行振込・アプラスに変えると UTAGE がバンプごと消すので、
-   * そのときに「何が選べなくなったのか」を名前で書けるようにしておく。
-   * パッド買い足しのページにはバンプが無いので、その場合は何も出さない。
-   */
-  var bumpNames = [];
-  var bumpFound = false;
-  function noteBumps() {
-    Array.prototype.forEach.call(
-      document.querySelectorAll(".oredr-bunmp"),
-      function (box) {
-        bumpFound = true;
-        var t = (box.innerText || box.textContent || "").replace(/\s+/g, " ");
-        /* 「OP① ジェルパッド1年分を追加する」のような、チェック欄の見出しから名前を取る。
-           箱の冒頭の煽り文（「注文をアップグレードします」など）は拾わない。 */
-        var m = t.match(/OP[①②][^＋+。\n]{0,20}/g);
-        if (!m) return;
-        m.forEach(function (x) {
-          var key = x.replace(/を追加する.*$/, "").trim();
-          if (key && bumpNames.indexOf(key) < 0) bumpNames.push(key);
-        });
-      }
-    );
-    return bumpFound;
+    var c = current();
+    return c ? c.kind : null;
   }
 
   /** 購入商品の明細を足し合わせた、いま支払う総額。 */
@@ -527,24 +514,31 @@
     });
     var text = kind && kind.note ? kind.note : "";
     if (text && key !== "card") {
-      if (noteBumps()) {
-        text +=
-          "\n※ " +
-          (bumpNames.length ? bumpNames.join("・") : "オプション") +
-          "の追加は、クレジットカード払いのみお選びいただけます。";
-      }
       if (wrap._note.textContent !== text) wrap._note.textContent = text;
       wrap._note.style.display = "";
     } else {
       wrap._note.style.display = "none";
     }
 
-    /* OP② はクレジットカード払いの行にしか無いので、クレジットのときだけ出す。 */
-    var op2 = buildOp2(wrap);
-    if (op2) {
-      var show = key === "card";
-      op2.style.display = show ? "" : "none";
-      if (wrap._op2Input.checked !== op2On()) wrap._op2Input.checked = op2On();
+    /* オプションのチェックを、UTAGE 側の実際の選択に合わせる。
+       その支払方法に行が用意されていないオプションは、押せないように隠す。 */
+    var opts = buildOptions(wrap);
+    var cur2 = current();
+    if (opts && cur2) {
+      Array.prototype.forEach.call(opts.children, function (box) {
+        var on = box._key === "op1" ? cur2.op1 : cur2.op2;
+        var can =
+          box._key === "op1"
+            ? Boolean(findRow(cur2.kind, true, cur2.op2) || findRow(cur2.kind, true, false))
+            : Boolean(findRow(cur2.kind, cur2.op1, true) || findRow(cur2.kind, false, true));
+        box.style.display = can ? "" : "none";
+        if (box._input.checked !== on) box._input.checked = on;
+      });
+      var anyVisible = Array.prototype.some.call(opts.children, function (box) {
+        return box.style.display !== "none";
+      });
+      wrap._optsHead.style.display = anyVisible ? "" : "none";
+      opts.style.display = anyVisible ? "" : "none";
     }
 
     paintSummary(totalYen());
@@ -553,7 +547,6 @@
   function tick() {
     if (!document.querySelector('input[name="payment-method"]')) return;
     showSelectedRowOnly();
-    noteBumps();
     if (build()) paint();
   }
 

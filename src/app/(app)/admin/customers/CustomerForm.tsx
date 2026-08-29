@@ -1,6 +1,6 @@
 "use client";
 
-import { isLoanMethod, paymentMethodLabel } from "@/lib/payment-status";
+import { isManualPaymentMethod, paymentMethodLabel } from "@/lib/payment-status";
 import { Fragment, useActionState, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Search, X } from "lucide-react";
@@ -191,7 +191,7 @@ function PaymentStatusCell({
 
   const method = (paymentMethod ?? "").trim();
   const methodLabel = paymentMethodLabel(method) || method;
-  const editable = isLoanMethod(method) || method === "振込";
+  const editable = isManualPaymentMethod(method);
 
   if (!editable) {
     return (

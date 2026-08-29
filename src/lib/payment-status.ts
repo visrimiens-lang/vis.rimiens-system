@@ -95,3 +95,21 @@ export function aplusUrlPending(
 ): boolean {
   return isLoanMethod(method) && !(sentAt ?? "").trim();
 }
+
+/**
+ * お支払いを手で変えてよい決済方法か。
+ *
+ * クレジットカード（Stripe・スクエア）は、決済が済んでから通知が届く。
+ * 手で変えられるようにすると、まだ払われていないものを「決済完了」にできて
+ * しまうので、こちらは変えさせない。
+ *
+ * 決済方法が記録されていない受注・お客様は、変えられる側に入れる。
+ * クレジットカードなら自動で決済完了になっているはずで、
+ * 着金待ちのまま残っているのは振込・アプラスのほうだから。
+ * ここを「記録が無ければ変えられない」にすると、
+ * 決済方法を写す前に入った古いお客様を本部が直せなくなる。
+ */
+export function isManualPaymentMethod(method: string | null | undefined): boolean {
+  const m = (method ?? "").trim();
+  return !INSTANT_METHODS.includes(m);
+}

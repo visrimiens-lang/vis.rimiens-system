@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { currentViewer } from "@/lib/auth";
 import { audit, selectOne, update } from "@/lib/db";
-import { isLoanMethod } from "@/lib/payment-status";
+import { isManualPaymentMethod } from "@/lib/payment-status";
 
 /**
  * お客様の登録内容を直す（本部専用）。
@@ -318,7 +318,7 @@ export async function setCustomerPaymentStatusAction(
     if (!customer) return { error: "このお客様は見つかりませんでした。" };
 
     const method = String(customer["payment_method"] ?? "").trim();
-    if (!isLoanMethod(method) && method !== "振込") {
+    if (!isManualPaymentMethod(method)) {
       return {
         error:
           "クレジットカードのお支払いは、決済が済んでから自動で「決済完了」になります。" +

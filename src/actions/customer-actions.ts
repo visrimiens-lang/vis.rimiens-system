@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { currentViewer } from "@/lib/auth";
 import { audit, selectOne, update } from "@/lib/db";
+import { isLoanMethod } from "@/lib/payment-status";
 
 /**
  * お客様の登録内容を直す（本部専用）。
@@ -270,4 +271,94 @@ export async function updateCustomerAction(
         : `${label} 様の${changed}を直しました。`;
 
   return { ok: done + staffNote };
+}
+
+/* ══════════════════ お支払いの状態を、顧客管理から直す ══════════════════ */
+
+/**
+ * 銀行振込・アプラスのお支払いを「着金待ち ↔ 決済完了」で切り替える（本部専用）。
+ *
+ * ■ なぜ顧客管理からも変えられるようにするか
+ *
+ * 着金の確認は「顧客管理を眺めて、着金待ちの人に連絡する」流れで行う。
+ * その画面から受注詳細まで開き直さないと変えられないと、確認のたびに
+ * 画面を行き来することになり、変え忘れが出る（2026-08-27 の打合せ）。
+ *
+ * ■ クレジットカードは変えない
+ *
+ * クレジットカードは決済が済んでから通知が届くので、いつでも決済完了。
+ * 手で変えられるようにすると、実際には支払われていないものを完了にできてしまう。
+ * 変えられるのは、お金がまだ動いていない銀行振込とアプラスだけにする。
+ *
+ * ■ 顧客台帳と受注の両方を直す
+ *
+ * 顧客管理と代理店の顧客管理は customers を、受注一覧は orders を見ている。
+ * 片方だけ直すと、同じお客様の状態が画面によって食い違う。
+ * そのお客様の受注のうち、クレジットカード以外のものだけをそろえる。
+ */
+export async function setCustomerPaymentStatusAction(
+  _prev: CustomerFormState,
+  formData: FormData,
+): Promise<CustomerFormState> {
+  const denied = await denyIfNotHq();
+  if (denied) return { error: denied };
+
+  const id = String(formData.get("customerId") ?? "").trim();
+  if (!/^\d+$/.test(id)) return { error: "お客様を特定できませんでした。" };
+
+  const next = String(formData.get("paymentStatus") ?? "").trim();
+  if (next !== "着金待ち" && next !== "決済完了") {
+    return { error: "お支払いは「着金待ち」「決済完了」から選んでください。" };
+  }
+
+  try {
+    const customer = await selectOne<Row>(
+      `customers?select=id,name,payment_method,payment_status&id=eq.${id}`,
+    );
+    if (!customer) return { error: "このお客様は見つかりませんでした。" };
+
+    const method = String(customer["payment_method"] ?? "").trim();
+    if (!isLoanMethod(method) && method !== "振込") {
+      return {
+        error:
+          "クレジットカードのお支払いは、決済が済んでから自動で「決済完了」になります。" +
+          "手で変えられるのは銀行振込とアプラスだけです。",
+      };
+    }
+
+    await update(`customers?id=eq.${id}`, { payment_status: next });
+
+    /*
+     * 同じお客様の受注もそろえる。
+     * クレジットカードの受注が混ざっていても、そちらは触らない
+     * （その受注は自動で決済完了になっているため）。
+     */
+    try {
+      await update(
+        `orders?customer_id=eq.${id}&payment_method=not.in.("Stripe","スクエア")`,
+        { payment_status: next },
+      );
+    } catch {
+      // payment_status の列がまだ無い環境。顧客台帳だけは直っている。
+    }
+
+    await audit("HQ", "お支払いの状態を変更", { type: "customer", key: id }, {
+      お客様: String(customer["name"] ?? ""),
+      決済方法: method,
+      変更前: String(customer["payment_status"] ?? "（未設定）"),
+      変更後: next,
+    });
+  } catch (e) {
+    return {
+      error:
+        e instanceof Error
+          ? `お支払いの状態を保存できませんでした。${e.message}`
+          : "お支払いの状態を保存できませんでした。時間をおいてお試しください。",
+    };
+  }
+
+  revalidatePath("/admin/customers");
+  revalidatePath("/admin/orders");
+  revalidatePath("/customers");
+  return { ok: `お支払いを「${next}」にしました。` };
 }

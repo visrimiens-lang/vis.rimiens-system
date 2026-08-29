@@ -1,10 +1,11 @@
 "use client";
 
-import { paymentMethodLabel } from "@/lib/payment-status";
-import { Fragment, useActionState, useState } from "react";
+import { isLoanMethod, paymentMethodLabel } from "@/lib/payment-status";
+import { Fragment, useActionState, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Search, X } from "lucide-react";
 import {
+  setCustomerPaymentStatusAction,
   updateCustomerAction,
   type CustomerFormState,
 } from "@/actions/customer-actions";
@@ -160,6 +161,77 @@ function shipTone(v: string): Tone {
   return "neutral";
 }
 
+/**
+ * 「お支払い」の欄。
+ *
+ * 銀行振込・アプラスは、本部が着金を確認して手で「決済完了」に変える。
+ * その確認はこの一覧を眺めながら行うので、ここで直せないと受注詳細まで
+ * 開き直すことになり、変え忘れが出る（2026-08-27 の打合せ）。
+ *
+ * クレジットカードは決済が済んでから通知が届くので、いつでも決済完了。
+ * 手で変えられるようにすると、払われていないものを完了にできてしまうため、
+ * 表示だけにして選べないようにしている。
+ *
+ * 選んだ時点で保存する。押し忘れる保存ボタンを増やさないため。
+ */
+function PaymentStatusCell({
+  customerId,
+  paymentStatus,
+  paymentMethod,
+}: {
+  customerId: string;
+  paymentStatus: string;
+  paymentMethod: string;
+}) {
+  const [state, formAction, pending] = useActionState<CustomerFormState, FormData>(
+    setCustomerPaymentStatusAction,
+    {},
+  );
+  const formRef = useRef<HTMLFormElement>(null);
+
+  const method = (paymentMethod ?? "").trim();
+  const methodLabel = paymentMethodLabel(method) || method;
+  const editable = isLoanMethod(method) || method === "振込";
+
+  if (!editable) {
+    return (
+      <>
+        <Status value={paymentStatus} tone={paymentTone(paymentStatus)} />
+        {methodLabel ? (
+          <div className="mt-1 text-xs text-ink-400">{methodLabel}</div>
+        ) : null}
+      </>
+    );
+  }
+
+  return (
+    <form ref={formRef} action={formAction} className="min-w-0">
+      <input type="hidden" name="customerId" value={customerId} />
+      <select
+        name="paymentStatus"
+        defaultValue={paymentStatus === "決済完了" ? "決済完了" : "着金待ち"}
+        disabled={pending}
+        onChange={(e) => e.currentTarget.form?.requestSubmit()}
+        aria-label="お支払いの状態"
+        className={
+          "w-full rounded-md border border-ink-700 bg-ink-900 px-2 py-1 text-xs " +
+          "text-ink-100 transition hover:border-gold-500 focus:border-gold-400 " +
+          "focus:outline-none disabled:opacity-60"
+        }
+      >
+        <option value="着金待ち">着金待ち</option>
+        <option value="決済完了">決済完了</option>
+      </select>
+      <div className="mt-1 text-xs text-ink-400">
+        {pending ? "保存中…" : methodLabel}
+      </div>
+      {state.error ? (
+        <div className="mt-1 text-xs leading-snug text-bad-500">{state.error}</div>
+      ) : null}
+    </form>
+  );
+}
+
 function Status({ value, tone }: { value: string; tone: Tone }) {
   if (!value) return <span className="text-ink-400">—</span>;
   return <Badge tone={tone}>{value}</Badge>;
@@ -272,15 +344,11 @@ export function CustomerRow({
           <Status value={customer.reviewStatus} tone={reviewTone(customer.reviewStatus)} />
         </Td>
         <Td>
-          <Status
-            value={customer.paymentStatus}
-            tone={paymentTone(customer.paymentStatus)}
+          <PaymentStatusCell
+            customerId={customer.id}
+            paymentStatus={customer.paymentStatus}
+            paymentMethod={customer.paymentMethod}
           />
-          {customer.paymentMethod ? (
-            <div className="mt-1 text-xs text-ink-400">
-              {paymentMethodLabel(customer.paymentMethod) || customer.paymentMethod}
-            </div>
-          ) : null}
         </Td>
         <Td>
           <Status value={customer.shipStatus} tone={shipTone(customer.shipStatus)} />

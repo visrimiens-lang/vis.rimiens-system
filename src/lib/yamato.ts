@@ -47,6 +47,13 @@ export type B2Config = {
   shipper: { name: string; zip: string; address: string; tel: string };
   /** 送り状に印字する品名（全角25文字以内） */
   itemName: string;
+  /**
+   * プリンタ種別（1:レーザー 2:インクジェット 3:ラベルプリンタ）。
+   * 空ならB2クラウド画面で設定されているプリンタが使われる。
+   * 実際に使うプリンタと合っていないと、発行が
+   * 「printer type or print_type is invalid」で 400 になる（検証環境で確認）。
+   */
+  printerType: string;
 };
 
 /**
@@ -88,6 +95,7 @@ export function shipperConfig(): { config: ShipperConfig | null; missing: string
         tel: read("YAMATO_SHIPPER_TEL"),
       },
       itemName: read("YAMATO_ITEM_NAME") || "眼筋トレーニングマシンVIS",
+      printerType: read("YAMATO_B2_PRINTER_TYPE"),
     },
     missing: [],
   };
@@ -221,8 +229,11 @@ export class B2Client {
 
   constructor(private cfg: B2Config) {}
 
-  private cookieHeader(): string {
-    return [...this.jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
+  private cookieHeader(skip: string[] = []): string {
+    return [...this.jar.entries()]
+      .filter(([k]) => !skip.includes(k))
+      .map(([k, v]) => `${k}=${v}`)
+      .join("; ");
   }
 
   private async request(
@@ -233,11 +244,17 @@ export class B2Client {
       body?: string;
       /** 業務の最初のリクエストだけ true（仕様書5章の決まり） */
     auth?: boolean;
+      /**
+       * 送らないCookieの名前。
+       * 発行のあとに付く RXID を印刷状態確認・PDF取得・伝票番号取得へ送ると、
+       * B2 が 401「Authentication error.」を返す（2026-08-29 検証環境で確認）。
+       */
+      skipCookies?: string[];
     } = {},
   ): Promise<Response> {
     const headers: Record<string, string> = { ...(init.headers ?? {}) };
     if (init.auth) headers["Authorization"] = `Token ${this.cfg.accessKey}`;
-    const cookie = this.cookieHeader();
+    const cookie = this.cookieHeader(init.skipCookies ?? []);
     if (cookie) headers["Cookie"] = cookie;
 
     const res = await fetch(this.cfg.baseUrl + path, {
@@ -339,6 +356,8 @@ export class B2Client {
               tracking_number: t.trackingNumber,
               created_ms: t.createdMs,
               service_type: "0",
+              // 設定していなければ送らない（B2クラウド画面のプリンタ設定に任せる）
+              ...(this.cfg.printerType ? { printer_type: this.cfg.printerType } : {}),
               shipment_flg: "1",
             },
           })),
@@ -352,7 +371,10 @@ export class B2Client {
           ? "ほかの画面が同時にB2クラウドを操作しています。少し待ってからやり直してください。"
           : res.status === 419
             ? "B2クラウドが混み合っています。少し待ってからやり直してください。"
-            : "";
+            : /printer type or print_type/i.test(feedMessage(feed))
+              ? "B2クラウドのプリンタ設定と合っていません。YAMATO_B2_PRINTER_TYPE に" +
+                "実際のプリンタ（1:レーザー 2:インクジェット 3:ラベルプリンタ）を設定してください。"
+              : "";
       throw new B2Error(
         `送り状発行に失敗しました（HTTP ${res.status}）。${feedMessage(feed)} ${hint}`.trim(),
         res.status,
@@ -376,10 +398,21 @@ export class B2Client {
     for (;;) {
       const res = await this.request(
         `/b2/p/polling?issue_no=${encodeURIComponent(issueNo)}&display=0`,
+        { headers: { "Content-Type": "application/json" }, skipCookies: ["RXID"] },
       );
       const text = await res.text();
       if (res.status === 200) {
         const feed = parseFeed(text);
+        /*
+         * 印刷データチェック。仕様書4.1の流れで、印刷状態確認のあと
+         * PDFダウンロードの前に通すことになっている。
+         * これを飛ばすと、そのあとの伝票番号取得が200のまま0件で返り、
+         * 「送り状は出たのに番号が取れない」状態になる（2026-08-29 検証環境で確認）。
+         */
+        await this.request(
+          `/b2/p/getfile?display=0&issue_no=${encodeURIComponent(issueNo)}&checkonly=1`,
+          { skipCookies: ["RXID"] },
+        );
         return { rxid: feed.title ?? "" };
       }
       if (res.status !== 202) {
@@ -403,6 +436,7 @@ export class B2Client {
   async downloadPdf(issueNo: string): Promise<Uint8Array | null> {
     const res = await this.request(
       `/b2/p/getfile?display=0&issue_no=${encodeURIComponent(issueNo)}&fileonly=1`,
+      { skipCookies: ["RXID"] },
     );
     if (res.status !== 200) return null; // PDFは控え。取れなくても発行は成立している
     return new Uint8Array(await res.arrayBuffer());
@@ -415,7 +449,9 @@ export class B2Client {
    */
   async fetchIssued(rxid: string): Promise<{ orderId: string; invoiceNo: string }[]> {
     for (let attempt = 0; ; attempt++) {
-      const res = await this.request(`/b2/p/editA?spool&_RXID=${encodeURIComponent(rxid)}`);
+      const res = await this.request(`/b2/p/editA?spool&_RXID=${encodeURIComponent(rxid)}`, {
+        skipCookies: ["RXID"],
+      });
       const feed = parseFeed(await res.text());
       const entries = (feed.entry ?? []).filter((e) => e.shipment);
       if (res.status === 200 && entries.length > 0 && feed.title !== "Error") {

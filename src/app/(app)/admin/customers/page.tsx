@@ -203,11 +203,38 @@ export default async function AdminCustomersPage({
   let loadError: string | null = null;
 
   try {
-    const [rows, all] = await Promise.all([
+    const [rows, all, orderRows] = await Promise.all([
       select<Row>(`customers?select=*&order=created_at.desc,id.desc&limit=${LIMIT}`),
       listAllAgencies(),
+      /*
+       * 決済方法を補うために、受注も読む。
+       *
+       * 決済方法は 2026-08-27 に受注へ足した項目で、そのあと顧客台帳にも写している。
+       * それより前に入ったお客様は台帳が空のままで、画面に何も出ない
+       * （銀行振込なのかアプラスなのか分からない）。
+       * 台帳が空のときは、そのお客様のいちばん新しい受注から借りて出す。
+       * データベースは書き換えない。表示だけを補う。
+       */
+      select<Row>(
+        `orders?select=customer_id,payment_method&customer_id=not.is.null&order=id.desc`,
+      ).catch(() => [] as Row[]),
     ]);
-    customers = rows.map(toCustomer);
+
+    const methodByCustomer = new Map<string, string>();
+    for (const o of orderRows) {
+      const key = s_(o, "customer_id");
+      const method = s_(o, "payment_method");
+      if (!key || !method || methodByCustomer.has(key)) continue;
+      methodByCustomer.set(key, method);
+    }
+
+    customers = rows.map((r) => {
+      const c = toCustomer(r);
+      if (!c.paymentMethod) {
+        c.paymentMethod = methodByCustomer.get(c.id) ?? "";
+      }
+      return c;
+    });
     agencies = all;
   } catch (e) {
     loadError =

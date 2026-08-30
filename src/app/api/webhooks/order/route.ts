@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { schedulePadSubscription } from "@/lib/pad-subscription";
 import { audit, select, selectOne, update } from "@/lib/db";
 import {
   KIND_STAFF,
@@ -325,6 +326,13 @@ export async function POST(req: NextRequest) {
 
     // 受注が登録できたので、使った控えに印を付ける（失敗時は付けず、再送で拾い直せる）
     if (r.ok) await markClaimUsed(claim.claimId, r.code || "");
+
+    /*
+     * 1年後の定期パッド配送を仕込む（2026-08-27 会議の決定）。
+     * クレジットカードなら Stripe に定期を自動作成、振込・アプラスなら
+     * 請求予定日だけを台帳に残す。中で失敗しても受注には影響しない。
+     */
+    if (r.ok && r.code) await schedulePadSubscription(r.code);
 
     // 担当者コードに引っかかりがあれば、受信箱に残して本部に確認してもらう。
     // 受注は登録できているので、その旨も一緒に書いておく。

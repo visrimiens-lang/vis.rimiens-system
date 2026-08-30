@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Search, X } from "lucide-react";
 import {
   setCustomerPaymentStatusAction,
+  stopPadSubscriptionAction,
   updateCustomerAction,
   type CustomerFormState,
 } from "@/actions/customer-actions";
@@ -61,6 +62,10 @@ export type CustomerView = {
   /** 配達が終わった日。入っていれば進み具合は「配達完了」。 */
   deliveredOn: string;
   serialNo: string;
+  /** Stripe上の定期パッド配送の契約ID。自動課金が仕込めたお客様に入る */
+  padSubscriptionId: string;
+  /** 定期パッド配送の初回請求予定日（1年後／OP①付きは2年後） */
+  padChargeFrom: string;
 };
 
 type Tone = "neutral" | "good" | "warn" | "bad" | "gold";
@@ -229,6 +234,64 @@ function PaymentStatusCell({
         <div className="mt-1 text-xs leading-snug text-bad-500">{state.error}</div>
       ) : null}
     </form>
+  );
+}
+
+/**
+ * 1年後の定期パッド配送の状態と、解約ボタン。
+ *
+ * 本体をご購入のお客様は、1年後（OP①付きは2年後）から毎年17,500円の
+ * 定期パッド配送が始まる。クレジットカードのお客様は Stripe に自動で
+ * 契約が作られ、振込・アプラスのお客様は請求予定日だけが残る（手動請求）。
+ * 解約は公式LINEで受け、本部がこのボタンで止める。
+ */
+function PadSubscriptionRow({ customer }: { customer: CustomerView }) {
+  const [state, formAction, pending] = useActionState<CustomerFormState, FormData>(
+    stopPadSubscriptionAction,
+    {},
+  );
+  const [confirmed, setConfirmed] = useState(false);
+
+  if (!customer.padSubscriptionId && !customer.padChargeFrom) return null;
+
+  return (
+    <div className="rounded-lg border border-ink-800 bg-ink-900/60 px-4 py-3 text-xs leading-relaxed">
+      <div className="font-semibold text-ink-200">定期パッド配送（17,500円/年・税込）</div>
+      {customer.padSubscriptionId ? (
+        <>
+          <p className="mt-1 text-ink-400">
+            {customer.padChargeFrom ? `${jpDate(customer.padChargeFrom)} から` : "期日が来ると"}
+            自動で請求されます。解約のお申し出があったときだけ、下で止めてください。
+          </p>
+          <form action={formAction} className="mt-2 flex flex-wrap items-center gap-3">
+            <input type="hidden" name="customerId" value={customer.id} />
+            <label className="flex items-center gap-1.5 text-ink-300">
+              <input
+                type="checkbox"
+                checked={confirmed}
+                onChange={(e) => setConfirmed(e.target.checked)}
+                disabled={pending}
+              />
+              解約のお申し出を確認しました
+            </label>
+            <button
+              type="submit"
+              disabled={pending || !confirmed}
+              className="rounded-md border border-bad-500/60 px-3 py-1 font-semibold text-bad-500 transition hover:bg-bad-500/10 disabled:opacity-50"
+            >
+              {pending ? "停止中…" : "定期を解約する"}
+            </button>
+          </form>
+        </>
+      ) : (
+        <p className="mt-1 text-ink-400">
+          {jpDate(customer.padChargeFrom)} が初回の請求予定日です。カードのご登録が無いため
+          自動では請求されません。期日になったら本部から請求書をお送りください。
+        </p>
+      )}
+      {state.error ? <p className="mt-1 text-bad-500">{state.error}</p> : null}
+      {state.ok ? <p className="mt-1 text-ink-300">{state.ok}</p> : null}
+    </div>
   );
 }
 
@@ -543,6 +606,8 @@ export function CustomerRow({
                 {customer.serialNo ? `　製造番号：${customer.serialNo}` : ""}
                 {customer.trackingNo ? `　送り状番号：${customer.trackingNo}` : ""}
               </div>
+
+              <PadSubscriptionRow customer={customer} />
 
               <div className="flex flex-wrap items-center gap-2">
                 <button type="submit" disabled={saving} className={primaryBtn}>

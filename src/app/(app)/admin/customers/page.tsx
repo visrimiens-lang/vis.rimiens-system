@@ -122,6 +122,8 @@ function toCustomer(r: Row): CustomerView {
     trackingNo: s_(r, "tracking_no"),
     deliveredOn: s_(r, "delivered_on"),
     serialNo: s_(r, "serial_no"),
+    padSubscriptionId: s_(r, "pad_subscription_id"),
+    padChargeFrom: s_(r, "pad_charge_from"),
   };
 }
 

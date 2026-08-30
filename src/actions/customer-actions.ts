@@ -5,6 +5,7 @@ import { z } from "zod";
 import { currentViewer } from "@/lib/auth";
 import { audit, selectOne, update } from "@/lib/db";
 import { isManualPaymentMethod } from "@/lib/payment-status";
+import { StripeError, stripeConfigured, stripeReq } from "@/lib/stripe";
 
 /**
  * お客様の登録内容を直す（本部専用）。
@@ -361,4 +362,68 @@ export async function setCustomerPaymentStatusAction(
   revalidatePath("/admin/orders");
   revalidatePath("/customers");
   return { ok: `お支払いを「${next}」にしました。` };
+}
+
+/* ══════════════════ 1年後定期（パッド配送）を止める ══════════════════ */
+
+/**
+ * 定期パッド配送の解約（本部専用）。
+ *
+ * 解約は公式LINEで受け付け、本部がここから止める（2026-08-27 会議の決定）。
+ * Stripe側の契約を止めてから、台帳の控えを消す。
+ * Stripe側で先に消えていた場合（ダッシュボードから直接止めた等）も、
+ * 台帳の控えだけを消して整合させる。
+ */
+export async function stopPadSubscriptionAction(
+  _prev: CustomerFormState,
+  formData: FormData,
+): Promise<CustomerFormState> {
+  const denied = await denyIfNotHq();
+  if (denied) return { error: denied };
+
+  const id = String(formData.get("customerId") ?? "").trim();
+  if (!/^\d+$/.test(id)) return { error: "お客様を特定できませんでした。" };
+
+  try {
+    const customer = await selectOne<Row>(
+      `customers?select=id,name,pad_subscription_id&id=eq.${id}`,
+    );
+    if (!customer) return { error: "このお客様は見つかりませんでした。" };
+    const subId = String(customer["pad_subscription_id"] ?? "").trim();
+    if (!subId) return { error: "このお客様に止められる定期はありません。" };
+
+    if (!stripeConfigured()) {
+      return {
+        error:
+          "STRIPE_SECRET_KEY が設定されていないため、Stripeの定期を止められません。" +
+          "設定するか、Stripeの管理画面から直接停止してください。",
+      };
+    }
+
+    try {
+      await stripeReq("DELETE", `/subscriptions/${subId}`);
+    } catch (e) {
+      // すでに無い契約なら、台帳の控えを消すだけでよい
+      if (!(e instanceof StripeError && e.code === "resource_missing")) throw e;
+    }
+
+    await update(`customers?id=eq.${id}`, {
+      pad_subscription_id: null,
+      pad_charge_from: null,
+    });
+    await audit("HQ", "1年後定期を解約", { type: "customer", key: id }, {
+      お客様: String(customer["name"] ?? ""),
+      Stripe定期: subId,
+    });
+  } catch (e) {
+    return {
+      error:
+        e instanceof Error
+          ? `定期を止められませんでした。${e.message}`
+          : "定期を止められませんでした。時間をおいてお試しください。",
+    };
+  }
+
+  revalidatePath("/admin/customers");
+  return { ok: "定期パッド配送を解約しました。" };
 }

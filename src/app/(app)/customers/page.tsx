@@ -707,7 +707,8 @@ export default async function CustomersPage({
                 return (
                   <tr key={o.recordId}>
                     <Td numeric>{orderDate(o.date, allPeriod)}</Td>
-                    <Td>{o.customerName || "—"}</Td>
+                    {/* 姓と名の間で折り返すと「中田敦／彦」のように読めなくなるため折り返さない */}
+                    <Td className="whitespace-nowrap">{o.customerName || "—"}</Td>
                     <Td className="whitespace-nowrap">
                       <span className="tabnum">{o.phone || "—"}</span>
                       {o.email ? (

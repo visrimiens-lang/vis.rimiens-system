@@ -213,7 +213,13 @@
        * 中のラジオボタンごと作り直されて選択が飛ぶ。
        */
       t = t.replace(/【[^】]*】/g, "").replace(/[ 　]{2,}/g, " ");
-      t = t.replace(/\s*／\s*/g, " ／\n");
+      /*
+       * 改行するのは、前後に空白がある「／」だけにする。
+       * 品目の区切りは「185,000円 ／ 事務手数料」のように空白で挟んであるが、
+       * 「単体／追加パッド(１年分)」のように商品名そのものに含まれる「／」もある。
+       * 区別しないと、1つの商品名が途中で切れる。
+       */
+      t = t.replace(/[ 　]+／[ 　]+/g, " ／\n");
       if (n.nodeValue !== t) n.nodeValue = t;
     }
   }
@@ -236,7 +242,10 @@
       "table.payment-method tbody td{display:block;width:auto;text-align:left;" +
       "white-space:pre-line;border:0;padding:2px 0;}" +
       "table.payment-method tbody tr{display:block;padding:10px 0;}" +
-      "table.payment-method thead{display:none;}" +
+      /* 「商品」の見出しは残す。「価格」は縦積みにすると指す先が無くなるので隠す。 */
+      "table.payment-method thead tr{display:block;}" +
+      "table.payment-method thead th{display:block;text-align:left;}" +
+      "table.payment-method thead th ~ th{display:none;}" +
       "table.payment-method tbody td:last-child{color:" + C.goldLight + ";font-weight:600;}";
     document.head.appendChild(st);
   }
@@ -309,6 +318,19 @@
       if (!tr) return;
       var want = r.checked ? "" : "none";
       if (tr.style.display !== want) tr.style.display = want;
+    });
+    /*
+     * 中身の無い行も隠す。
+     *
+     * UTAGE は商品の表の末尾に、セルが1つも無い空の <tr> をいくつか置いている。
+     * もとの表組みでは高さ0で見えなかったが、行を縦積み（display:block）に
+     * したことで余白のぶんだけ場所を取り、商品と「お支払い方法」の間に
+     * 意味のない空白ができていた（2026-08-31）。
+     */
+    Array.prototype.forEach.call(table.querySelectorAll("tbody tr"), function (tr) {
+      if (tr.querySelector('input[type="radio"]')) return;
+      if ((tr.innerText || "").trim()) return;
+      if (tr.style.display !== "none") tr.style.display = "none";
     });
     return table.closest(".form-group") || table.parentElement;
   }

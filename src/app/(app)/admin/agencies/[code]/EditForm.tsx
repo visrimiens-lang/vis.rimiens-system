@@ -555,7 +555,7 @@ export function EditForm({
             label="上位代理店"
             defaultValue={agency.parentCode}
             disabled={pending}
-            hint="付け替えると組織図と報酬のたどり先が変わります。自分の配下は選べません。"
+            hint="付け替えると組織図と報酬のたどり先が変わります。自分のスタッフは選べません。"
           >
             <option value="">上位なし（本部の直下）</option>
             {parents.map((p) => (
@@ -692,7 +692,7 @@ export function EditForm({
           />
         </Section>
 
-        <Section title="配下を登録できる数（枠の上限）">
+        <Section title="スタッフを登録できる数（枠の上限）">
           <NumberField
             name="limitStaff"
             label="スタッフの枠"
@@ -711,7 +711,7 @@ export function EditForm({
             <span className="min-w-0">
               <span className="block text-sm text-ink-100">特別枠にする（上限を数えない）</span>
               <span className="block text-xs leading-relaxed text-ink-400">
-                入れておくと、上の枠がいっぱいでも配下を登録できます。本部が個別に認めた相手だけに使ってください。
+                入れておくと、上の枠がいっぱいでもスタッフを登録できます。本部が個別に認めた相手だけに使ってください。
               </span>
             </span>
           </label>
@@ -802,10 +802,10 @@ export function EditForm({
   );
 }
 
-/* ═══════════════ 本部が配下を手で登録する ═══════════════ */
+/* ═══════════════ 本部がスタッフを手で登録する ═══════════════ */
 
 /**
- * 電話やFAXで届いた申込を、本部がこの代理店の配下として登録する。
+ * 電話やFAXで届いた申込を、本部がこの代理店のスタッフとして登録する。
  * 代理店コードは組織の英字と区分から自動で採番するので、入力は要らない。
  */
 export function NewChildForm({
@@ -890,7 +890,7 @@ export function NewChildForm({
         </label>
 
         <button type="submit" disabled={pending} className={primaryBtn}>
-          {pending ? "登録中…" : `${parentName || parentCode} の配下として登録する`}
+          {pending ? "登録中…" : `${parentName || parentCode} のスタッフとして登録する`}
         </button>
 
         <p className="text-xs leading-relaxed text-ink-400">

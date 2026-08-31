@@ -4,7 +4,13 @@ import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import { select, selectOne, val } from "@/lib/db";
 import { listAllAgencies } from "@/lib/agencies";
-import { agencyTypeOf, belongsToOrg, codeTermOf, isOrgStyleCode } from "@/lib/labels";
+import {
+  agencyTypeOf,
+  belongsToOrg,
+  codeTermOf,
+  companyNameOf,
+  isOrgStyleCode,
+} from "@/lib/labels";
 import { areaUsage, breakdownSlots, slotModelOf } from "@/lib/slots";
 import type { Agency } from "@/lib/types";
 import type { QrSource } from "@/lib/qr";
@@ -449,7 +455,7 @@ export default async function AgencyDetailPage({
           }
         />
         <StatTile
-          label={slotModel === "area" ? "エリア枠（全国60社）" : "配下の枠の使用"}
+          label={slotModel === "area" ? "エリア枠（全国60社）" : "スタッフ枠の使用"}
           value={
             !slots
               ? "—"
@@ -461,7 +467,7 @@ export default async function AgencyDetailPage({
           tone={anySlotFull ? "warn" : "default"}
           hint={
             !slots
-              ? "取次パートナー・スタッフ・取次店は配下を持ちません"
+              ? "取次パートナー・スタッフ・取次店はスタッフを持ちません"
               : slotModel === "area"
                 ? anySlotFull
                   ? "埋まっているエリアがあります"
@@ -685,21 +691,21 @@ export default async function AgencyDetailPage({
       <Card
         title={
           slotModel === "area"
-            ? "配下の枠　エリア枠（全国60社）"
-            : "配下の枠　販路種別ごと"
+            ? "スタッフ枠　エリア枠（全国60社）"
+            : "スタッフ枠　種別ごと"
         }
       >
         {!slots ? (
           <EmptyState
-            title="この代理店には配下の枠がありません"
-            description="取次パートナー・スタッフ・取次店ランクは配下を登録できないため、枠を数えていません。"
+            title="この代理店にはスタッフ枠がありません"
+            description="取次パートナー・スタッフ・取次店ランクはスタッフを登録できないため、枠を数えていません。"
           />
         ) : (
           <>
             <Table>
               <thead>
                 <tr>
-                  <Th>{slotModel === "area" ? "エリア" : "販路種別"}</Th>
+                  <Th>{slotModel === "area" ? "エリア" : "種別"}</Th>
                   <Th align="right">登録済</Th>
                   <Th align="right">上限</Th>
                   <Th align="right">残り</Th>
@@ -776,7 +782,7 @@ export default async function AgencyDetailPage({
             <div className="space-y-3 px-5 py-4">
               <p className="text-xs leading-relaxed text-ink-400">
                 {slotModel === "area"
-                  ? "総販売代理店の配下は統括代理店（2次代理店）です。1社ずつではなく、全国60社のエリア枠で数えます。エリア区分が「本部」の統括代理店は数えていません。"
+                  ? "総販売代理店の下は統括代理店（2次代理店）です。1社ずつではなく、全国60社のエリア枠で数えます。エリア区分が「本部」の統括代理店は数えていません。"
                   : "直下にいる方は、コード区分にかかわらず1名ぶん枠を使います。停止・解約になった方は数えていません。"}
                 {agency.specialSlot
                   ? "　この代理店は特別枠のため、上限では申し込みを止めません。"
@@ -785,10 +791,10 @@ export default async function AgencyDetailPage({
 
               {slots.unclassified.length > 0 ? (
                 <Notice tone="warn">
-                  販路種別が入っていない配下が {slots.unclassified.length} 件あり、
+                  種別が入っていないスタッフが {slots.unclassified.length} 件あり、
                   どの枠にも数えられていません（
                   {slots.unclassified.map((a) => a.name || a.code).join("、")}）。
-                  その代理店の画面で販路種別を入れると、正しい枠に数えられます。
+                  その方の画面で種別を入れると、正しい枠に数えられます。
                 </Notice>
               ) : null}
             </div>
@@ -796,10 +802,10 @@ export default async function AgencyDetailPage({
         )}
       </Card>
 
-      <Card title={`配下の一覧　${children.length} 件`}>
+      <Card title={`スタッフの一覧　${children.length} 件`}>
         {children.length === 0 ? (
           <EmptyState
-            title="配下はまだいません"
+            title="スタッフはまだいません"
             description="この代理店が配ったQRから申し込みが入るか、下の欄で本部が手で登録すると、ここに並びます。"
           />
         ) : (
@@ -808,9 +814,8 @@ export default async function AgencyDetailPage({
               <tr>
                 <Th>コード</Th>
                 <Th>法人名・お名前</Th>
-                <Th>区分</Th>
-                <Th>ランク</Th>
-                <Th>販路種別</Th>
+                <Th>代理店種別</Th>
+                <Th>所属会社、種別</Th>
                 <Th>稼働状況</Th>
                 <Th>登録日</Th>
               </tr>
@@ -839,8 +844,26 @@ export default async function AgencyDetailPage({
                     </div>
                   </Td>
                   <Td>{kindLabel(c.codeKind)}</Td>
-                  <Td>{c.rank || "—"}</Td>
-                  <Td>{c.channel || "—"}</Td>
+                  {/*
+                    所属会社と種別。コードやランクだけでは、どこの誰なのかが読み取れない。
+                    会社名はスタッフなら company_name、無ければ上位の代理店名（companyNameOf）。
+                    種別は申込フォームと同じ呼び方にそろえる（agencyTypeOf）。
+                  */}
+                  <Td>
+                    <div className="min-w-0">
+                      <div className="truncate text-ink-100">
+                        {companyNameOf({
+                          name: c.name,
+                          codeKind: c.codeKind,
+                          companyName: c.companyName,
+                          parentName: c.parentName,
+                        })}
+                      </div>
+                      <div className="truncate text-xs text-ink-400">
+                        {agencyTypeOf(c.rank, c.channel, c.codeKind, c.staffType) || "—"}
+                      </div>
+                    </div>
+                  </Td>
                   <Td>
                     <StatusBadge status={c.status} />
                   </Td>
@@ -855,7 +878,7 @@ export default async function AgencyDetailPage({
       </Card>
 
       {agency.codeKind === "00" && isOrgStyleCode(agency.code) ? (
-        <Card title="自社代理店コード（配下の採番に使う英字）">
+        <Card title="自社代理店コード（スタッフの採番に使う英字）">
           <OrgCodeForm code={agency.code} name={agency.name} current={agency.orgCode} />
         </Card>
       ) : null}

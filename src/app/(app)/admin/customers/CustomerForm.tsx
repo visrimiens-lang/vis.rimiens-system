@@ -1,9 +1,9 @@
 "use client";
 
 import { isManualPaymentMethod, paymentMethodLabel } from "@/lib/payment-status";
-import { Fragment, useActionState, useRef, useState } from "react";
+import { Fragment, useActionState, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Search, X } from "lucide-react";
+import { ChevronDown, Search, X } from "lucide-react";
 import {
   setCustomerPaymentStatusAction,
   stopPadSubscriptionAction,
@@ -189,11 +189,17 @@ function PaymentStatusCell({
    */
   onPicked: (next: string) => void;
 }) {
-  const [state, formAction, pending] = useActionState<CustomerFormState, FormData>(
-    setCustomerPaymentStatusAction,
-    {},
-  );
-  const formRef = useRef<HTMLFormElement>(null);
+  /*
+   * <form action={...}> は使わない。
+   *
+   * React はサーバーの処理が終わったあとフォームを初期化する。
+   * 選ぶ欄は親の状態で値を決めているのに、初期化で DOM だけが先頭の
+   * 「着金待ち」に戻され、色は「決済完了」のまま文字だけ戻る、という
+   * ちぐはぐな見え方になっていた（2026-08-31）。
+   * ここでは選んだ値を直接サーバーへ渡し、初期化を起こさない。
+   */
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState("");
 
   const method = (paymentMethod ?? "").trim();
   const methodLabel = paymentMethodLabel(method) || method;
@@ -217,38 +223,59 @@ function PaymentStatusCell({
    */
   const done = paymentStatus === "決済完了";
   const tone = done
-    ? "border-good-500/50 bg-good-500/15 text-good-300"
-    : "border-bad-500/50 bg-bad-500/15 text-bad-300";
+    ? "border-good-500/60 bg-good-500/15 text-good-200 hover:bg-good-500/25"
+    : "border-bad-500/60 bg-bad-500/15 text-bad-200 hover:bg-bad-500/25";
+
+  function pick(next: string) {
+    onPicked(next);
+    setError("");
+    const data = new FormData();
+    data.set("customerId", customerId);
+    data.set("paymentStatus", next);
+    startTransition(async () => {
+      const res = await setCustomerPaymentStatusAction({}, data);
+      if (res.error) setError(res.error);
+    });
+  }
 
   return (
-    <form ref={formRef} action={formAction} className="whitespace-nowrap">
-      <input type="hidden" name="customerId" value={customerId} />
-      {/* 幅を内容に合わせる。w-full だと列が詰まったとき「着金…」と切れて読めない */}
-      <select
-        name="paymentStatus"
-        value={done ? "決済完了" : "着金待ち"}
-        disabled={pending}
-        onChange={(e) => {
-          onPicked(e.target.value);
-          e.currentTarget.form?.requestSubmit();
-        }}
-        aria-label="お支払いの状態"
-        className={
-          "w-auto min-w-[7.5rem] rounded-md border px-2 py-1 text-xs font-medium " +
-          "transition focus:outline-none disabled:opacity-60 " +
-          tone
-        }
-      >
-        <option value="着金待ち">着金待ち</option>
-        <option value="決済完了">決済完了</option>
-      </select>
+    <div className="whitespace-nowrap">
+      {/*
+        幅は内容に合わせる。w-full だと列が詰まったとき「着金…」と切れて読めない。
+        矢印は appearance-none で自前で描く。ブラウザ既定の矢印は
+        色を変えられず、赤や緑の枠のなかで浮いて見えるため。
+      */}
+      <div className="relative inline-block">
+        <select
+          value={done ? "決済完了" : "着金待ち"}
+          disabled={pending}
+          onChange={(e) => pick(e.target.value)}
+          aria-label="お支払いの状態"
+          className={
+            "w-auto appearance-none rounded-lg border py-1.5 pl-3 pr-8 text-sm " +
+            "font-semibold leading-tight transition focus:outline-none " +
+            "focus:ring-2 focus:ring-gold-500/40 disabled:opacity-60 " +
+            tone
+          }
+        >
+          <option value="着金待ち">着金待ち</option>
+          <option value="決済完了">決済完了</option>
+        </select>
+        <ChevronDown
+          aria-hidden
+          className={
+            "pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 " +
+            (done ? "text-good-300" : "text-bad-300")
+          }
+        />
+      </div>
       <div className="mt-1 text-xs text-ink-400">
         {pending ? "保存中…" : methodLabel}
       </div>
-      {state.error ? (
-        <div className="mt-1 text-xs leading-snug text-bad-500">{state.error}</div>
+      {error ? (
+        <div className="mt-1 text-xs leading-snug text-bad-500">{error}</div>
       ) : null}
-    </form>
+    </div>
   );
 }
 

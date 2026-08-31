@@ -1,9 +1,9 @@
 "use client";
 
 import { isManualPaymentMethod, paymentMethodLabel } from "@/lib/payment-status";
-import { Fragment, useActionState, useState, useTransition } from "react";
+import { Fragment, useActionState, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronDown, Search, X } from "lucide-react";
+import { Check, ChevronDown, Search, X } from "lucide-react";
 import {
   setCustomerPaymentStatusAction,
   stopPadSubscriptionAction,
@@ -173,6 +173,144 @@ function shipTone(v: string): Tone {
  *
  * 選んだ時点で保存する。押し忘れる保存ボタンを増やさないため。
  */
+/**
+ * お支払いの状態を選ぶ小さな一覧。
+ *
+ * ブラウザ標準の <select> は、開いたあとの一覧を OS が描く。
+ * そのため Mac と Windows で見た目が変わり、Windows では
+ * 背景も文字色も指定が効かず読みにくかった（2026-08-31 の指摘）。
+ * どの環境でも同じに見えるよう、開いたあとの一覧まで自前で描く。
+ *
+ * 表は横スクロールする入れ物の中にあるので、一覧は画面基準（fixed）で出す。
+ * 入れ物の中に絶対配置すると、右端の行で切れてしまう。
+ */
+function StatusPicker({
+  value,
+  options,
+  disabled,
+  onPick,
+  label,
+}: {
+  value: string;
+  options: { value: string; label: string; tone: "good" | "bad" }[];
+  disabled?: boolean;
+  onPick: (next: string) => void;
+  label: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [at, setAt] = useState<{ top: number; left: number; width: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  const current = options.find((o) => o.value === value) ?? options[0];
+  const toneOf = (tone: "good" | "bad", on: boolean) =>
+    tone === "good"
+      ? on
+        ? "border-good-500/60 bg-good-500/20 text-good-200"
+        : "text-good-300"
+      : on
+        ? "border-bad-500/60 bg-bad-500/20 text-bad-200"
+        : "text-bad-300";
+
+  // 開いている間だけ、外を押す・Esc・スクロールで閉じる
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    // スクロールで位置がずれるので、動いたら閉じる（追従させるより迷いが少ない）
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [open]);
+
+  function toggle() {
+    if (disabled) return;
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r) setAt({ top: r.bottom + 4, left: r.left, width: Math.max(r.width, 132) });
+    setOpen((v) => !v);
+  }
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={toggle}
+        disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={label}
+        className={
+          "inline-flex w-auto items-center gap-1.5 rounded-lg border py-1.5 pl-3 pr-2 " +
+          "text-sm font-semibold leading-tight transition " +
+          "focus:outline-none focus:ring-2 focus:ring-gold-500/40 disabled:opacity-60 " +
+          (current.tone === "good"
+            ? "border-good-500/60 bg-good-500/15 text-good-200 hover:bg-good-500/25"
+            : "border-bad-500/60 bg-bad-500/15 text-bad-200 hover:bg-bad-500/25")
+        }
+      >
+        <span className="whitespace-nowrap">{current.label}</span>
+        <ChevronDown aria-hidden className="h-3.5 w-3.5 opacity-80" />
+      </button>
+
+      {open && at ? (
+        <>
+          {/* 外を押したら閉じるための受け皿 */}
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setOpen(false)}
+            aria-hidden
+          />
+          <ul
+            role="listbox"
+            aria-label={label}
+            style={{ top: at.top, left: at.left, minWidth: at.width }}
+            className={
+              "fixed z-50 overflow-hidden rounded-lg border border-ink-700 " +
+              "bg-ink-900 p-1 shadow-xl shadow-black/50"
+            }
+          >
+            {options.map((o) => {
+              const on = o.value === value;
+              return (
+                <li key={o.value}>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={on}
+                    onClick={() => {
+                      setOpen(false);
+                      if (!on) onPick(o.value);
+                    }}
+                    className={
+                      "flex w-full items-center gap-2 whitespace-nowrap rounded-md border " +
+                      "border-transparent px-2.5 py-1.5 text-left text-sm font-semibold " +
+                      "transition hover:bg-ink-800 " +
+                      toneOf(o.tone, on)
+                    }
+                  >
+                    <Check
+                      aria-hidden
+                      className={"h-3.5 w-3.5 " + (on ? "opacity-100" : "opacity-0")}
+                    />
+                    {o.label}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      ) : null}
+    </>
+  );
+}
+
 function PaymentStatusCell({
   customerId,
   paymentStatus,
@@ -222,9 +360,6 @@ function PaymentStatusCell({
    * 赤が残っている行＝まだお金が届いていない行として一目で拾えるようにする。
    */
   const done = paymentStatus === "決済完了";
-  const tone = done
-    ? "border-good-500/60 bg-good-500/15 text-good-200 hover:bg-good-500/25"
-    : "border-bad-500/60 bg-bad-500/15 text-bad-200 hover:bg-bad-500/25";
 
   function pick(next: string) {
     onPicked(next);
@@ -240,35 +375,16 @@ function PaymentStatusCell({
 
   return (
     <div className="whitespace-nowrap">
-      {/*
-        幅は内容に合わせる。w-full だと列が詰まったとき「着金…」と切れて読めない。
-        矢印は appearance-none で自前で描く。ブラウザ既定の矢印は
-        色を変えられず、赤や緑の枠のなかで浮いて見えるため。
-      */}
-      <div className="relative inline-block">
-        <select
-          value={done ? "決済完了" : "着金待ち"}
-          disabled={pending}
-          onChange={(e) => pick(e.target.value)}
-          aria-label="お支払いの状態"
-          className={
-            "w-auto appearance-none rounded-lg border py-1.5 pl-3 pr-8 text-sm " +
-            "font-semibold leading-tight transition focus:outline-none " +
-            "focus:ring-2 focus:ring-gold-500/40 disabled:opacity-60 " +
-            tone
-          }
-        >
-          <option value="着金待ち">着金待ち</option>
-          <option value="決済完了">決済完了</option>
-        </select>
-        <ChevronDown
-          aria-hidden
-          className={
-            "pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 " +
-            (done ? "text-good-300" : "text-bad-300")
-          }
-        />
-      </div>
+      <StatusPicker
+        label="お支払いの状態"
+        value={done ? "決済完了" : "着金待ち"}
+        disabled={pending}
+        onPick={pick}
+        options={[
+          { value: "着金待ち", label: "着金待ち", tone: "bad" },
+          { value: "決済完了", label: "決済完了", tone: "good" },
+        ]}
+      />
       <div className="mt-1 text-xs text-ink-400">
         {pending ? "保存中…" : methodLabel}
       </div>

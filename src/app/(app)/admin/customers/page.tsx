@@ -61,7 +61,7 @@ export const metadata = { title: "顧客管理（本部）｜VIS 代理店ポー
 const LIMIT = 1000;
 
 /** 表の列数。修正欄を表いっぱいに広げるのに使う。 */
-const COLUMN_COUNT = 11;
+const COLUMN_COUNT = 10;
 
 type Kind = "all" | "introduced" | "general";
 
@@ -457,7 +457,6 @@ export default async function AdminCustomersPage({
                   <SortableTh column="staff" label="担当スタッフ" sort={sort} basePath={BASE} params={params} />
                   <SortableTh column="referrer" label="紹介元" sort={sort} basePath={BASE} params={params} />
                   <SortableTh column="progress" label="進み具合" sort={sort} basePath={BASE} params={params} />
-                  <SortableTh column="review" label="審査" sort={sort} basePath={BASE} params={params} />
                   <SortableTh column="payment" label="お支払い" sort={sort} basePath={BASE} params={params} />
                   <SortableTh column="ship" label="出荷" sort={sort} basePath={BASE} params={params} />
                   <SortableTh column="contracted" label="ご契約日" sort={sort} basePath={BASE} params={params} />

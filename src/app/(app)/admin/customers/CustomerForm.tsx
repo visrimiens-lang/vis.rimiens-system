@@ -147,12 +147,6 @@ export function CustomerSearch({ keyword, kind }: { keyword: string; kind: strin
 
 /* ---------- 状態の色分け ---------- */
 
-function reviewTone(v: string): Tone {
-  if (v === "審査完了") return "good";
-  if (v === "審査NG") return "bad";
-  return "warn";
-}
-
 function paymentTone(v: string): Tone {
   if (v === "決済完了") return "good";
   if (v === "否決・キャンセル") return "bad";
@@ -183,10 +177,17 @@ function PaymentStatusCell({
   customerId,
   paymentStatus,
   paymentMethod,
+  onPicked,
 }: {
   customerId: string;
   paymentStatus: string;
   paymentMethod: string;
+  /**
+   * 選んだ直後に親へ知らせる。
+   * 進み具合はお支払いの状態で変わるので、保存の返事を待たずにその場で動かす。
+   * 待たせると「変えたのに棒が動かない」と見え、二度押しされる。
+   */
+  onPicked: (next: string) => void;
 }) {
   const [state, formAction, pending] = useActionState<CustomerFormState, FormData>(
     setCustomerPaymentStatusAction,
@@ -200,28 +201,42 @@ function PaymentStatusCell({
 
   if (!editable) {
     return (
-      <>
+      <div className="whitespace-nowrap">
         <Status value={paymentStatus} tone={paymentTone(paymentStatus)} />
         {methodLabel ? (
           <div className="mt-1 text-xs text-ink-400">{methodLabel}</div>
         ) : null}
-      </>
+      </div>
     );
   }
 
+  /*
+   * 着金待ちは赤、決済完了は緑。
+   * この欄は本部が着金を確認して回すためのもので、
+   * 赤が残っている行＝まだお金が届いていない行として一目で拾えるようにする。
+   */
+  const done = paymentStatus === "決済完了";
+  const tone = done
+    ? "border-good-500/50 bg-good-500/15 text-good-300"
+    : "border-bad-500/50 bg-bad-500/15 text-bad-300";
+
   return (
-    <form ref={formRef} action={formAction} className="min-w-0">
+    <form ref={formRef} action={formAction} className="whitespace-nowrap">
       <input type="hidden" name="customerId" value={customerId} />
+      {/* 幅を内容に合わせる。w-full だと列が詰まったとき「着金…」と切れて読めない */}
       <select
         name="paymentStatus"
-        defaultValue={paymentStatus === "決済完了" ? "決済完了" : "着金待ち"}
+        value={done ? "決済完了" : "着金待ち"}
         disabled={pending}
-        onChange={(e) => e.currentTarget.form?.requestSubmit()}
+        onChange={(e) => {
+          onPicked(e.target.value);
+          e.currentTarget.form?.requestSubmit();
+        }}
         aria-label="お支払いの状態"
         className={
-          "w-full rounded-md border border-ink-700 bg-ink-900 px-2 py-1 text-xs " +
-          "text-ink-100 transition hover:border-gold-500 focus:border-gold-400 " +
-          "focus:outline-none disabled:opacity-60"
+          "w-auto min-w-[7.5rem] rounded-md border px-2 py-1 text-xs font-medium " +
+          "transition focus:outline-none disabled:opacity-60 " +
+          tone
         }
       >
         <option value="着金待ち">着金待ち</option>
@@ -335,6 +350,16 @@ export function CustomerRow({
 }) {
   const [state, save, saving] = useActionState(updateCustomerAction, initial);
   const [editing, setEditing] = useState(false);
+  /*
+   * お支払いの状態は、この行の中で持つ。
+   *
+   * 保存はサーバー側で行うが、その返事を待って画面を作り直すと、
+   * 選んでから進み具合の棒が動くまで間が空く。
+   * 「変えたのに反映されない」と見えるので、選んだ時点でここを更新し、
+   * 進み具合も一緒に動かす（2026-08-31 の依頼）。
+   * 保存に失敗したときは PaymentStatusCell が理由を出す。
+   */
+  const [payStatus, setPayStatus] = useState(customer.paymentStatus);
 
   return (
     <Fragment>
@@ -401,16 +426,14 @@ export function CustomerRow({
           )}
         </Td>
         <Td>
-          <Progress {...progress} compact />
-        </Td>
-        <Td>
-          <Status value={customer.reviewStatus} tone={reviewTone(customer.reviewStatus)} />
+          <Progress {...progress} paymentStatus={payStatus} compact />
         </Td>
         <Td>
           <PaymentStatusCell
             customerId={customer.id}
-            paymentStatus={customer.paymentStatus}
+            paymentStatus={payStatus}
             paymentMethod={customer.paymentMethod}
+            onPicked={setPayStatus}
           />
         </Td>
         <Td>

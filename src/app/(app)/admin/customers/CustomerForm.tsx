@@ -10,6 +10,7 @@ import {
   useState,
   useTransition,
 } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Check, ChevronDown, Search, X } from "lucide-react";
 import {
@@ -283,7 +284,14 @@ function StatusPicker({
         <ChevronDown aria-hidden className="h-3.5 w-3.5 opacity-80" />
       </button>
 
-      {open && at ? (
+      {/*
+        一覧は body の直下へ出す（ポータル）。
+        position: fixed は、transform を持つ親があるとその親を基準にしてしまう。
+        表の入れ物に transform が掛かっていて、実際 312px ずれて出ていた。
+        body 直下なら、どの行から開いても画面の座標どおりに置ける。
+      */}
+      {open && at
+        ? createPortal(
         <>
           {/* 外を押したら閉じるための受け皿 */}
           <div
@@ -329,8 +337,10 @@ function StatusPicker({
               );
             })}
           </ul>
-        </>
-      ) : null}
+        </>,
+            document.body,
+          )
+        : null}
     </>
   );
 }

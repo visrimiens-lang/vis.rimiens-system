@@ -182,7 +182,7 @@ export default async function AdminCustomersPage({
   searchParams: Promise<{
     kind?: string;
     keyword?: string;
-    review?: string;
+    agency?: string;
     payment?: string;
     ship?: string;
     sort?: string;
@@ -196,7 +196,7 @@ export default async function AdminCustomersPage({
   const params: SearchParams = await searchParams;
   const kind = toKind(readParam(params, "kind"));
   const keyword = readParam(params, "keyword");
-  const review = readParam(params, "review") || ALL;
+  const agency = readParam(params, "agency") || ALL;
   const payment = readParam(params, "payment") || ALL;
   const ship = readParam(params, "ship") || ALL;
   const sort = parseSort(params, DEFAULT_SORT, SORT_COLUMNS);
@@ -249,7 +249,7 @@ export default async function AdminCustomersPage({
   const header = (
     <PageHeader
       title="顧客管理"
-      description="ご契約いただいたお客様の一覧です。お名前と電話番号で探せ、審査・お支払い・出荷の状態でも絞り込めます。申込からお届けまでの進み具合と、担当スタッフもこの表で確認できます。表の見出しを押すと並び替わります。住所や連絡先の書き間違いは、この画面から直せます。"
+      description="ご契約いただいたお客様の一覧です。お名前と電話番号で探せ、担当代理店・お支払い・出荷の状態でも絞り込めます。申込からお届けまでの進み具合と、担当スタッフもこの表で確認できます。表の見出しを押すと並び替わります。住所や連絡先の書き間違いは、この画面から直せます。"
     />
   );
 
@@ -276,7 +276,7 @@ export default async function AdminCustomersPage({
   // 検索は、お名前・フリガナ・電話番号のどれかに含まれていれば当たりにする
   const matches = (c: CustomerView) => {
     if (!matchesKeyword(keyword, [c.name, c.nameKana, c.phone])) return false;
-    if (review !== ALL && c.reviewStatus !== review) return false;
+    if (agency !== ALL && c.agencyCode !== agency) return false;
     if (payment !== ALL && c.paymentStatus !== payment) return false;
     if (ship !== ALL && c.shipStatus !== ship) return false;
     return true;
@@ -319,14 +319,28 @@ export default async function AdminCustomersPage({
     accessors,
   );
 
-  const isFiltered = Boolean(keyword) || review !== ALL || payment !== ALL || ship !== ALL;
+  const isFiltered = Boolean(keyword) || agency !== ALL || payment !== ALL || ship !== ALL;
   const clearHref = buildListHref(BASE, params, {
     keyword: "",
-    review: "",
+    agency: "",
     payment: "",
     ship: "",
   });
-  const reviewOptions = buildOptions(customers, (c) => c.reviewStatus, [], review);
+  /*
+   * 担当代理店で絞る。
+   * 審査で絞る欄が入っていたが、審査の列は 2026-08-31 に外してあり、
+   * 見えない項目で絞っても結果を読み取れない。
+   * 本部が見たいのは「どの代理店のお客様か」なので、そちらに差し替える。
+   *
+   * 選択肢はコードだけだと分からないので会社名を添える。
+   * 値はコードのまま（絞り込みの照合に使う）。
+   */
+  const agencyOptions = buildOptions(customers, (c) => c.agencyCode, [], agency).map(
+    (o) => {
+      const name = nameByCode.get(o.value);
+      return name ? { ...o, label: `${o.value}　${name}` } : o;
+    },
+  );
   const paymentOptions = buildOptions(customers, (c) => c.paymentStatus, [], payment);
   const shipOptions = buildOptions(customers, (c) => c.shipStatus, [], ship);
 
@@ -427,11 +441,12 @@ export default async function AdminCustomersPage({
             width="w-64"
           />
           <FilterSelect
-            name="review"
-            label="審査"
-            value={review}
-            options={reviewOptions}
+            name="agency"
+            label="担当代理店"
+            value={agency}
+            options={agencyOptions}
             allLabel={`すべて（${customers.length}）`}
+            width="w-64"
           />
           <FilterSelect name="payment" label="お支払い" value={payment} options={paymentOptions} />
           <FilterSelect name="ship" label="出荷" value={ship} options={shipOptions} />

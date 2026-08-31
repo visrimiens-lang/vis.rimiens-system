@@ -9,7 +9,7 @@ import {
   paymentStatusLabel,
   paymentStatusOf,
 } from "@/lib/payment-status";
-import { rankLabel, rankShort } from "@/lib/labels";
+import { companyNameOf, rankLabel, rankShort } from "@/lib/labels";
 import { digitsOf } from "@/lib/list-params";
 import {
   Badge,
@@ -33,7 +33,7 @@ export const metadata = { title: "受注の詳細（本部）｜VIS 代理店ポ
 
 /* ------------------------------------------------------------------
  * 受注1件の全体像。
- * 本部はこの画面だけで「誰の売上か」「審査は通ったか」「出荷したか」
+ * 本部はこの画面だけで「誰が売ったか」「審査は通ったか」「出荷したか」
  * 「いくらの報酬が立ったか」を確かめて、出荷の手配まで済ませる。
  * ------------------------------------------------------------------ */
 
@@ -302,6 +302,23 @@ export default async function AdminOrderDetailPage({
   const names = new Map<string, string>();
   for (const a of agencies) names.set(str(a, "code"), str(a, "name"));
 
+  /*
+   * 担当者の所属会社。紹介元の欄に出す。
+   * スタッフ（区分02）は company_name、無ければ上位の代理店名を使う（companyNameOf）。
+   */
+  const companies = new Map<string, string>();
+  for (const a of agencies) {
+    companies.set(
+      str(a, "code"),
+      companyNameOf({
+        name: str(a, "name"),
+        codeKind: str(a, "code_kind"),
+        companyName: str(a, "company_name"),
+        parentName: str(a, "parent_name"),
+      }),
+    );
+  }
+
   // 紹介元コードの入力候補。解約済みは外す（新しく紹介元に据えることはないため）。
   // コード区分（00=会社 / 01=取次パートナー / 02=スタッフ）も渡す。
   // 担当スタッフの候補をスタッフだけに絞るのに使う。
@@ -519,7 +536,7 @@ export default async function AdminOrderDetailPage({
         </Fields>
       </Card>
 
-      <Card title="誰の売上か">
+      <Card title="担当者">
         {agencyError ? (
           <div className="px-5 pt-5">
             <Notice tone="bad">
@@ -543,8 +560,17 @@ export default async function AdminOrderDetailPage({
           <Field label="ゼロ次代理店">
             <AgencyCell code={str(order, "zeroth_code")} names={names} />
           </Field>
-          <Field label="紹介元の取次店">
-            <AgencyCell code={referrerCode} names={names} />
+          {/*
+            紹介元。取次店から紹介された受注はそのコードを出す。
+            そうでない受注は、担当スタッフの所属会社を出す（2026-08-31 の依頼）。
+            コードだけでは、どこの誰が売ったのかを追えないため。
+          */}
+          <Field label="紹介元">
+            {referrerCode ? (
+              <AgencyCell code={referrerCode} names={names} />
+            ) : (
+              companies.get(str(order, "staff_code")) || ""
+            )}
           </Field>
         </Fields>
 

@@ -5,7 +5,6 @@ import { currentViewer } from "@/lib/auth";
 import { listAllAgencies } from "@/lib/agencies";
 import { effectivePayUnits, payTaxIncl, payoutForOrder } from "@/lib/pay-defaults";
 import {
-  aplusUrlPending,
   paymentMethodLabel,
   paymentStatusOf,
   paymentStatusLabel,
@@ -1002,11 +1001,6 @@ export default async function AdminOrdersPage({
                     {/*
                       お支払い：着金待ち／決済完了。変更は受注詳細から。
                       出す言葉は決済方法で変える（振込は着金、アプラスは決済）。
-
-                      審査の列は 2026-08-31 に外した。アプラス以外は自動で完了になり、
-                      同じことを進み具合でも出しているため。
-                      ただし「URL未送付」は、送るまで審査が始まらず受注が止まる合図なので、
-                      列と一緒に消さずにここへ移した。
                     */}
                     <Td className="whitespace-nowrap">
                       <StatusBadge
@@ -1019,11 +1013,6 @@ export default async function AdminOrdersPage({
                               ) || paymentStatusOf(o.paymentMethod, o.paymentStatus)
                         }
                       />
-                      {!o.voided && aplusUrlPending(o.paymentMethod, o.aplusUrlSentAt) ? (
-                        <span className="ml-1.5 align-middle text-xs text-warn-500">
-                          URL未送付
-                        </span>
-                      ) : null}
                     </Td>
                     <Td>
                       {payee ? (

@@ -170,7 +170,23 @@ export async function POST(req: NextRequest) {
       const r = await registerLead({
         customerName: pick(data, "お客様氏名", "お名前", "氏名", "name", "customerName"),
         phone: pick(data, "電話", "phone", "tel"),
-        referrerCode: pick(data, "取次店コード", "紹介コード", "referrerCode", "code"),
+        /*
+         * 取次店コードの欄。
+         * ご紹介フォーム（JotForm 261952432766464）の固有名は agency_id で、
+         * 承認メールで配っている専用URLも ?agency_id=＜コード＞ の形になっている
+         * （lib/qr.ts の TOSS_FORM_CODE_KEY と同じ）。
+         * これを候補に入れていなかったため、送っても
+         * 「取次店コードが入っていません」で弾かれる状態だった（2026-08-31）。
+         */
+        referrerCode: pick(
+          data,
+          "取次店コード",
+          "紹介コード",
+          "referrerCode",
+          "agency_id",
+          "agencyId",
+          "code",
+        ),
         note: pick(data, "備考", "note"),
       });
       await markProcessed(box.id, r.ok ? undefined : r.message);

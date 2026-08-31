@@ -1002,7 +1002,8 @@ export default async function AdminOrdersPage({
                     <Td numeric className="whitespace-nowrap">
                       {orderDate(o.date, allPeriod)}
                     </Td>
-                    <Td>
+                    {/* 姓と名の間で折り返すと「松本人／志」のように読めなくなる */}
+                    <Td className="whitespace-nowrap">
                       <Link
                         href={`/admin/orders/${encodeURIComponent(o.recordId)}`}
                         className="underline underline-offset-4 hover:text-gold-300"

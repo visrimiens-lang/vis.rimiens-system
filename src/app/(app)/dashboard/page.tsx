@@ -460,7 +460,8 @@ export default async function DashboardPage() {
               {recent.map((o) => (
                 <tr key={o.recordId}>
                   <Td numeric>{jpDate(o.date)}</Td>
-                  <Td>{o.customerName || "—"}</Td>
+                  {/* 姓と名の間で折り返すと読めなくなる */}
+                  <Td className="whitespace-nowrap">{o.customerName || "—"}</Td>
                   <Td numeric className="text-ink-300">
                     {o.ownerCode || "—"}
                   </Td>

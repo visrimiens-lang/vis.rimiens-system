@@ -92,7 +92,10 @@ export function IssueForm({
                   {r.orderedOn}
                 </Td>
                 <Td>
-                  <div className="text-ink-100">{r.customerName || "（名前なし）"}</div>
+                  {/* 姓と名の間で折り返すと読めなくなる */}
+                  <div className="whitespace-nowrap text-ink-100">
+                    {r.customerName || "（名前なし）"}
+                  </div>
                   <div className="tabnum mt-0.5 text-xs text-ink-400">{r.phone || "電話番号なし"}</div>
                 </Td>
                 <Td>

@@ -379,7 +379,8 @@ export default async function LeadsPage({
               {rows.map((l) => (
                 <tr key={l.recordId}>
                   <Td numeric>{showDate(jstDate(l.tossedAt), allPeriod)}</Td>
-                  <Td>{l.customerName || "—"}</Td>
+                  {/* 姓と名の間で折り返すと読めなくなる */}
+                  <Td className="whitespace-nowrap">{l.customerName || "—"}</Td>
                   <Td numeric>{l.phone || "—"}</Td>
                   {showReferrer ? (
                     <Td>

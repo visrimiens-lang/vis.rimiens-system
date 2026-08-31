@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { PAYMENT_STATUSES } from "@/lib/payment-status";
+import { PAYMENT_STATUSES, initialPaymentStatus } from "@/lib/payment-status";
 import { currentViewer } from "@/lib/auth";
 import { audit, select, selectOne, update } from "@/lib/db";
 import { todayInJapan } from "@/lib/jst";
@@ -331,14 +331,17 @@ export async function updateShipmentAction(
   let rewardNote = "";
   let deliveryNote = "";
   let customerId = "";
+  /** 決済方法。キャンセルから戻すとき、お支払いの状況を初期値に返すのに使う。 */
+  let paymentMethod = "";
 
   try {
     const order = await selectOne<Row>(
-      `orders?select=id,customer_id,customer_name,ship_status,tracking_no,shipped_on,delivered_on&id=eq.${id}`,
+      `orders?select=id,customer_id,customer_name,ship_status,tracking_no,shipped_on,delivered_on,payment_method&id=eq.${id}`,
     );
     if (!order) return { error: NOT_FOUND };
 
     before = s_(order, "ship_status");
+    paymentMethod = s_(order, "payment_method");
     label = customerLabel(order);
     customerId = s_(order, "customer_id");
 
@@ -513,10 +516,22 @@ export async function updateShipmentAction(
         tracking_no: tracking || null,
         // 出荷の状態も顧客台帳に写す（キャンセルのときは触らない）
         ...(mirrorShip ? { ship_status: mirrorShip } : {}),
-        // キャンセルはお客様の決済状況で表す。
-        // 進み具合（components/Progress.tsx）は決済状況の「否決・キャンセル」を
-        // 見て「中止」と出すため、ここを揃えないと止まった案件が進行中に見える。
-        ...(next === "キャンセル" ? { payment_status: "否決・キャンセル" } : {}),
+        /*
+         * キャンセルはお客様の決済状況で表す。
+         * 進み具合（components/Progress.tsx）は決済状況の「否決・キャンセル」を
+         * 見て「中止」と出すため、ここを揃えないと止まった案件が進行中に見える。
+         *
+         * キャンセルから戻すときは、この印を外さないと進み具合が「中止」のまま残る。
+         * 戻す先は決済方法から見た初期値にする
+         * （クレジットカードは決済完了、銀行振込・アプラスは着金待ち）。
+         * 実際のお支払いの状況は受注側で管理しているので、
+         * ここは進み具合が動く状態に戻せれば足りる。
+         */
+        ...(next === "キャンセル"
+          ? { payment_status: "否決・キャンセル" }
+          : before === "キャンセル"
+            ? { payment_status: initialPaymentStatus(paymentMethod) }
+            : {}),
       });
       deliveryNote = deliveredOn ? `配達完了日を ${deliveredOn} として記録しました。` : "";
     } catch (e) {

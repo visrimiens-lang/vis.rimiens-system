@@ -173,29 +173,13 @@ function groupByOwner(
 
 /** 担当ひとりぶんの行。会社ごとの小計の下にぶら下がる。 */
 /*
- * 担当ひとりぶんの行。
- *
- * company は「その会社に1人しかいなくて小計を挟まない」ときだけ渡す。
- * 渡さないと会社名がどこにも出ず、字下げされた行が直前の会社の一員に見える。
- * 実際、株式会社ウィッシュの北川さんが株式会社HANAの3人目に、
- * 株式会社ミライの有村さんが株式会社comvaceの3人目に見えていた（2026-08-31）。
- * 「2 名分」と書いてある下に3人並ぶので、支払通知を作るときに取り違える。
+ * 担当ひとりぶんの行。会社の見出しの下に字下げして並べる。
+ * 見出しは会社に1人しかいなくても出す（groupByOwner のあとの組み立てを参照）。
  */
-function MemberRow({
-  g,
-  showReward,
-  company,
-}: {
-  g: OwnerGroup;
-  showReward: boolean;
-  company?: string;
-}) {
+function MemberRow({ g, showReward }: { g: OwnerGroup; showReward: boolean }) {
   return (
     <tr>
-      <Td numeric className={company ? "text-ink-300" : "pl-8 text-ink-300"}>
-        {company ? (
-          <span className="mb-0.5 block font-semibold text-ink-100">{company}</span>
-        ) : null}
+      <Td numeric className="pl-8 text-ink-300">
         {g.code}
       </Td>
       <Td>{g.name}</Td>
@@ -395,7 +379,7 @@ export default async function RewardsPage({
    */
   const companyRows: (
     | { kind: "company"; company: string; count: number; units: number; reward: number | null; payout: number | null }
-    | { kind: "member"; g: OwnerGroup; company?: string }
+    | { kind: "member"; g: OwnerGroup }
   )[] = [];
   {
     /*
@@ -413,11 +397,15 @@ export default async function RewardsPage({
     }
     for (const [, { label: company, list }] of byCompany) {
       const units = list.reduce((s, g) => s + g.units, 0);
-      // 会社に1人しかいないときは、小計を挟まずその人の行だけ出す
-      if (list.length === 1) {
-        companyRows.push({ kind: "member", g: list[0], company });
-        continue;
-      }
+      /*
+       * 1人だけの会社にも見出しを出す。
+       *
+       * 以前は1人のときだけ見出しを省いていたが、そうすると
+       * 字下げされた本人の行が直前の会社の一員に見えた
+       * （「株式会社HANA 2 名分」の下に3人並ぶ状態。2026-08-31）。
+       * 見出しに会社名を入れて避けようとすると、その行だけ2行になって
+       * 行の高さがそろわない。会社ごとに必ず見出しを出すのが一番読みやすい。
+       */
       /*
        * 1人でも算出できない人がいれば、小計は出さずに「—」にする。
        * 出せるぶんだけ足すと、欠けた額があるのに「それらしい数字」が出て、
@@ -723,7 +711,8 @@ export default async function RewardsPage({
               {detail.map((r) => (
                 <tr key={r.recordId}>
                   <Td numeric>{jpDate(r.deliveredAt)}</Td>
-                  <Td>{r.customerName || "—"}</Td>
+                  {/* 姓と名の間で折り返すと「渡辺 悠／真」のように読めなくなる */}
+                  <Td className="whitespace-nowrap">{r.customerName || "—"}</Td>
                   <Td className="min-w-[13rem] max-w-[22rem]">
                       <span className="line-clamp-2 leading-snug" title={r.productName || undefined}>
                         {r.productName || "—"}
@@ -824,12 +813,7 @@ export default async function RewardsPage({
                     ) : null}
                   </tr>
                 ) : (
-                  <MemberRow
-                    key={row.g.code}
-                    g={row.g}
-                    showReward={showReward}
-                    company={row.company}
-                  />
+                  <MemberRow key={row.g.code} g={row.g} showReward={showReward} />
                 ),
               )}
             </tbody>

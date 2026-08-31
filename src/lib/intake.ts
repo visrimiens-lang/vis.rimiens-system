@@ -1286,17 +1286,15 @@ export async function linkCustomer(app: {
    * お名前は、空白の入れ方だけが違うことがあるので詰めて比べる。
    * 同じ番号でお名前が違えば、別の方として新しく台帳を作る。
    */
-  const nameKey = (v: string) => v.replace(/[\s　]/g, "");
-
-  let found: Row | null = null;
-  if (normalized) {
-    const tail = normalized.slice(-4);
-    const rows = await select<Row>(
-      `customers?select=id,name,phone,contracted_on,agency_code,staff_code,referrer_code&phone=like.*${encodeURIComponent(tail)}&limit=50`,
-    );
-    const samePhone = rows.filter((c) => normalizePhone(s_(c, "phone")) === normalized);
-    found = samePhone.find((c) => nameKey(s_(c, "name")) === nameKey(name)) ?? null;
-  }
+  /*
+   * ご注文ごとに台帳を1件作る。前のお客様を探して1つにまとめることはしない。
+   *
+   * 台帳は製造番号・保証・1年後の定期パッドをそれぞれ持つので、
+   * 2台お買い上げなら2件あるのが正しい。
+   * まとめていたころは、2台目のご注文が1台目の台帳に吸い込まれ、
+   * 顧客管理に出てこなかった（2026-08-31）。
+   */
+  const found: Row | null = null;
 
   const attribution: Record<string, string> = {};
   if (app.agencyCode) attribution["agency_code"] = app.agencyCode;
@@ -1377,9 +1375,6 @@ function normalizePaymentMethod(raw: string): { value: string | null; raw: strin
 export async function registerOrder(app: OrderApplication): Promise<IntakeResult> {
   const name = (app.customerName || "").trim();
   if (!name) return { ok: false, message: "注文者名が入っていません。" };
-  /** 二重の疑いなど、本部に見てもらいたい注記。受信箱に残す。 */
-  let doubtNote = "";
-
   if (app.stripePaymentId) {
     const dup = await selectOne<Row>(
       `orders?select=id&stripe_payment_id=eq.${encodeURIComponent(app.stripePaymentId)}`,
@@ -1429,28 +1424,15 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
       };
     }
     /*
-     * 5分を超えて24時間以内に、同じ連絡先・同じ金額の受注がある場合。
+     * 24時間以内に同じ連絡先・同額の受注があっても、そのまま登録する。
      *
-     * UTAGEの再送（タイムアウト・手動再実行）なら二重登録、
-     * 同じ方の正当な2台目の購入なら正しい受注で、機械では見分けられない。
-     * 以前はそのまま2件目を登録して黙っていたため、二重なら報酬も
-     * 満額もう1件分（139,700円）立ってしまう状態だった。
-     * 登録は止めずに行い、受信箱に残して本部に見分けてもらう。
+     * 以前はここで「二重届きかもしれない」と受信箱に但し書きを残していた。
+     * ただ同じ方が続けて2台買うことも普通にあり、機械では見分けられない。
+     * 2件のご注文は2件のまま残す、という運用に決めた（2026-08-31）。
+     *
+     * 通知が本当に二度届いた場合は2件立つ。5分以内の再送は上で弾いているので、
+     * 残るのは時間を空けた再送だけ。受注一覧で気づいたらキャンセルにする。
      */
-    if (phone5) {
-      const day = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
-      const sameDay = await selectOne<Row>(
-        `orders?select=id&phone=eq.${encodeURIComponent(phone5)}` +
-          `&amount=eq.${Number(app.amount ?? 0)}` +
-          `&created_at=gte.${encodeURIComponent(day)}&order=id.desc`,
-      );
-      if (sameDay) {
-        doubtNote =
-          `同じ連絡先・同額の受注（#${s_(sameDay, "id")}）が24時間以内にもうあります。` +
-          "通知の二重届きなら、この受注をキャンセルにしてください（報酬も取り消されます）。" +
-          "2台目のご購入なら、このままで結構です。";
-      }
-    }
   }
 
   // 渡されたコードの持ち主を見て、売上の付け先と担当者を分ける
@@ -1680,10 +1662,10 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
     ok: true,
     code: String(order["id"]),
     message: `${name} 様のご注文を登録しました。${trouble ? ` ${trouble}` : ""}${
-      doubtNote ? ` ${doubtNote}` : ""
+      ""
     }`,
     // 受け口はこれを見て、受信箱に「取り込めていない」として残す
-    needsReview: trouble || doubtNote ? true : undefined,
+    needsReview: trouble ? true : undefined,
   };
 }
 

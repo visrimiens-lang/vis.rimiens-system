@@ -562,20 +562,46 @@ function CancelCell({
   if (orders.length === 0) {
     return <span className="text-ink-500">—</span>;
   }
+  /*
+   * ご注文が複数あるときは、どれを止めるのかを選べるようにする。
+   * 以前は件数だけ出して受注一覧へ回していたが、
+   * 同じ方が2台お買い上げになることは普通にあり、
+   * そのたびにこの画面から操作できないのは不便だった。
+   */
   if (!cancelled && live.length > 1) {
     return (
-      <span className="whitespace-nowrap text-xs text-ink-400">
-        受注が {live.length} 件あります
-      </span>
+      <div className="whitespace-nowrap">
+        <Dropdown
+          label="キャンセルするご注文"
+          value="通常"
+          disabled={pending}
+          onPick={pick}
+          options={[
+            { value: "通常", label: `通常（${live.length}件）`, tone: "plain" },
+            ...live.map((o) => ({
+              value: o.id,
+              label: `受注 ${o.id} をキャンセル`,
+              tone: "bad" as const,
+            })),
+          ]}
+        />
+        {pending ? <div className="mt-1 text-xs text-ink-400">取消中…</div> : null}
+        {error ? (
+          <div className="mt-1 text-xs leading-snug text-bad-500">{error}</div>
+        ) : null}
+      </div>
     );
   }
 
   function pick(next: string) {
-    const target = next === "キャンセル" ? live[0] : orders[0];
+    // 受注が複数あるときは、選択肢の値に受注番号そのものが入る
+    const byId = orders.find((o) => o.id === next);
+    const target = byId ?? (next === "キャンセル" ? live[0] : orders[0]);
     if (!target) return;
+    if (next === "通常" && !cancelled) return;
+    const toCancel = Boolean(byId) || next === "キャンセル";
     const who = customerName || "このお客様";
-    const ok =
-      next === "キャンセル"
+    const ok = toCancel
         ? window.confirm(
             `${who} のご注文をキャンセルにします。\n` +
               "この受注から発生した報酬も取り消されます（同額のマイナスが立ちます）。\n" +
@@ -591,7 +617,7 @@ function CancelCell({
     const data = new FormData();
     // 受け口（order-actions の readOrderId）が見るのは "orderId"。"id" では届かない。
     data.set("orderId", target.id);
-    data.set("shipStatus", next === "キャンセル" ? "キャンセル" : "出荷待ち");
+    data.set("shipStatus", toCancel ? "キャンセル" : "出荷待ち");
     data.set("confirmCancel", "true");
     startTransition(async () => {
       const res = await updateShipmentAction({}, data);

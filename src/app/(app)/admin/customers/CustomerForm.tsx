@@ -414,13 +414,10 @@ function CancelCell({
   const live = orders.filter((o) => o.shipStatus !== "キャンセル");
   const cancelled = orders.length > 0 && live.length === 0;
 
-  if (cancelled) {
-    return <Badge tone="bad">キャンセル</Badge>;
-  }
   if (orders.length === 0) {
     return <span className="text-ink-500">—</span>;
   }
-  if (live.length > 1) {
+  if (!cancelled && live.length > 1) {
     return (
       <span className="whitespace-nowrap text-xs text-ink-400">
         受注が {live.length} 件あります
@@ -428,9 +425,10 @@ function CancelCell({
     );
   }
 
-  const target = live[0];
-
-  function cancel() {
+  function pick(next: string) {
+    if (next !== "キャンセル") return;
+    const target = live[0];
+    if (!target) return;
     const ok = window.confirm(
       `${customerName || "このお客様"} のご注文をキャンセルにします。\n` +
         "この受注から発生した報酬も取り消されます（同額のマイナスが立ちます）。\n" +
@@ -451,18 +449,25 @@ function CancelCell({
 
   return (
     <div className="whitespace-nowrap">
-      <button
-        type="button"
-        onClick={cancel}
-        disabled={pending}
-        className={
-          "whitespace-nowrap rounded-lg border border-bad-500/50 bg-bad-500/10 px-2.5 py-1.5 " +
-          "text-sm font-medium text-bad-100 transition hover:bg-bad-500/20 " +
-          "focus:outline-none focus:ring-2 focus:ring-bad-500/40 disabled:opacity-60"
-        }
-      >
-        {pending ? "取消中…" : "キャンセルにする"}
-      </button>
+      {/*
+        キャンセルにしたあと「通常」へ戻す道は、ここには置かない。
+        戻しても取り消した報酬は自動では立て直らないため、
+        受注詳細で状況を見ながら判断してもらう。
+      */}
+      <StatusToggle
+        label="キャンセルの状態"
+        value={cancelled ? "キャンセル" : "通常"}
+        disabled={pending || cancelled}
+        onPick={pick}
+        options={[
+          { value: "通常", label: "通常", tone: "good" },
+          { value: "キャンセル", label: "キャンセル", tone: "bad" },
+        ]}
+      />
+      {pending ? <div className="mt-1 text-xs text-ink-400">取消中…</div> : null}
+      {cancelled ? (
+        <div className="mt-1 text-xs text-ink-400">戻すときは受注詳細から</div>
+      ) : null}
       {error ? (
         <div className="mt-1 text-xs leading-snug text-bad-500">{error}</div>
       ) : null}

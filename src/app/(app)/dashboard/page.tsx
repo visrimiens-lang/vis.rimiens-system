@@ -151,6 +151,10 @@ async function load(code: string, month: string): Promise<Loaded | null> {
     if (customerId) customerIdByOrder.set(id, customerId);
   }
 
+  /*
+   * 直近の受注。新しいものから5件。
+   * 並びは listOrders が「受注日の新しい順 → 受注番号の大きい順」でそろえている。
+   */
   const latest = attachRewards(allTime.raw, effectiveRank(self), selfPayUnits).slice(0, 5);
 
   // 配達が終わった日は顧客台帳のほうに入っている。

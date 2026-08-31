@@ -124,7 +124,12 @@ export async function listOrders(
    */
   const filters = [
     `or=(agency_code.in.${list},niji_code.in.${list},referrer_code.in.${list},staff_code.in.${list})`,
-    "order=ordered_on.desc",
+    /*
+     * 受注日の新しい順。同じ日の中は受注番号の大きい順にする。
+     * 番号まで指定しないと同じ日のぶんの並びが決まらず、
+     * さっき入ったご注文が下のほうに出ることがある（2026-08-31）。
+     */
+    "order=ordered_on.desc,id.desc",
   ];
   if (opts.month) {
     const { from, to } = monthRange(opts.month);

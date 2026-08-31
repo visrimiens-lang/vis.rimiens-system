@@ -441,11 +441,28 @@ export function CustomerRow({
   return (
     <Fragment>
       <tr>
+        {/*
+          お名前を押すと、その方の詳細（下に開く登録内容）が出るようにする。
+          受注一覧では注文者名から詳細に飛べるのに、こちらは右端の
+          「登録内容を直す」まで目を動かさないと開けなかった。
+          押す場所は増えるが、開くものは同じ1つなので迷わない。
+        */}
         <Td>
           <div className="min-w-0">
-            <div className="truncate font-medium text-ink-100">
+            <button
+              type="button"
+              onClick={() => setEditing((v) => !v)}
+              disabled={saving}
+              aria-expanded={editing}
+              title={editing ? "詳細を閉じる" : "詳細を開く"}
+              className={
+                "block max-w-full truncate text-left font-medium text-ink-100 " +
+                "underline underline-offset-4 transition hover:text-gold-300 " +
+                "focus:outline-none focus-visible:text-gold-300 disabled:opacity-60"
+              }
+            >
               {customer.name || "（お名前未登録）"}
-            </div>
+            </button>
             {customer.nameKana ? (
               <div className="truncate text-xs text-ink-400">{customer.nameKana}</div>
             ) : null}

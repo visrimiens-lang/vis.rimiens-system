@@ -253,7 +253,10 @@ export default async function AdminOrderDetailPage({
   const [rewardResult, agencyResult, productResult, customerResult] =
     await Promise.allSettled([
       select<Row>(`rewards?select=*&order_id=eq.${id}&order=id.asc`),
-      select<Row>("agencies?select=code,name,status,code_kind&order=code.asc"),
+      // company_name / parent_name も読む。紹介元の欄に担当スタッフの所属会社を出すため。
+      select<Row>(
+        "agencies?select=code,name,status,code_kind,company_name,parent_name&order=code.asc",
+      ),
       /*
        * 商品の引き当ては @/lib/product-match に集約してある。
        * ここだけ商品名の完全一致で引いていると、OP①付きのように

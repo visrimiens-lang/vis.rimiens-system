@@ -199,9 +199,46 @@
     var walker = document.createTreeWalker(tb, NodeFilter.SHOW_TEXT, null);
     var n;
     while ((n = walker.nextNode())) {
-      if (n.nodeValue.indexOf("【") < 0) continue;
-      n.nodeValue = n.nodeValue.replace(/【[^】]*】/g, "").replace(/[ 　]{2,}/g, " ");
+      var t = n.nodeValue;
+      if (t.indexOf("【") < 0 && t.indexOf("／") < 0) continue;
+      /*
+       * 印を消し、品目の区切り（／）で改行する。
+       *
+       * 商品名は「本体 ／ 事務手数料 ／ OP① ／ OP②」と1本につながっていて、
+       * 狭い幅では途中で勝手に折り返し、どこまでが1品目か読めなかった。
+       * 品目ごとに行を分けると、何がいくらなのかがそのまま読める。
+       *
+       * 改行は「\n」を入れるだけにして、表示は CSS（white-space: pre-line）に任せる。
+       * <br> を入れるには innerHTML を書き換えることになり、
+       * 中のラジオボタンごと作り直されて選択が飛ぶ。
+       */
+      t = t.replace(/【[^】]*】/g, "").replace(/[ 　]{2,}/g, " ");
+      t = t.replace(/\s*／\s*/g, " ／\n");
+      if (n.nodeValue !== t) n.nodeValue = t;
     }
+  }
+
+  var STYLE_ID = "vis-pay-choice-style";
+
+  /**
+   * 商品の行を縦に積む。
+   *
+   * もとは「商品名｜価格」の2列で、名前が長いと左が潰れて読めなかった。
+   * 品目を縦に並べ、そのすぐ下に合計を出す形にそろえる。
+   *
+   * 見た目は CSS だけで変える。表の作り（td の並び）には触らない。
+   */
+  function injectStyle() {
+    if (document.getElementById(STYLE_ID)) return;
+    var st = document.createElement("style");
+    st.id = STYLE_ID;
+    st.textContent =
+      "table.payment-method tbody td{display:block;width:auto;text-align:left;" +
+      "white-space:pre-line;border:0;padding:2px 0;}" +
+      "table.payment-method tbody tr{display:block;padding:10px 0;}" +
+      "table.payment-method thead{display:none;}" +
+      "table.payment-method tbody td:last-child{color:" + C.goldLight + ";font-weight:600;}";
+    document.head.appendChild(st);
   }
 
   function rowsInfo() {
@@ -577,6 +614,7 @@
   function tick() {
     if (!document.querySelector('input[name="payment-method"]')) return;
     showSelectedRowOnly();
+    injectStyle();
     stripMarkers();
     if (build()) paint();
   }

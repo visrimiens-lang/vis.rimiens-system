@@ -1269,13 +1269,27 @@ export async function linkCustomer(app: {
 
   const normalized = normalizePhone(app.phone ?? "");
 
+  /*
+   * 同じ方かどうかは「電話番号 ＋ お名前」で見る。
+   *
+   * 以前は電話番号だけで突き合わせていたため、会社の代表番号のように
+   * 複数の方が同じ番号を使っていると、別の方が1人にまとめられていた。
+   * 実際、石嶋秋人 様のご注文が松本人志 様の台帳に吸い込まれ、
+   * 顧客管理にお名前が出てこなかった（2026-08-31）。
+   *
+   * お名前は、空白の入れ方だけが違うことがあるので詰めて比べる。
+   * 同じ番号でお名前が違えば、別の方として新しく台帳を作る。
+   */
+  const nameKey = (v: string) => v.replace(/[\s　]/g, "");
+
   let found: Row | null = null;
   if (normalized) {
     const tail = normalized.slice(-4);
     const rows = await select<Row>(
       `customers?select=id,name,phone,agency_code,staff_code,referrer_code&phone=like.*${encodeURIComponent(tail)}&limit=50`,
     );
-    found = rows.find((c) => normalizePhone(s_(c, "phone")) === normalized) ?? null;
+    const samePhone = rows.filter((c) => normalizePhone(s_(c, "phone")) === normalized);
+    found = samePhone.find((c) => nameKey(s_(c, "name")) === nameKey(name)) ?? null;
   }
 
   const attribution: Record<string, string> = {};

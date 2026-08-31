@@ -1380,60 +1380,20 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
       `orders?select=id&stripe_payment_id=eq.${encodeURIComponent(app.stripePaymentId)}`,
     );
     if (dup) return { ok: true, code: String(dup["id"]), message: "この決済は登録済みです。" };
-  } else {
-    /*
-     * 決済の番号が入っていないとき。
-     *
-     * 番号があれば、それを鍵にして二重登録を防げる。無いときは鍵が無いので、
-     * このままだと同じ通知が二度届いただけで受注が2件立ち、報酬も満額もう1件分
-     * 計上される。確定・支払まで進めば実際に二重払いになる。
-     *
-     * そこで「同じお客様・同じ金額の受注が、ついさっき入っていないか」を見る。
-     * 人が続けて2回申し込むことは実務上まず無いので、5分以内に同じ内容が来たら
-     * 通知の二度届きとみなして、前の受注をそのまま返す。
-     * 番号がある通常のときは、この判定は通らない（上の分岐で終わる）。
-     */
-    /*
-     * 5分以内の同じ内容は、通知の二度届きとみなして前の受注を返す。
-     * 名前と金額だけで見ると同姓同名の別人まで巻き込むので、
-     * 電話番号が分かるときはそれも一致条件に足す。
-     *
-     * 受注にはメールアドレスの列が無い（連絡先の本体は顧客台帳）。
-     * 以前ここでメールアドレスを条件にしていて、メール付きの通知が
-     * 全部この場所で失敗していた。再送は同じ内容がそのまま届くので、
-     * 電話番号の完全一致で十分見分けられる。
-     */
-    const phone5 = (app.phone || "").trim();
-    const since = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-    const recent = await selectOne<Row>(
-      `orders?select=id,amount&customer_name=eq.${encodeURIComponent(name)}` +
-        `&amount=eq.${Number(app.amount ?? 0)}` +
-        (phone5 ? `&phone=eq.${encodeURIComponent(phone5)}` : "") +
-        `&created_at=gte.${encodeURIComponent(since)}&order=id.desc`,
-    );
-    if (recent) {
-      await audit("intake", "受注の二重登録を防いだ", { type: "order", key: s_(recent, "id") }, {
-        顧客: name,
-        金額: app.amount,
-        理由: "決済の番号が無く、5分以内に同じ内容の受注があるため",
-      });
-      return {
-        ok: true,
-        code: String(recent["id"]),
-        message: "この注文は登録済みです（同じ内容が続けて届いたため）。",
-      };
-    }
-    /*
-     * 24時間以内に同じ連絡先・同額の受注があっても、そのまま登録する。
-     *
-     * 以前はここで「二重届きかもしれない」と受信箱に但し書きを残していた。
-     * ただ同じ方が続けて2台買うことも普通にあり、機械では見分けられない。
-     * 2件のご注文は2件のまま残す、という運用に決めた（2026-08-31）。
-     *
-     * 通知が本当に二度届いた場合は2件立つ。5分以内の再送は上で弾いているので、
-     * 残るのは時間を空けた再送だけ。受注一覧で気づいたらキャンセルにする。
-     */
   }
+
+  /*
+   * 決済の番号が無いときの二重登録よけは置かない。
+   *
+   * 以前は「同じお客様・同じ金額の受注が5分以内にあれば、通知の二度届きとみなす」
+   * という決め方をしていた。しかし人が続けて2回申し込むことは実際にあり、
+   * 岡崎太郎 様のご注文は4分ほどの間に2回入って、2件目が消えていた（2026-08-31）。
+   *
+   * 決済の番号があるときは、それを鍵に上で弾いている（stripe_payment_id）。
+   * 鍵の無いものを名前と金額で当て推量するより、
+   * 届いたぶんをそのまま残して、受注一覧で見分けてもらうことにした。
+   * 通知が本当に二度届いた場合は2件立つので、片方をキャンセルにする。
+   */
 
   // 渡されたコードの持ち主を見て、売上の付け先と担当者を分ける
   const who = await resolveAttribution(app.agencyCode ?? "", app.staffCode ?? "");

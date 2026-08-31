@@ -61,8 +61,6 @@ export const metadata = { title: "顧客管理（本部）｜VIS 代理店ポー
 /** 一度に読み込む上限。これを超えたら、検索して絞り込んでもらう。 */
 const LIMIT = 1000;
 
-/** 表の列数。修正欄を表いっぱいに広げるのに使う。 */
-const COLUMN_COUNT = 11;
 
 type Kind = "all" | "introduced" | "general";
 
@@ -496,7 +494,6 @@ export default async function AdminCustomersPage({
                     staffCompany={companyByCode.get(c.staffCode) ?? ""}
                     progress={progressSourceOf(c)}
                     introduced={isIntroduced(c)}
-                    columnCount={COLUMN_COUNT}
                   />
                 ))}
               </tbody>

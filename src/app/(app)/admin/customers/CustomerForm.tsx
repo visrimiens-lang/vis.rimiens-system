@@ -19,6 +19,7 @@ import {
   yamatoTrackingUrl,
   type ProgressSource,
 } from "@/components/Progress";
+import Link from "next/link";
 import { Badge, Notice, Td, jpDate } from "@/components/ui";
 
 /* ------------------------------------------------------------------
@@ -403,7 +404,6 @@ export function CustomerRow({
   staffCompany,
   progress,
   introduced,
-  columnCount,
 }: {
   customer: CustomerView;
   /** 担当代理店の名前（代理店マスタから引いたもの）。 */
@@ -422,11 +422,7 @@ export function CustomerRow({
   progress: ProgressSource;
   /** 取次店からの紹介かどうか。判定は一覧側でまとめて行っている。 */
   introduced: boolean;
-  /** 修正欄を表いっぱいに広げるための列数。 */
-  columnCount: number;
 }) {
-  const [state, save, saving] = useActionState(updateCustomerAction, initial);
-  const [editing, setEditing] = useState(false);
   /*
    * お支払いの状態は、この行の中で持つ。
    *
@@ -441,28 +437,15 @@ export function CustomerRow({
   return (
     <Fragment>
       <tr>
-        {/*
-          お名前を押すと、その方の詳細（下に開く登録内容）が出るようにする。
-          受注一覧では注文者名から詳細に飛べるのに、こちらは右端の
-          「登録内容を直す」まで目を動かさないと開けなかった。
-          押す場所は増えるが、開くものは同じ1つなので迷わない。
-        */}
+        {/* お名前からその方の詳細ページへ。受注一覧の注文者名と同じ操作にそろえる。 */}
         <Td>
           <div className="min-w-0">
-            <button
-              type="button"
-              onClick={() => setEditing((v) => !v)}
-              disabled={saving}
-              aria-expanded={editing}
-              title={editing ? "詳細を閉じる" : "詳細を開く"}
-              className={
-                "block max-w-full truncate text-left font-medium text-ink-100 " +
-                "underline underline-offset-4 transition hover:text-gold-300 " +
-                "focus:outline-none focus-visible:text-gold-300 disabled:opacity-60"
-              }
+            <Link
+              href={`/admin/customers/${encodeURIComponent(customer.id)}`}
+              className="block max-w-full truncate font-medium text-ink-100 underline underline-offset-4 transition hover:text-gold-300"
             >
               {customer.name || "（お名前未登録）"}
-            </button>
+            </Link>
             {customer.nameKana ? (
               <div className="truncate text-xs text-ink-400">{customer.nameKana}</div>
             ) : null}
@@ -566,222 +549,218 @@ export function CustomerRow({
           {fullDate(customer.contractedOn)}
         </Td>
         <Td align="right">
-          <button
-            type="button"
-            onClick={() => setEditing((v) => !v)}
-            disabled={saving}
+          <Link
+            href={`/admin/customers/${encodeURIComponent(customer.id)}`}
             className={quietBtn}
           >
-            {editing ? "閉じる" : "登録内容を直す"}
-          </button>
+            詳細を見る
+          </Link>
         </Td>
       </tr>
 
-      {editing ? (
-        <tr>
-          <td colSpan={columnCount} className="border-b border-ink-850 bg-ink-950/40 px-4 py-5">
-            <form action={save} className="space-y-4">
-              <input type="hidden" name="id" value={customer.id} />
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <label className="block">
-                  <span className={labelCls}>お名前</span>
-                  <input
-                    type="text"
-                    name="name"
-                    required
-                    maxLength={100}
-                    defaultValue={customer.name}
-                    disabled={saving}
-                    className={inputCls}
-                  />
-                </label>
-                <label className="block">
-                  <span className={labelCls}>フリガナ</span>
-                  <input
-                    type="text"
-                    name="nameKana"
-                    maxLength={100}
-                    defaultValue={customer.nameKana}
-                    disabled={saving}
-                    className={inputCls}
-                  />
-                </label>
-                <label className="block">
-                  <span className={labelCls}>電話番号</span>
-                  <input
-                    type="tel"
-                    name="phone"
-                    maxLength={30}
-                    defaultValue={customer.phone}
-                    disabled={saving}
-                    placeholder="090-1234-5678"
-                    className={`${inputCls} tabnum`}
-                  />
-                  <span className={hintCls}>
-                    出荷やお届けの連絡に使います。半角の数字とハイフンで入力してください。
-                  </span>
-                </label>
-                <label className="block">
-                  <span className={labelCls}>メールアドレス</span>
-                  <input
-                    type="email"
-                    name="email"
-                    maxLength={200}
-                    defaultValue={customer.email}
-                    disabled={saving}
-                    className={inputCls}
-                  />
-                </label>
-                <label className="block">
-                  <span className={labelCls}>郵便番号</span>
-                  <input
-                    type="text"
-                    name="zip"
-                    maxLength={8}
-                    defaultValue={customer.zip}
-                    disabled={saving}
-                    placeholder="123-4567"
-                    className={`${inputCls} tabnum max-w-[10rem]`}
-                  />
-                </label>
-                <label className="block">
-                  <span className={labelCls}>領収書のあて名</span>
-                  <input
-                    type="text"
-                    name="receiptName"
-                    maxLength={100}
-                    defaultValue={customer.receiptName}
-                    disabled={saving}
-                    className={inputCls}
-                  />
-                  <span className={hintCls}>
-                    お名前と違うあて名をご希望のときだけ入力してください。
-                  </span>
-                </label>
-              </div>
-
-              <label className="block">
-                <span className={labelCls}>住所</span>
-                <input
-                  type="text"
-                  name="address"
-                  maxLength={200}
-                  defaultValue={customer.address}
-                  disabled={saving}
-                  placeholder="都道府県から番地まで"
-                  className={inputCls}
-                />
-                <span className={hintCls}>
-                  ここがお届け先になります。出荷前であれば、直した住所で発送されます。
-                </span>
-              </label>
-
-              <label className="block">
-                <span className={labelCls}>建物名・部屋番号</span>
-                <input
-                  type="text"
-                  name="building"
-                  maxLength={100}
-                  defaultValue={customer.building}
-                  disabled={saving}
-                  className={inputCls}
-                />
-              </label>
-
-              <label className="block">
-                <span className={labelCls}>本部メモ</span>
-                <textarea
-                  name="note"
-                  rows={3}
-                  maxLength={2000}
-                  defaultValue={customer.note}
-                  disabled={saving}
-                  placeholder="やり取りの経緯など、本部で共有しておきたいことを書いてください。"
-                  className={`${inputCls} resize-y leading-relaxed`}
-                />
-                <span className={hintCls}>
-                  代理店の画面には出ません。本部の担当者だけが見られます。
-                </span>
-              </label>
-
-              {/* 「誰が売ったか」を後からでも埋められるようにする欄。
-                  一覧の「担当スタッフ」列が空欄の方を、本部が聞き取って入れる想定。 */}
-              <label className="block md:max-w-sm">
-                <span className={labelCls}>担当スタッフのコード</span>
-                <input
-                  type="text"
-                  name="staffCode"
-                  list={STAFF_CODE_LIST_ID}
-                  maxLength={20}
-                  defaultValue={customer.staffCode}
-                  disabled={saving}
-                  placeholder="例：ABCD0001"
-                  className={`${inputCls} tabnum`}
-                />
-                <span className={hintCls}>
-                  このお申し込みを取った方のコードです。入力欄を押すと、登録されているコードから選べます。
-                  分からないときは空のままにしてください。
-                  {customer.staffCode
-                    ? staffName
-                      ? `　いまの登録：${customer.staffCode}（${staffName}）`
-                      : `　いまの登録：${customer.staffCode}（このコードは代理店一覧に見当たりません）`
-                    : ""}
-                </span>
-              </label>
-
-              <div className="rounded-lg border border-ink-800 bg-ink-900/60 px-4 py-3 text-xs leading-relaxed text-ink-400">
-                担当代理店（{customer.agencyCode || "未設定"}）と紹介元（
-                {customer.referrerCode || "なし"}）は、報酬のお支払い先に直結するため、
-                この画面からは変えられません。付け替えが必要なときは本部内でご相談ください。
-                また、お客様の登録を消すことはできません。
-                {customer.serialNo ? `　製造番号：${customer.serialNo}` : ""}
-                {customer.trackingNo ? `　送り状番号：${customer.trackingNo}` : ""}
-              </div>
-
-              <PadSubscriptionRow customer={customer} />
-
-              <div className="flex flex-wrap items-center gap-2">
-                <button type="submit" disabled={saving} className={primaryBtn}>
-                  {saving ? "保存中…" : "この内容で保存する"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setEditing(false)}
-                  disabled={saving}
-                  className={quietBtn}
-                >
-                  やめる
-                </button>
-              </div>
-            </form>
-
-            {state.error ? (
-              <div className="mt-3">
-                <Notice tone="bad">{state.error}</Notice>
-              </div>
-            ) : null}
-            {state.ok ? (
-              <div className="mt-3">
-                <Notice tone="info">{state.ok}</Notice>
-              </div>
-            ) : null}
-          </td>
-        </tr>
-      ) : null}
-
-      {!editing && (state.ok || state.error) ? (
-        <tr>
-          <td colSpan={columnCount} className="border-b border-ink-850 px-4 pb-4">
-            {state.error ? (
-              <Notice tone="bad">{state.error}</Notice>
-            ) : (
-              <Notice tone="info">{state.ok}</Notice>
-            )}
-          </td>
-        </tr>
-      ) : null}
     </Fragment>
+  );
+}
+
+
+/**
+ * お客様1名ぶんの登録内容を直す欄。
+ *
+ * もとは一覧の行の下に開くアコーディオンだったが、
+ * 詳細は専用ページ（/admin/customers/[id]）で見る形に変えたので、
+ * ここは中身だけを持つ部品にして、そのページから使う。
+ */
+export function CustomerEditForm({
+  customer,
+  staffName = "",
+}: {
+  customer: CustomerView;
+  /** 担当スタッフの名前（代理店マスタから引いたもの）。案内文に添える。 */
+  staffName?: string;
+}) {
+  const [state, save, saving] = useActionState(updateCustomerAction, initial);
+
+  return (
+    <div>
+        <form action={save} className="space-y-4">
+          <input type="hidden" name="id" value={customer.id} />
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="block">
+              <span className={labelCls}>お名前</span>
+              <input
+                type="text"
+                name="name"
+                required
+                maxLength={100}
+                defaultValue={customer.name}
+                disabled={saving}
+                className={inputCls}
+              />
+            </label>
+            <label className="block">
+              <span className={labelCls}>フリガナ</span>
+              <input
+                type="text"
+                name="nameKana"
+                maxLength={100}
+                defaultValue={customer.nameKana}
+                disabled={saving}
+                className={inputCls}
+              />
+            </label>
+            <label className="block">
+              <span className={labelCls}>電話番号</span>
+              <input
+                type="tel"
+                name="phone"
+                maxLength={30}
+                defaultValue={customer.phone}
+                disabled={saving}
+                placeholder="090-1234-5678"
+                className={`${inputCls} tabnum`}
+              />
+              <span className={hintCls}>
+                出荷やお届けの連絡に使います。半角の数字とハイフンで入力してください。
+              </span>
+            </label>
+            <label className="block">
+              <span className={labelCls}>メールアドレス</span>
+              <input
+                type="email"
+                name="email"
+                maxLength={200}
+                defaultValue={customer.email}
+                disabled={saving}
+                className={inputCls}
+              />
+            </label>
+            <label className="block">
+              <span className={labelCls}>郵便番号</span>
+              <input
+                type="text"
+                name="zip"
+                maxLength={8}
+                defaultValue={customer.zip}
+                disabled={saving}
+                placeholder="123-4567"
+                className={`${inputCls} tabnum max-w-[10rem]`}
+              />
+            </label>
+            <label className="block">
+              <span className={labelCls}>領収書のあて名</span>
+              <input
+                type="text"
+                name="receiptName"
+                maxLength={100}
+                defaultValue={customer.receiptName}
+                disabled={saving}
+                className={inputCls}
+              />
+              <span className={hintCls}>
+                お名前と違うあて名をご希望のときだけ入力してください。
+              </span>
+            </label>
+          </div>
+
+          <label className="block">
+            <span className={labelCls}>住所</span>
+            <input
+              type="text"
+              name="address"
+              maxLength={200}
+              defaultValue={customer.address}
+              disabled={saving}
+              placeholder="都道府県から番地まで"
+              className={inputCls}
+            />
+            <span className={hintCls}>
+              ここがお届け先になります。出荷前であれば、直した住所で発送されます。
+            </span>
+          </label>
+
+          <label className="block">
+            <span className={labelCls}>建物名・部屋番号</span>
+            <input
+              type="text"
+              name="building"
+              maxLength={100}
+              defaultValue={customer.building}
+              disabled={saving}
+              className={inputCls}
+            />
+          </label>
+
+          <label className="block">
+            <span className={labelCls}>本部メモ</span>
+            <textarea
+              name="note"
+              rows={3}
+              maxLength={2000}
+              defaultValue={customer.note}
+              disabled={saving}
+              placeholder="やり取りの経緯など、本部で共有しておきたいことを書いてください。"
+              className={`${inputCls} resize-y leading-relaxed`}
+            />
+            <span className={hintCls}>
+              代理店の画面には出ません。本部の担当者だけが見られます。
+            </span>
+          </label>
+
+          {/* 「誰が売ったか」を後からでも埋められるようにする欄。
+              一覧の「担当スタッフ」列が空欄の方を、本部が聞き取って入れる想定。 */}
+          <label className="block md:max-w-sm">
+            <span className={labelCls}>担当スタッフのコード</span>
+            <input
+              type="text"
+              name="staffCode"
+              list={STAFF_CODE_LIST_ID}
+              maxLength={20}
+              defaultValue={customer.staffCode}
+              disabled={saving}
+              placeholder="例：ABCD0001"
+              className={`${inputCls} tabnum`}
+            />
+            <span className={hintCls}>
+              このお申し込みを取った方のコードです。入力欄を押すと、登録されているコードから選べます。
+              分からないときは空のままにしてください。
+              {customer.staffCode
+                ? staffName
+                  ? `　いまの登録：${customer.staffCode}（${staffName}）`
+                  : `　いまの登録：${customer.staffCode}（このコードは代理店一覧に見当たりません）`
+                : ""}
+            </span>
+          </label>
+
+          <div className="rounded-lg border border-ink-800 bg-ink-900/60 px-4 py-3 text-xs leading-relaxed text-ink-400">
+            担当代理店（{customer.agencyCode || "未設定"}）と紹介元（
+            {customer.referrerCode || "なし"}）は、報酬のお支払い先に直結するため、
+            この画面からは変えられません。付け替えが必要なときは本部内でご相談ください。
+            また、お客様の登録を消すことはできません。
+            {customer.serialNo ? `　製造番号：${customer.serialNo}` : ""}
+            {customer.trackingNo ? `　送り状番号：${customer.trackingNo}` : ""}
+          </div>
+
+          <PadSubscriptionRow customer={customer} />
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="submit" disabled={saving} className={primaryBtn}>
+              {saving ? "保存中…" : "この内容で保存する"}
+            </button>
+          </div>
+        </form>
+
+      {state.error ? (
+        <div className="mt-3">
+          <Notice tone="bad">{state.error}</Notice>
+        </div>
+      ) : null}
+      {state.ok ? (
+        <div className="mt-3">
+          <Notice tone="info">{state.ok}</Notice>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

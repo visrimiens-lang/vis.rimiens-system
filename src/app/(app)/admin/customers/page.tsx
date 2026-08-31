@@ -39,7 +39,8 @@ import {
   FilterText,
   SortableTh,
 } from "@/components/SortableTh";
-import { codeKindLabel } from "@/lib/labels";
+import { codeKindLabel, companyNameOf } from "@/lib/labels";
+import { paymentMethodLabel } from "@/lib/payment-status";
 import { CustomerRow, STAFF_CODE_LIST_ID, type CustomerView } from "./CustomerForm";
 
 const BASE = "/admin/customers";
@@ -61,7 +62,7 @@ export const metadata = { title: "顧客管理（本部）｜VIS 代理店ポー
 const LIMIT = 1000;
 
 /** 表の列数。修正欄を表いっぱいに広げるのに使う。 */
-const COLUMN_COUNT = 10;
+const COLUMN_COUNT = 11;
 
 type Kind = "all" | "introduced" | "general";
 
@@ -83,7 +84,7 @@ const SORT_COLUMNS = [
   "staff",
   "referrer",
   "progress",
-  "review",
+  "method",
   "payment",
   "ship",
   "contracted",
@@ -266,6 +267,11 @@ export default async function AdminCustomersPage({
   }
 
   const nameByCode = new Map(agencies.map((a) => [a.code, a.name]));
+  /*
+   * 担当スタッフの所属会社。紹介元の欄に添える。
+   * スタッフ（区分02）は company_name、無ければ上位の代理店名を使う（companyNameOf）。
+   */
+  const companyByCode = new Map(agencies.map((a) => [a.code, companyNameOf(a)]));
 
   // 検索は、お名前・フリガナ・電話番号のどれかに含まれていれば当たりにする
   const matches = (c: CustomerView) => {
@@ -301,7 +307,7 @@ export default async function AdminCustomersPage({
     staff: (c) => c.staffCode,
     referrer: (c) => c.referrerCode,
     progress: (c) => progressValue(c),
-    review: (c) => c.reviewStatus,
+    method: (c) => paymentMethodLabel(c.paymentMethod),
     payment: (c) => c.paymentStatus,
     ship: (c) => c.shipStatus,
     contracted: (c) => c.contractedOn,
@@ -457,6 +463,7 @@ export default async function AdminCustomersPage({
                   <SortableTh column="staff" label="担当スタッフ" sort={sort} basePath={BASE} params={params} />
                   <SortableTh column="referrer" label="紹介元" sort={sort} basePath={BASE} params={params} />
                   <SortableTh column="progress" label="進み具合" sort={sort} basePath={BASE} params={params} />
+                  <SortableTh column="method" label="決済方法" sort={sort} basePath={BASE} params={params} />
                   <SortableTh column="payment" label="お支払い" sort={sort} basePath={BASE} params={params} />
                   <SortableTh column="ship" label="出荷" sort={sort} basePath={BASE} params={params} />
                   <SortableTh column="contracted" label="ご契約日" sort={sort} basePath={BASE} params={params} />
@@ -471,6 +478,7 @@ export default async function AdminCustomersPage({
                     agencyName={nameByCode.get(c.agencyCode) ?? ""}
                     referrerName={nameByCode.get(c.referrerCode) ?? ""}
                     staffName={nameByCode.get(c.staffCode) ?? ""}
+                    staffCompany={companyByCode.get(c.staffCode) ?? ""}
                     progress={progressSourceOf(c)}
                     introduced={isIntroduced(c)}
                     columnCount={COLUMN_COUNT}

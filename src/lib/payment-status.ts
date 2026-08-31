@@ -39,6 +39,35 @@ export function paymentMethodLabel(method: string | null | undefined): string {
 }
 
 /**
+ * 画面に出すお支払いの言葉。決済方法によって言い方を変える。
+ *
+ * 保存値は「着金待ち」「決済完了」の2つだけ（PAYMENT_STATUSES）で、
+ * ここで変えるのは見せ方だけ。値そのものは決済方法によらず共通にしておかないと、
+ * 絞り込みや集計が方法ごとにばらけてしまう。
+ *
+ *   銀行振込 … お金が振り込まれたかどうかなので「着金待ち → 着金完了」
+ *   アプラス … 信販の手続きが進んでいる最中なので「決済中 → 決済完了」
+ *   その他　 … 保存値のまま
+ *
+ * 2026-08-31 の依頼。本部が画面を見て着金を確認するとき、
+ * 振込なのに「決済完了」と出ていると入金済みかどうかが読み取りにくい。
+ */
+export function paymentStatusLabel(
+  method: string | null | undefined,
+  status: string | null | undefined,
+): string {
+  const s = (status ?? "").trim();
+  const m = (method ?? "").trim();
+  if (m === "振込" || m === "銀行振込") {
+    return s === "決済完了" ? "着金完了" : "着金待ち";
+  }
+  if (isLoanMethod(m)) {
+    return s === "決済完了" ? "決済完了" : "決済中";
+  }
+  return s;
+}
+
+/**
  * 受注が入った時点のお支払いステータス。
  *   クレジットカード（Stripe・スクエア）… 決済が済んでから通知が来るので「決済完了」
  *   銀行振込・代引き・信販　　　　　　 … お金はまだ動いていないので「着金待ち」

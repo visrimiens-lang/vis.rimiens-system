@@ -1,6 +1,10 @@
 "use client";
 
-import { isManualPaymentMethod, paymentMethodLabel } from "@/lib/payment-status";
+import {
+  isManualPaymentMethod,
+  paymentMethodLabel,
+  paymentStatusLabel,
+} from "@/lib/payment-status";
 import { Fragment, useActionState, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Search, X } from "lucide-react";
@@ -271,10 +275,10 @@ function PaymentStatusCell({
   if (!editable) {
     return (
       <div className="whitespace-nowrap">
-        <Status value={paymentStatus} tone={paymentTone(paymentStatus)} />
-        {methodLabel ? (
-          <div className="mt-1 text-xs text-ink-400">{methodLabel}</div>
-        ) : null}
+        <Status
+          value={paymentStatusLabel(method, paymentStatus) || paymentStatus}
+          tone={paymentTone(paymentStatus)}
+        />
       </div>
     );
   }
@@ -300,19 +304,21 @@ function PaymentStatusCell({
 
   return (
     <div className="whitespace-nowrap">
+      {/*
+        出す言葉は決済方法で変える（振込は着金、アプラスは決済）。
+        保存する値は「着金待ち／決済完了」のままで、見せ方だけを変えている。
+      */}
       <StatusToggle
         label="お支払いの状態"
         value={done ? "決済完了" : "着金待ち"}
         disabled={pending}
         onPick={pick}
         options={[
-          { value: "着金待ち", label: "着金待ち", tone: "bad" },
-          { value: "決済完了", label: "決済完了", tone: "good" },
+          { value: "着金待ち", label: paymentStatusLabel(method, "着金待ち"), tone: "bad" },
+          { value: "決済完了", label: paymentStatusLabel(method, "決済完了"), tone: "good" },
         ]}
       />
-      <div className="mt-1 text-xs text-ink-400">
-        {pending ? "保存中…" : methodLabel}
-      </div>
+      {pending ? <div className="mt-1 text-xs text-ink-400">保存中…</div> : null}
       {error ? (
         <div className="mt-1 text-xs leading-snug text-bad-500">{error}</div>
       ) : null}
@@ -394,6 +400,7 @@ export function CustomerRow({
   agencyName,
   referrerName,
   staffName,
+  staffCompany,
   progress,
   introduced,
   columnCount,
@@ -405,6 +412,8 @@ export function CustomerRow({
   referrerName: string;
   /** 担当スタッフの名前（代理店マスタから引いたもの）。無ければ空。 */
   staffName: string;
+  /** 担当スタッフが属している会社の名前。紹介元の欄に添える。 */
+  staffCompany: string;
   /**
    * 進み具合のもとになる状態。
    * 顧客台帳と受注では言葉が違う（審査完了／承認）ため、
@@ -480,6 +489,11 @@ export function CustomerRow({
             <span className="text-ink-500">未記録</span>
           )}
         </Td>
+        {/*
+          紹介元。取次店から紹介された分はそのコードを出す。
+          そうでない分は「一般」だけだと誰が売ったのか読み取れないので、
+          担当スタッフの所属会社を添える（2026-08-31 の依頼）。
+        */}
         <Td>
           {introduced ? (
             <div className="min-w-0">
@@ -490,11 +504,22 @@ export function CustomerRow({
               </div>
             </div>
           ) : (
-            <Badge>一般</Badge>
+            <div className="min-w-0">
+              <Badge>一般</Badge>
+              {staffCompany ? (
+                <div className="mt-1 truncate text-xs text-ink-300" title={staffCompany}>
+                  {staffCompany}
+                </div>
+              ) : null}
+            </div>
           )}
         </Td>
         <Td>
           <Progress {...progress} paymentStatus={payStatus} compact />
+        </Td>
+        {/* 決済方法は絞り込みにも使うので、お支払いとは別の列に分けて出す */}
+        <Td className="whitespace-nowrap text-ink-200">
+          {paymentMethodLabel(customer.paymentMethod) || "—"}
         </Td>
         <Td>
           <PaymentStatusCell

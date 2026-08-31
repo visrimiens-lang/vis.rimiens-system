@@ -8,7 +8,7 @@ import {
   aplusUrlPending,
   paymentMethodLabel,
   paymentStatusOf,
-  reviewStatusLabel,
+  paymentStatusLabel,
 } from "@/lib/payment-status";
 import { select } from "@/lib/db";
 import { agencyTypeOf, companyNameOf, rankLabel } from "@/lib/labels";
@@ -144,7 +144,6 @@ const SORT_COLUMNS = [
   "quantity",
   "amount",
   "payment",
-  "review",
   "pay",
   "payee",
   "staff",
@@ -589,7 +588,6 @@ export default async function AdminOrdersPage({
     quantity: (o) => o.quantity || 1,
     amount: (o) => o.amount,
     payment: (o) => paymentMethodLabel(o.paymentMethod),
-    review: (o) => reviewStatusLabel(o.paymentMethod, o.reviewResult),
     pay: (o) => paymentStatusOf(o.paymentMethod, o.paymentStatus),
     payee: (o) => payeeCodeOf(o),
     staff: (o) => nameByCode.get(o.staffCode) || o.staffCode,
@@ -977,7 +975,6 @@ export default async function AdminOrdersPage({
                 <SortableTh column="quantity" label="台数" sort={sort} basePath={BASE} params={params} align="right" />
                 <SortableTh column="amount" label="金額（税込）" sort={sort} basePath={BASE} params={params} align="right" />
                 <SortableTh column="payment" label="決済方法" sort={sort} basePath={BASE} params={params} />
-                <SortableTh column="review" label="審査" sort={sort} basePath={BASE} params={params} />
                 <SortableTh column="pay" label="お支払い" sort={sort} basePath={BASE} params={params} />
                 <SortableTh column="payee" label="代理店" sort={sort} basePath={BASE} params={params} />
                 <SortableTh column="staff" label="担当スタッフ" sort={sort} basePath={BASE} params={params} />
@@ -1038,19 +1035,31 @@ export default async function AdminOrdersPage({
                     <Td className="whitespace-nowrap">
                       {paymentMethodLabel(o.paymentMethod) || <span className="text-ink-400">—</span>}
                     </Td>
-                    {/* 審査：アプラス（信販）だけ審査がある。銀行振込・クレカは自動で完了。
-                        申込URLを送るまで審査は始まらないので、未送付なら目印を出す。 */}
+                    {/*
+                      お支払い：着金待ち／決済完了。変更は受注詳細から。
+                      出す言葉は決済方法で変える（振込は着金、アプラスは決済）。
+
+                      審査の列は 2026-08-31 に外した。アプラス以外は自動で完了になり、
+                      同じことを進み具合でも出しているため。
+                      ただし「URL未送付」は、送るまで審査が始まらず受注が止まる合図なので、
+                      列と一緒に消さずにここへ移した。
+                    */}
                     <Td className="whitespace-nowrap">
-                      <StatusBadge status={reviewStatusLabel(o.paymentMethod, o.reviewResult)} />
+                      <StatusBadge
+                        status={
+                          o.voided
+                            ? "キャンセル"
+                            : paymentStatusLabel(
+                                o.paymentMethod,
+                                paymentStatusOf(o.paymentMethod, o.paymentStatus),
+                              ) || paymentStatusOf(o.paymentMethod, o.paymentStatus)
+                        }
+                      />
                       {!o.voided && aplusUrlPending(o.paymentMethod, o.aplusUrlSentAt) ? (
                         <span className="ml-1.5 align-middle text-xs text-warn-500">
                           URL未送付
                         </span>
                       ) : null}
-                    </Td>
-                    {/* お支払い：着金待ち／決済完了。変更は受注詳細から。 */}
-                    <Td className="whitespace-nowrap">
-                      <StatusBadge status={o.voided ? "キャンセル" : paymentStatusOf(o.paymentMethod, o.paymentStatus)} />
                     </Td>
                     <Td>
                       {payee ? (

@@ -1,5 +1,5 @@
 import "server-only";
-import { audit, insert, select, selectOne, update } from "./db";
+import { audit, count, insert, remove, select, selectOne, update } from "./db";
 import { todayInJapan } from "./jst";
 import { usesPortal } from "./labels";
 import { OFFICIAL_LINE_URL, QR2_APPROVED, buildQrUrl, tossUpUrl } from "./qr";
@@ -422,7 +422,51 @@ export async function receive(
   const [row] = await insert<Row>("inbox", [
     { source, external_id: externalId, form_id: formId, payload },
   ]);
+  /*
+   * 新しく1件受け取ったついでに、保存期間を過ぎたものを片付ける。
+   * 受信箱が増えるのは受け取ったときだけなので、ここに置けば
+   * 定期実行の仕組みを足さなくても保存期間を守れる。
+   */
+  await purgeInbox();
   return { id: Number(row["id"]), duplicate: false };
+}
+
+/** 受信箱に残す日数。これを過ぎた受信記録は消す。 */
+export const INBOX_KEEP_DAYS = 7;
+
+/**
+ * 古い受信記録を消す。
+ *
+ * 受信箱は「届いたものが受注・申込になったか」を確かめるための控えで、
+ * 確かめ終わったあとまで持っておく必要がない。
+ * 中身には氏名・電話・住所がそのまま入っているので、
+ * 用が済んだものを溜め続けるのは個人情報の持ちすぎでもある。
+ *
+ * 取り込めていないものも消す（2026-08-31 の依頼「過ぎたものは削除」）。
+ * 取り込めていない＝受注が作られなかった、ではない点に注意。
+ * いま残っている7件も受注そのものは登録済みで、
+ * 「報酬が立たなかった」という但し書きが付いているだけ。
+ * それでも消えるのは警告のほうなので、1週間のうちに受信箱を見て
+ * 片付ける運用とセットで使う。
+ *
+ * 消せなくても業務は止めない（呼び出し元は受注の登録が本番）。
+ */
+export async function purgeInbox(days = INBOX_KEEP_DAYS): Promise<number> {
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  try {
+    const n = await count("inbox", `created_at=lt.${cutoff}`);
+    if (n === 0) return 0;
+    await remove(`inbox?created_at=lt.${cutoff}`);
+    await audit("system", "受信箱の自動削除", { type: "inbox" }, {
+      保存日数: days,
+      削除件数: n,
+      これより前を削除: cutoff,
+    });
+    return n;
+  } catch {
+    // 消せなくても、受け取り自体は続ける
+    return 0;
+  }
 }
 
 /** 受信箱の1件を「処理済み」にする。 */

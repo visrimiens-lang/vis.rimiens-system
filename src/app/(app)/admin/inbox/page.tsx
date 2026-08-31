@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import { selectAll } from "@/lib/db";
+import { INBOX_KEEP_DAYS } from "@/lib/intake";
 import {
   Badge,
   Card,
@@ -335,6 +336,16 @@ export default async function AdminInboxPage({
           <p className="text-ink-400">
             同じ内容が二度届いても、一度取り込めているものは二重に登録しません。
             取り込みに失敗したものは、送り直していただくとやり直します。
+          </p>
+          {/*
+            控えには氏名・電話・住所がそのまま入っているので、用が済んだものは残さない。
+            消えるのはこの控えだけで、取り込み済みの受注・顧客・代理店はそのまま残る。
+          */}
+          <p className="text-ink-400">
+            ここに残るのは {INBOX_KEEP_DAYS} 日ぶんです。
+            それより古い控えは、次に申込・決済が届いたときにまとめて消えます。
+            取り込めていないものも消えるので、
+            <span className="text-ink-100">{INBOX_KEEP_DAYS} 日以内に片付けてください</span>。
           </p>
         </div>
       </Card>

@@ -18,7 +18,7 @@ import {
 const initial: OrderActionState = {};
 
 const primaryBtn =
-  "rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-on-gold transition hover:bg-brand-strong disabled:cursor-not-allowed disabled:bg-ink-700 disabled:text-ink-300";
+  "whitespace-nowrap rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-on-gold transition hover:bg-brand-strong disabled:cursor-not-allowed disabled:bg-ink-700 disabled:text-ink-300";
 const dangerBtn =
   "rounded-lg border border-bad-500/50 bg-bad-500/15 px-4 py-2.5 text-sm font-semibold text-bad-100 transition hover:bg-bad-500/25 disabled:cursor-not-allowed disabled:opacity-50";
 const inputCls =

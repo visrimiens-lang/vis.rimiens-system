@@ -152,7 +152,7 @@ const DEFAULT_SORT: SortState = { column: "await", desc: true };
 const COLUMN_COUNT = 11;
 
 const primaryBtn =
-  "rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-on-gold transition hover:bg-brand-strong";
+  "whitespace-nowrap rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-on-gold transition hover:bg-brand-strong";
 const rowBtn =
   "whitespace-nowrap rounded-lg border border-ink-700 bg-ink-850 px-2.5 py-1.5 text-xs font-medium text-ink-100 transition hover:border-ink-600 hover:text-ink-50";
 const quietLink =

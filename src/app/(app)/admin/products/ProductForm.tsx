@@ -22,9 +22,9 @@ const labelCls = "text-xs font-medium tracking-wide text-ink-400";
 const hintCls = "mt-1.5 block text-xs leading-relaxed text-ink-500";
 
 const primaryBtn =
-  "rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-on-gold transition hover:bg-brand-strong disabled:cursor-not-allowed disabled:bg-ink-700 disabled:text-ink-300";
+  "whitespace-nowrap rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-on-gold transition hover:bg-brand-strong disabled:cursor-not-allowed disabled:bg-ink-700 disabled:text-ink-300";
 const quietBtn =
-  "rounded-lg border border-ink-700 px-3.5 py-2 text-sm font-medium text-ink-200 transition hover:border-ink-600 hover:text-ink-50 disabled:cursor-not-allowed disabled:text-ink-500";
+  "whitespace-nowrap rounded-lg border border-ink-700 px-3.5 py-2 text-sm font-medium text-ink-200 transition hover:border-ink-600 hover:text-ink-50 disabled:cursor-not-allowed disabled:text-ink-500";
 const stopBtn =
   "rounded-lg border border-warn-500/50 bg-warn-500/10 px-3.5 py-2 text-sm font-medium text-warn-100 transition hover:bg-warn-500/20 disabled:cursor-not-allowed disabled:opacity-50";
 

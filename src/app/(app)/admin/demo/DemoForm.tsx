@@ -56,9 +56,9 @@ const inputCls =
 const labelCls = "text-xs font-medium tracking-wide text-ink-400";
 const hintCls = "mt-1.5 block text-xs leading-relaxed text-ink-500";
 const primaryBtn =
-  "rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-on-gold transition hover:bg-brand-strong disabled:cursor-not-allowed disabled:bg-ink-700 disabled:text-ink-300";
+  "whitespace-nowrap rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-on-gold transition hover:bg-brand-strong disabled:cursor-not-allowed disabled:bg-ink-700 disabled:text-ink-300";
 const quietBtn =
-  "rounded-lg border border-ink-700 px-3 py-1.5 text-sm font-medium text-ink-200 transition hover:border-ink-600 hover:text-ink-50 disabled:cursor-not-allowed disabled:text-ink-500";
+  "whitespace-nowrap rounded-lg border border-ink-700 px-3 py-1.5 text-sm font-medium text-ink-200 transition hover:border-ink-600 hover:text-ink-50 disabled:cursor-not-allowed disabled:text-ink-500";
 
 /* ---------- 入力欄のまとまり ---------- */
 
@@ -122,7 +122,7 @@ function DetailFields({
               貸出中
             </div>
             <span className={hintCls}>
-              貸出中の台の状態は、この欄では変えられません。返ってきたら「返却を登録」から記録してください。
+              貸出中の台の状態は、この欄では変えられません。返ってきたら「返却」から記録してください。
             </span>
           </div>
         ) : (
@@ -143,7 +143,7 @@ function DetailFields({
             <span className={hintCls}>
               {returned
                 ? "「在庫」に戻すと、ふたたび貸し出せるようになります。"
-                : "貸出中・返却済は、一覧の「貸出を登録」「返却を登録」から付きます。"}
+                : "貸出中・返却済は、一覧の「貸出」「返却」から付きます。"}
             </span>
           </label>
         )}
@@ -319,7 +319,7 @@ export function DemoForm({ agencies }: { agencies: AgencyOption[] }) {
 type Panel = "none" | "edit" | "lend" | "return";
 
 /**
- * 表の1行と、「内容を修正」「貸出を登録」「返却を登録」で開く入力欄。
+ * 表の1行と、「修正」「貸出」「返却」で開く入力欄。
  * どれか1つだけが開くようにして、どの手続きをしているかを見失わないようにしている。
  */
 export function DemoRow({
@@ -436,7 +436,7 @@ export function DemoRow({
               disabled={busy}
               className={quietBtn}
             >
-              {panel === "edit" ? "閉じる" : "内容を修正"}
+              {panel === "edit" ? "閉じる" : "修正"}
             </button>
             {canLend ? (
               <button
@@ -445,7 +445,7 @@ export function DemoRow({
                 disabled={busy}
                 className={quietBtn}
               >
-                {panel === "lend" ? "閉じる" : "貸出を登録"}
+                {panel === "lend" ? "閉じる" : "貸出"}
               </button>
             ) : null}
             {canReturn ? (
@@ -455,7 +455,7 @@ export function DemoRow({
                 disabled={busy}
                 className={quietBtn}
               >
-                {panel === "return" ? "閉じる" : "返却を登録"}
+                {panel === "return" ? "閉じる" : "返却"}
               </button>
             ) : null}
           </div>

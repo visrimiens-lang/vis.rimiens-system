@@ -1,7 +1,15 @@
 "use client";
 
 import { isManualPaymentMethod, paymentMethodLabel } from "@/lib/payment-status";
-import { Fragment, useActionState, useEffect, useRef, useState, useTransition } from "react";
+import {
+  Fragment,
+  useActionState,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { useRouter } from "next/navigation";
 import { Check, ChevronDown, Search, X } from "lucide-react";
 import {
@@ -211,28 +219,37 @@ function StatusPicker({
         ? "border-bad-500/60 bg-bad-500/20 text-bad-200"
         : "text-bad-300";
 
-  // 開いている間だけ、外を押す・Esc・スクロールで閉じる
+  const place = useCallback(() => {
+    const r = btnRef.current?.getBoundingClientRect();
+    if (!r) return;
+    setAt({ top: r.bottom + 4, left: r.left, width: Math.max(r.width, 132) });
+  }, []);
+
+  /*
+   * 開いている間は、Esc で閉じ、スクロールや画面幅の変化には位置を合わせ直す。
+   *
+   * はじめは「動いたら閉じる」にしていたが、押した拍子に入れ物が少し動いて
+   * scroll が飛び、開いた直後に閉じてしまって一度も出せなかった。
+   * 追従させれば、その取りこぼしが起きない。
+   */
   useEffect(() => {
     if (!open) return;
-    const close = () => setOpen(false);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
     };
     document.addEventListener("keydown", onKey);
-    // スクロールで位置がずれるので、動いたら閉じる（追従させるより迷いが少ない）
-    window.addEventListener("scroll", close, true);
-    window.addEventListener("resize", close);
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
     return () => {
       document.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", close, true);
-      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
     };
-  }, [open]);
+  }, [open, place]);
 
   function toggle() {
     if (disabled) return;
-    const r = btnRef.current?.getBoundingClientRect();
-    if (r) setAt({ top: r.bottom + 4, left: r.left, width: Math.max(r.width, 132) });
+    place();
     setOpen((v) => !v);
   }
 

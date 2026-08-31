@@ -24,11 +24,16 @@
  *
  * ■ 触ってよい場所・いけない場所
  *
- * 商品行（table.payment-method の中）の文字は絶対に書き換えない。
+ * 商品行（table.payment-method の中）は、td や innerHTML をまとめて書き換えない。
  * 書き換えると UTAGE が行を作り直し、選んだ内容が先頭に戻る
  * （2026-08-27 に VIS-BUMP-TOTAL でこの不具合を出した）。
- * ここでやるのは、選ばれていない行を display:none にすることと、
- * 行を押すことだけ。
+ * ここでやるのは、選ばれていない行を display:none にすること、行を押すこと、
+ * それと stripMarkers() が文字の節だけから【】の印を消すことの3つ。
+ *
+ * 印そのものを商品側の表示名から消してはいけない。
+ * 消すと支払方法を見分けられなくなり、銀行振込・アプラスの選択肢が
+ * 画面から丸ごと消える（2026-08-31 に実際に起こした）。
+ * 見た目が気になるときは、この stripMarkers() で表示だけを落とす。
  *
  * ■ オーダーバンプは使わない
  *
@@ -55,16 +60,13 @@
     goldLight: "#e7cf95",
   };
 
-  /* 支払方法ごとの見せ方。UTAGE の行の文字から種類を判定する。 */
+  /* 支払方法ごとの見せ方。種類の判定は rowInfo() が行う。 */
   var KINDS = [
     {
       key: "card",
       title: "クレジットカード",
       lead: "VISA / Mastercard / JCB / AMEX / Diners（一回払い）",
       note: null,
-      match: function (t) {
-        return !/アプラス|ローン|銀行振込|振込/.test(t);
-      },
     },
     {
       key: "bank",
@@ -75,9 +77,6 @@
         "※ 注文者と同じ本人名義にてお振込みをお願いいたします。\n" +
         "※ 振込手数料はお客様のご負担となります。\n" +
         "※ ご入金の確認後に、商品の手配へ進みます。",
-      match: function (t) {
-        return /銀行振込|振込/.test(t) && !/アプラス|ローン/.test(t);
-      },
     },
     {
       key: "aplus",
@@ -88,9 +87,6 @@
         "※ この画面ではお支払いは確定しません。URLからのお手続きが必要です。\n" +
         "※ 分割回数によって、お支払い総額が変わる場合があります。\n" +
         "※ 審査の結果によっては、ご希望に添えない場合がございます。",
-      match: function (t) {
-        return /アプラス|ローン/.test(t);
-      },
     },
   ];
 
@@ -165,13 +161,47 @@
   /**
    * 行1つぶんの中身。表示名の印から、支払方法とオプションの有無を読む。
    * 商品側の「連携フォームでの表記」を変えるときは、ここも合わせること。
+   *
+   * 読んだ結果は行の要素に覚えさせる。
+   * このあと stripMarkers() が画面から【銀行振込】などの印を消すため、
+   * 毎回読み直すと二度目から全部クレジット扱いになり、
+   * 銀行振込・アプラスの選択肢が画面から消える（2026-08-31 に実際に起きた）。
+   * UTAGE が行を作り直したときは新しい要素になり、印の付いた文字から読み直される。
    */
   function rowInfo(r) {
-    var t = textOf(r);
-    var kind = "card";
-    if (/アプラス|ローン/.test(t)) kind = "aplus";
-    else if (/銀行振込|振込/.test(t)) kind = "bank";
-    return { radio: r, kind: kind, op1: /OP①/.test(t), op2: /OP②/.test(t) };
+    if (!r.__visKind) {
+      var t = textOf(r);
+      var kind = "card";
+      if (/アプラス|ローン/.test(t)) kind = "aplus";
+      else if (/銀行振込|振込/.test(t)) kind = "bank";
+      r.__visKind = kind;
+      r.__visOp1 = /OP①/.test(t);
+      r.__visOp2 = /OP②/.test(t);
+    }
+    return { radio: r, kind: r.__visKind, op1: r.__visOp1, op2: r.__visOp2 };
+  }
+
+  /**
+   * 【銀行振込】のような、支払方法を見分けるためだけの印を画面から消す。
+   *
+   * 印は商品側の表示名に入れてあり、種類の判定に要る。
+   * ただしお客様には不要で、商品名が長いところへ入るため行が折り返して読みにくい。
+   * そこで、判定を済ませてから表示だけを消す。
+   *
+   * 消すのは文字の節（テキストノード）だけにする。
+   * td の textContent をまとめて書き換えると中のラジオボタンごと作り直され、
+   * 選んだ支払方法が元に戻ってしまう（VIS-BUMP-TOTAL で起きた不具合）。
+   */
+  function stripMarkers() {
+    var tb = document.querySelector("table.payment-method");
+    if (!tb) return;
+    radios().forEach(rowInfo); // 先に種類を読んで覚えさせる
+    var walker = document.createTreeWalker(tb, NodeFilter.SHOW_TEXT, null);
+    var n;
+    while ((n = walker.nextNode())) {
+      if (n.nodeValue.indexOf("【") < 0) continue;
+      n.nodeValue = n.nodeValue.replace(/【[^】]*】/g, "").replace(/[ 　]{2,}/g, " ");
+    }
   }
 
   function rowsInfo() {
@@ -547,6 +577,7 @@
   function tick() {
     if (!document.querySelector('input[name="payment-method"]')) return;
     showSelectedRowOnly();
+    stripMarkers();
     if (build()) paint();
   }
 

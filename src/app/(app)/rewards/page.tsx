@@ -172,10 +172,30 @@ function groupByOwner(
 }
 
 /** 担当ひとりぶんの行。会社ごとの小計の下にぶら下がる。 */
-function MemberRow({ g, showReward }: { g: OwnerGroup; showReward: boolean }) {
+/*
+ * 担当ひとりぶんの行。
+ *
+ * company は「その会社に1人しかいなくて小計を挟まない」ときだけ渡す。
+ * 渡さないと会社名がどこにも出ず、字下げされた行が直前の会社の一員に見える。
+ * 実際、株式会社ウィッシュの北川さんが株式会社HANAの3人目に、
+ * 株式会社ミライの有村さんが株式会社comvaceの3人目に見えていた（2026-08-31）。
+ * 「2 名分」と書いてある下に3人並ぶので、支払通知を作るときに取り違える。
+ */
+function MemberRow({
+  g,
+  showReward,
+  company,
+}: {
+  g: OwnerGroup;
+  showReward: boolean;
+  company?: string;
+}) {
   return (
     <tr>
-      <Td numeric className="pl-8 text-ink-300">
+      <Td numeric className={company ? "text-ink-300" : "pl-8 text-ink-300"}>
+        {company ? (
+          <span className="mb-0.5 block font-semibold text-ink-100">{company}</span>
+        ) : null}
         {g.code}
       </Td>
       <Td>{g.name}</Td>
@@ -375,7 +395,7 @@ export default async function RewardsPage({
    */
   const companyRows: (
     | { kind: "company"; company: string; count: number; units: number; reward: number | null; payout: number | null }
-    | { kind: "member"; g: OwnerGroup }
+    | { kind: "member"; g: OwnerGroup; company?: string }
   )[] = [];
   {
     /*
@@ -395,7 +415,7 @@ export default async function RewardsPage({
       const units = list.reduce((s, g) => s + g.units, 0);
       // 会社に1人しかいないときは、小計を挟まずその人の行だけ出す
       if (list.length === 1) {
-        companyRows.push({ kind: "member", g: list[0] });
+        companyRows.push({ kind: "member", g: list[0], company });
         continue;
       }
       /*
@@ -804,7 +824,12 @@ export default async function RewardsPage({
                     ) : null}
                   </tr>
                 ) : (
-                  <MemberRow key={row.g.code} g={row.g} showReward={showReward} />
+                  <MemberRow
+                    key={row.g.code}
+                    g={row.g}
+                    showReward={showReward}
+                    company={row.company}
+                  />
                 ),
               )}
             </tbody>

@@ -1263,6 +1263,12 @@ export async function linkCustomer(app: {
   paymentStatus?: string;
   /** 顧客台帳の決済方法。本部の顧客管理で「銀行振込／クレジットカード／アプラス」を出すのに使う。 */
   paymentMethod?: string;
+  /**
+   * ご契約日。受注日をそのまま入れる。
+   * 入れていなかったため、QR2 から入ったお客様は顧客管理の
+   * 「ご契約日」が空のままだった（2026-08-31）。
+   */
+  contractedOn?: string;
 }): Promise<number | null> {
   const name = (app.name || "").trim();
   if (!name) return null;
@@ -1286,7 +1292,7 @@ export async function linkCustomer(app: {
   if (normalized) {
     const tail = normalized.slice(-4);
     const rows = await select<Row>(
-      `customers?select=id,name,phone,agency_code,staff_code,referrer_code&phone=like.*${encodeURIComponent(tail)}&limit=50`,
+      `customers?select=id,name,phone,contracted_on,agency_code,staff_code,referrer_code&phone=like.*${encodeURIComponent(tail)}&limit=50`,
     );
     const samePhone = rows.filter((c) => normalizePhone(s_(c, "phone")) === normalized);
     found = samePhone.find((c) => nameKey(s_(c, "name")) === nameKey(name)) ?? null;
@@ -1309,6 +1315,10 @@ export async function linkCustomer(app: {
      */
     if (app.paymentStatus) patch["payment_status"] = app.paymentStatus;
     if (app.paymentMethod) patch["payment_method"] = app.paymentMethod;
+    // ご契約日は「入っていなければ入れる」。最初のご契約の日を残したいため。
+    if (app.contractedOn && !s_(found, "contracted_on")) {
+      patch["contracted_on"] = app.contractedOn;
+    }
     if (Object.keys(patch).length > 0) {
       await update(`customers?id=eq.${encodeURIComponent(s_(found, "id"))}`, patch);
     }
@@ -1325,6 +1335,7 @@ export async function linkCustomer(app: {
       building: app.building || null,
       ...(app.paymentStatus ? { payment_status: app.paymentStatus } : {}),
       ...(app.paymentMethod ? { payment_method: app.paymentMethod } : {}),
+      ...(app.contractedOn ? { contracted_on: app.contractedOn } : {}),
       ...attribution,
     },
   ]);
@@ -1553,6 +1564,7 @@ export async function registerOrder(app: OrderApplication): Promise<IntakeResult
         referrerCode,
         paymentStatus,
         paymentMethod: normalizePaymentMethod(app.paymentMethod ?? "").value ?? undefined,
+        contractedOn: todayInJapan(),
       });
     const initialPay = initialPaymentStatus(
       normalizePaymentMethod(app.paymentMethod ?? "").value,

@@ -589,7 +589,8 @@ function CancelCell({
     if (!ok) return;
     setError("");
     const data = new FormData();
-    data.set("id", target.id);
+    // 受け口（order-actions の readOrderId）が見るのは "orderId"。"id" では届かない。
+    data.set("orderId", target.id);
     data.set("shipStatus", next === "キャンセル" ? "キャンセル" : "出荷待ち");
     data.set("confirmCancel", "true");
     startTransition(async () => {

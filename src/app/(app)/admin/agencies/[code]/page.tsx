@@ -689,11 +689,7 @@ export default async function AgencyDetailPage({
       </Card>
 
       <Card
-        title={
-          slotModel === "area"
-            ? "スタッフ枠　エリア枠（全国60社）"
-            : "スタッフ枠　種別ごと"
-        }
+        title={slotModel === "area" ? "スタッフ枠　エリア枠（全国60社）" : "スタッフ枠"}
       >
         {!slots ? (
           <EmptyState
@@ -813,8 +809,7 @@ export default async function AgencyDetailPage({
             <thead>
               <tr>
                 <Th>コード</Th>
-                <Th>法人名・お名前</Th>
-                <Th>代理店種別</Th>
+                <Th>お名前</Th>
                 <Th>所属会社、種別</Th>
                 <Th>稼働状況</Th>
                 <Th>登録日</Th>
@@ -843,7 +838,6 @@ export default async function AgencyDetailPage({
                       ) : null}
                     </div>
                   </Td>
-                  <Td>{kindLabel(c.codeKind)}</Td>
                   {/*
                     所属会社と種別。コードやランクだけでは、どこの誰なのかが読み取れない。
                     会社名はスタッフなら company_name、無ければ上位の代理店名（companyNameOf）。

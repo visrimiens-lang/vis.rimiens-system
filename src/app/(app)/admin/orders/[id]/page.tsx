@@ -345,7 +345,6 @@ export default async function AdminOrderDetailPage({
    */
   const rewardLeftOver = voided && confirmed + pending > 0;
 
-  const needsCheck = matchStatus === "要確認";
   const rewardOff = product !== null && str(product, "reward_target") === "対象外";
   const productUnknown = Boolean(productName) && product === null;
 
@@ -391,18 +390,6 @@ export default async function AdminOrderDetailPage({
                 }`
           }
         />
-        <StatTile
-          label="照合の状態"
-          value={matchStatus || "未設定"}
-          tone={needsCheck ? "warn" : "default"}
-          hint={
-            needsCheck
-              ? "紹介元が確定していません"
-              : referrerCode
-                ? `紹介元 ${referrerCode}`
-                : "紹介元のいない受注です"
-          }
-        />
       </div>
 
       {voided ? (
@@ -427,14 +414,6 @@ export default async function AdminOrderDetailPage({
               帳簿の上でも消す場合は、担当者にご相談ください。
             </p>
           ) : null}
-        </Notice>
-      ) : null}
-
-      {needsCheck ? (
-        <Notice tone="warn">
-          このご注文は紹介元が特定できていません（照合の状態が「要確認」）。
-          このままでは報酬の支払先が決まらないため、下の「審査結果と紹介元を直す」で
-          紹介元コードを確かめてから、照合の状態を「照合済」または「直販」に変えてください。
         </Notice>
       ) : null}
 
@@ -557,9 +536,6 @@ export default async function AdminOrderDetailPage({
           <Field label="紹介元の取次店">
             <AgencyCell code={referrerCode} names={names} />
           </Field>
-          <Field label="照合の状態">
-            <StatusBadge status={matchStatus} />
-          </Field>
         </Fields>
 
         {/*
@@ -567,11 +543,6 @@ export default async function AdminOrderDetailPage({
           あとから本部が入れ直して報酬を立て直せるようにする。
         */}
         <AttributionForm id={String(order["id"])} current={str(order, "agency_code")} />
-        <p className="border-t border-ink-800 px-5 py-3.5 text-xs leading-relaxed text-ink-400">
-          照合の状態は、お客様の電話番号とトスアップ（事前のご紹介）を突き合わせた結果です。
-          「照合済」は紹介元が1件に決まったもの、「要確認」は候補が複数あったもの、
-          「直販」は紹介のないご注文です。
-        </p>
       </Card>
 
       <Card title="出荷">

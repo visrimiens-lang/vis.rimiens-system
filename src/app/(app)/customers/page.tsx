@@ -698,7 +698,6 @@ export default async function CustomersPage({
                   basePath={BASE}
                   params={params}
                 />
-                <Th>照合ステータス</Th>
               </tr>
             </thead>
             <tbody>
@@ -797,9 +796,6 @@ export default async function CustomersPage({
                           <span className="text-ink-500">送り状番号はまだありません</span>
                         )}
                       </div>
-                    </Td>
-                    <Td>
-                      <StatusBadge status={o.matchStatus} />
                     </Td>
                   </tr>
                 );

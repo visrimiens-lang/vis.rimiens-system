@@ -114,16 +114,14 @@ function shipViewOf(o: { shippingStatus: string; deliveredAt: string }): string 
 }
 
 /**
- * 決済方法と照合ステータスも、受注が無い状態で選べるように並べておく。
+ * 決済方法も、受注が無い状態で選べるように並べておく。
  *
  * ここに書く文字は、必ずデータベースに保存されている値と同じにすること。
  * 受注テーブルの決済方法は 九州信販／アプラス／ライフカード／Stripe／スクエア／代引き の
- * 6つだけ、照合ステータスは 照合済／要確認／直販 の3つだけを受け付けるようになっている
+ * 6つだけを受け付けるようになっている
  * （supabase/part2.sql の orders）。ここに無い言葉（「クレジット」など）を並べると、
  * 選んでも必ず0件になる選択肢が出てしまう。
  *
- * 照合ステータスの「直販」は、新しい受注に何も入っていないときの初期値なので、
- * 実際にはいちばん件数が多くなる。これが選べないと本部が直販ぶんを絞り込めない。
  */
 const PAYMENT_METHODS = [
   "九州信販",
@@ -134,7 +132,6 @@ const PAYMENT_METHODS = [
   "代引き",
   "振込",
 ];
-const MATCH_STATUSES = ["照合済", "要確認", "直販"];
 
 /** 並び替えに使える列。過去に配った URL が効かなくならないよう、名前は変えない。 */
 const SORT_COLUMNS = [
@@ -150,7 +147,6 @@ const SORT_COLUMNS = [
   "owner",
   "ship",
   "tracking",
-  "match",
 ];
 
 const DEFAULT_SORT: SortState = { column: "date", desc: true };
@@ -430,7 +426,6 @@ export default async function AdminOrdersPage({
   const selectedCode = readParam(params, "code") || ALL;
   const selectedShip = readParam(params, "ship") || ALL;
   const selectedPay = readParam(params, "pay") || ALL;
-  const selectedMatch = readParam(params, "match") || ALL;
   const rawTodo = readParam(params, "todo");
   const todo = TODO_VALUES.includes(rawTodo) ? rawTodo : "";
   const keyword = readParam(params, "keyword");
@@ -461,7 +456,7 @@ export default async function AdminOrdersPage({
   const header = (
     <PageHeader
       title="受注一覧（全代理店）"
-      description="全代理店の受注をまとめて確認できます。期間・代理店・出荷状況・決済方法・照合状態で絞り込め、注文者名や送り状番号でも探せます。表の見出しを押すと並び替わります。キャンセルと審査否決の受注は、売上・支払対象額には数えていません。"
+      description="全代理店の受注をまとめて確認できます。期間・代理店・出荷状況・決済方法で絞り込め、注文者名や送り状番号でも探せます。表の見出しを押すと並び替わります。キャンセルと審査否決の受注は、売上・支払対象額には数えていません。"
       actions={<AutoRefresh seconds={REFRESH_SECONDS} label="受注一覧" />}
     />
   );
@@ -557,19 +552,12 @@ export default async function AdminOrdersPage({
     PAYMENT_METHODS,
     selectedPay,
   );
-  const matchOptions = buildOptions(
-    periodOrders,
-    (o) => o.matchStatus,
-    MATCH_STATUSES,
-    selectedMatch,
-  );
 
   /* --- 絞り込み --- */
   const filteredRows = periodOrders.filter((o) => {
     if (selectedCode !== ALL && !codesOf(o).includes(selectedCode)) return false;
     if (selectedShip !== ALL && shipViewOf(o) !== selectedShip) return false;
     if (selectedPay !== ALL && o.paymentMethod !== selectedPay) return false;
-    if (selectedMatch !== ALL && o.matchStatus !== selectedMatch) return false;
     // 未出荷・送り状番号なしは「これから手を動かすもの」なので、
     // 取り消された受注は最初から外す。
     if (todo === TODO_UNSHIPPED && (o.voided || ["出荷済", "配達完了"].includes(shipViewOf(o))))
@@ -594,7 +582,6 @@ export default async function AdminOrdersPage({
     owner: (o) => o.ownerCode,
     ship: (o) => shipViewOf(o),
     tracking: (o) => o.trackingNo,
-    match: (o) => o.matchStatus,
   };
   const rows = sortRows(filteredRows, sort.column, sort.desc, accessors);
 
@@ -602,14 +589,12 @@ export default async function AdminOrdersPage({
     selectedCode !== ALL ||
     selectedShip !== ALL ||
     selectedPay !== ALL ||
-    selectedMatch !== ALL ||
     Boolean(todo) ||
     Boolean(keyword);
   const clearHref = buildListHref(BASE, params, {
     code: "",
     ship: "",
     pay: "",
-    match: "",
     todo: "",
     keyword: "",
   });
@@ -642,7 +627,6 @@ export default async function AdminOrdersPage({
   const rejectedCount = voidedRows.filter(
     (o) => o.reviewResult === "否決" && o.shippingStatus !== "キャンセル",
   ).length;
-  const needsCheck = liveRows.filter((o) => o.matchStatus === "要確認");
   const noTracking = liveRows.filter((o) => !o.trackingNo).length;
   const groups = groupByPayee(rows, nameByCode);
   const missingPayable = groups.some((g) => g.payable === null);
@@ -653,7 +637,6 @@ export default async function AdminOrdersPage({
     selectedCode === ALL ? null : selectedCode,
     selectedShip === ALL ? null : selectedShip,
     selectedPay === ALL ? null : selectedPay,
-    selectedMatch === ALL ? null : selectedMatch,
     todo ? TODO_LABELS[todo] : null,
     keyword ? `「${keyword}」` : null,
   ]
@@ -703,13 +686,6 @@ export default async function AdminOrdersPage({
             value={selectedPay}
             options={payOptions}
             width="w-48"
-          />
-          <FilterSelect
-            name="match"
-            label="照合状態"
-            value={selectedMatch}
-            options={matchOptions}
-            width="w-44"
           />
           <FilterText
             name="keyword"
@@ -817,14 +793,6 @@ export default async function AdminOrdersPage({
           上の受注件数・台数・売上合計と、代理店ごとの集計・支払対象額も、この
           {LIMIT.toLocaleString("ja-JP")} 件分だけを数えた金額です。
           振込の金額を確かめるときは、期間を月で絞り込んでからご覧ください。
-        </Notice>
-      ) : null}
-
-      {needsCheck.length > 0 ? (
-        <Notice tone="warn">
-          紹介元が特定できていない受注が {needsCheck.length} 件あります（照合ステータスが「要確認」）。
-          このぶんは報酬の支払先が決まっていないため、下の表では色を付けています。
-          受注の紹介元をご確認のうえ、照合ステータスを更新してください。
         </Notice>
       ) : null}
 
@@ -956,7 +924,6 @@ export default async function AdminOrdersPage({
                       : `代理店 ${selectedCode}${selectedName ? `（${selectedName}）` : ""}`,
                     selectedShip === ALL ? null : `出荷状況「${selectedShip}」`,
                     selectedPay === ALL ? null : `決済方法「${selectedPay}」`,
-                    selectedMatch === ALL ? null : `照合状態「${selectedMatch}」`,
                     todo ? TODO_LABELS[todo] : null,
                     keyword ? `キーワード「${keyword}」` : null,
                   ]
@@ -981,19 +948,16 @@ export default async function AdminOrdersPage({
                 <SortableTh column="owner" label="担当コード" sort={sort} basePath={BASE} params={params} />
                 <SortableTh column="ship" label="出荷状況" sort={sort} basePath={BASE} params={params} />
                 <SortableTh column="tracking" label="送り状番号" sort={sort} basePath={BASE} params={params} />
-                <SortableTh column="match" label="照合状態" sort={sort} basePath={BASE} params={params} />
               </tr>
             </thead>
             <tbody>
               {rows.map((o) => {
                 const payee = payeeCodeOf(o);
-                const attention = !o.voided && o.matchStatus === "要確認";
                 return (
                   <tr
                     key={o.recordId}
                     className={cn(
                       o.voided && "bg-bad-500/10",
-                      attention && "bg-warn-500/10",
                     )}
                   >
                     <Td numeric className="whitespace-nowrap">
@@ -1118,9 +1082,6 @@ export default async function AdminOrdersPage({
                       ) : (
                         <span className="text-ink-400">未入力</span>
                       )}
-                    </Td>
-                    <Td>
-                      <StatusBadge status={o.matchStatus} />
                     </Td>
                   </tr>
                 );

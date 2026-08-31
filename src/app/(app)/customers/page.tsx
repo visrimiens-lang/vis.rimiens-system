@@ -33,7 +33,7 @@ import {
   yamatoTrackingUrl,
   type ProgressStep,
 } from "@/components/Progress";
-import { paymentMethodLabel, paymentStatusOf, reviewStatusLabel } from "@/lib/payment-status";
+import { paymentMethodLabel, paymentStatusOf } from "@/lib/payment-status";
 import {
   ALL,
   buildListHref,
@@ -79,7 +79,6 @@ const SORT_COLUMNS = [
   "owner",
   "staff",
   "progress",
-  "review",
   "pay",
   "ship",
 ];
@@ -434,7 +433,6 @@ export default async function CustomersPage({
     owner: (o) => o.ownerCode,
     staff: (o) => o.staffName || o.staffCode,
     progress: (o) => o.percent,
-    review: (o) => reviewStatusLabel(o.paymentMethod, o.reviewResult),
     pay: (o) => o.payStatus,
     ship: (o) => o.shippingStatus,
   };
@@ -678,13 +676,6 @@ export default async function CustomersPage({
                   params={params}
                 />
                 <SortableTh
-                  column="review"
-                  label="審査"
-                  sort={sort}
-                  basePath={BASE}
-                  params={params}
-                />
-                <SortableTh
                   column="pay"
                   label="お支払い"
                   sort={sort}
@@ -768,9 +759,6 @@ export default async function CustomersPage({
                         paymentMethod={o.paymentMethod}
                         paymentStatus={o.payStatus}
                       />
-                    </Td>
-                    <Td>
-                      <StatusBadge status={reviewStatusLabel(o.paymentMethod, o.reviewResult)} />
                     </Td>
                     <Td>
                       <StatusBadge status={o.stopped ? "キャンセル" : o.payStatus} />

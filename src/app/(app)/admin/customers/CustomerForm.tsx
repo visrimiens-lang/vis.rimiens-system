@@ -503,15 +503,14 @@ export function CustomerRow({
                 {referrerName ? `　${referrerName}` : ""}
               </div>
             </div>
-          ) : (
-            <div className="min-w-0">
-              <Badge>一般</Badge>
-              {staffCompany ? (
-                <div className="mt-1 truncate text-xs text-ink-300" title={staffCompany}>
-                  {staffCompany}
-                </div>
-              ) : null}
+          ) : staffCompany ? (
+            /* 取次店の紹介でないときは所属会社だけを出す。
+               「一般」の札は、会社名が出ていれば言い足す意味がない。 */
+            <div className="min-w-0 truncate text-ink-200" title={staffCompany}>
+              {staffCompany}
             </div>
+          ) : (
+            <span className="text-ink-500">—</span>
           )}
         </Td>
         <Td>

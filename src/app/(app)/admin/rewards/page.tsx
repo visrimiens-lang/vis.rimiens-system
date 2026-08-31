@@ -629,6 +629,7 @@ export default async function AdminRewardsPage({
     adj?: string;
     sort?: string;
     dir?: string;
+    lines?: string;
     done?: string;
     n?: string;
     amt?: string;
@@ -670,6 +671,18 @@ export default async function AdminRewardsPage({
   const keyword = readParam(params, "keyword");
   const openCodeRaw = readParam(params, "open");
   const openCode = /^[A-Za-z0-9-]{1,20}$/.test(openCodeRaw) ? openCodeRaw : "";
+  /*
+   * 明細に「未確定」を出すかどうか。既定は出さない（2026-08-31 の依頼）。
+   *
+   * この画面は振り込む相手と額を決めるためのもので、
+   * 配送が終わっていない未確定はまだ払えない。混ざっていると
+   * どれを振り込むのかが読み取りにくい。
+   * 取消になった元の報酬も、どの合計にも入らないので既定では隠す。
+   *
+   * 隠すのは表示だけ。合計・支払い待ち・支払通知の下書きは
+   * これまでどおり全部の行から計算する（openLines はそのまま使う）。
+   */
+  const showAllLines = readParam(params, "lines") === "all";
   const payCodeRaw = readParam(params, "pay");
   const payCode = /^[A-Za-z0-9-]{1,20}$/.test(payCodeRaw) ? payCodeRaw : "";
   // 下書きで相殺を差し引くかどうか。ALL（指定なし）なら、あとで自動で決める。
@@ -861,6 +874,11 @@ export default async function AdminRewardsPage({
 
   /* --- 明細を開いている代理店 --- */
   const openLines = openCode ? (allByCode.get(openCode) ?? []) : [];
+  /** 明細の表に出す行。合計には使わない。 */
+  const openShownLines = showAllLines
+    ? openLines
+    : openLines.filter((l) => l.status === "確定" || l.status === "支払済");
+  const hiddenLineCount = openLines.length - openShownLines.length;
   const openAgency = openCode ? (agencyByCode.get(openCode) ?? null) : null;
   const openTotals = openCode ? totalsOf(openLines) : EMPTY_TOTALS;
   const openOffsetLines = offsetLinesOf(openLines);
@@ -1408,7 +1426,8 @@ export default async function AdminRewardsPage({
                             <span className="text-sm font-medium text-ink-100">
                               {g.code}
                               {g.name ? `　${g.name}` : ""} の明細（{jpMonthLabel(month)}・
-                              {openLines.length.toLocaleString("ja-JP")}件）
+                              {openShownLines.length.toLocaleString("ja-JP")}件
+                              {showAllLines ? "" : "・確定ぶんのみ"}）
                             </span>
                             <span>
                               ランク：{rankLabel(g.rank, g.agency?.codeKind)}
@@ -1423,11 +1442,30 @@ export default async function AdminRewardsPage({
                                 受注の情報を読み込めませんでした（金額と状態はそのまま表示しています）
                               </span>
                             ) : null}
+                            {/*
+                              既定は確定ぶんだけ。まだ払えない未確定を混ぜないため。
+                              上の合計や支払通知は、隠した行も含めて計算している。
+                            */}
+                            <a
+                              href={linkTo({
+                                open: openCode,
+                                lines: showAllLines ? undefined : "all",
+                              })}
+                              className="underline underline-offset-4 hover:text-gold-300"
+                            >
+                              {showAllLines
+                                ? "確定ぶんだけ出す"
+                                : hiddenLineCount > 0
+                                  ? `未確定・取消も出す（${hiddenLineCount.toLocaleString("ja-JP")}件）`
+                                  : "未確定・取消も出す"}
+                            </a>
                           </div>
 
-                          {openLines.length === 0 ? (
+                          {openShownLines.length === 0 ? (
                             <p className="text-sm text-ink-400">
-                              この月の明細はありません。
+                              {openLines.length > 0
+                                ? "確定した報酬はまだありません。配送が完了すると確定します。"
+                                : "この月の明細はありません。"}
                             </p>
                           ) : (
                             <Table>
@@ -1445,7 +1483,7 @@ export default async function AdminRewardsPage({
                                 </tr>
                               </thead>
                               <tbody>
-                                {openLines.map((l) => {
+                                {openShownLines.map((l) => {
                                   const order = orderById.get(l.orderId) ?? null;
                                   const negative = l.amount < 0;
                                   return (

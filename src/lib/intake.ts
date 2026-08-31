@@ -1375,24 +1375,21 @@ function normalizePaymentMethod(raw: string): { value: string | null; raw: strin
 export async function registerOrder(app: OrderApplication): Promise<IntakeResult> {
   const name = (app.customerName || "").trim();
   if (!name) return { ok: false, message: "注文者名が入っていません。" };
-  if (app.stripePaymentId) {
-    const dup = await selectOne<Row>(
-      `orders?select=id&stripe_payment_id=eq.${encodeURIComponent(app.stripePaymentId)}`,
-    );
-    if (dup) return { ok: true, code: String(dup["id"]), message: "この決済は登録済みです。" };
-  }
-
   /*
-   * 決済の番号が無いときの二重登録よけは置かない。
+   * 二重登録よけは置かない（2026-08-31 の決定）。
    *
-   * 以前は「同じお客様・同じ金額の受注が5分以内にあれば、通知の二度届きとみなす」
-   * という決め方をしていた。しかし人が続けて2回申し込むことは実際にあり、
-   * 岡崎太郎 様のご注文は4分ほどの間に2回入って、2件目が消えていた（2026-08-31）。
+   * もとは3段構えだった。
+   *   ・決済の番号（stripe_payment_id）が同じなら弾く
+   *   ・同じお客様・同じ金額の受注が5分以内にあれば弾く
+   *   ・24時間以内にあれば受信箱に但し書きを残す
    *
-   * 決済の番号があるときは、それを鍵に上で弾いている（stripe_payment_id）。
-   * 鍵の無いものを名前と金額で当て推量するより、
-   * 届いたぶんをそのまま残して、受注一覧で見分けてもらうことにした。
-   * 通知が本当に二度届いた場合は2件立つので、片方をキャンセルにする。
+   * どれも「同じ方が続けて2回申し込むことはない」という前提だったが、
+   * 実際には起きる。岡崎太郎 様のご注文は4分ほどの間に2回入って2件目が消え、
+   * 安林将 様は2台目が1台目の台帳に吸い込まれていた。
+   *
+   * 届いたぶんはそのまま残す。通知が本当に二度届いた場合は2件立つので、
+   * 受注一覧で見つけて、顧客管理のキャンセル欄から片方を止める
+   * （報酬も一緒に取り消される）。
    */
 
   // 渡されたコードの持ち主を見て、売上の付け先と担当者を分ける

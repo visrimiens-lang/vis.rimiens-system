@@ -200,6 +200,8 @@ export default async function AdminCustomersPage({
   const sort = parseSort(params, DEFAULT_SORT, SORT_COLUMNS);
 
   let customers: CustomerView[] = [];
+  /** お客様の番号 → その方の受注（キャンセルの欄で使う）。 */
+  const ordersByCustomer = new Map<string, { id: string; shipStatus: string }[]>();
   let agencies: Agency[] = [];
   let loadError: string | null = null;
 
@@ -217,7 +219,7 @@ export default async function AdminCustomersPage({
        * データベースは書き換えない。表示だけを補う。
        */
       select<Row>(
-        `orders?select=customer_id,payment_method&customer_id=not.is.null&order=id.desc`,
+        `orders?select=id,customer_id,payment_method,ship_status&customer_id=not.is.null&order=id.desc`,
       ).catch(() => [] as Row[]),
     ]);
 
@@ -227,6 +229,21 @@ export default async function AdminCustomersPage({
       const method = s_(o, "payment_method");
       if (!key || !method || methodByCustomer.has(key)) continue;
       methodByCustomer.set(key, method);
+    }
+
+    /*
+     * お客様1名ぶんの受注。キャンセルの欄に使う。
+     *
+     * キャンセルは報酬の取り消しにつながるので、対象の受注が1件に決まるときだけ
+     * この画面から操作できるようにする。2件以上あるときは、どれを止めるのかを
+     * ここでは決められないため、受注一覧へ回す。
+     */
+    for (const o of orderRows) {
+      const key = s_(o, "customer_id");
+      if (!key) continue;
+      const list = ordersByCustomer.get(key) ?? [];
+      list.push({ id: s_(o, "id"), shipStatus: s_(o, "ship_status") });
+      ordersByCustomer.set(key, list);
     }
 
     customers = rows.map((r) => {
@@ -479,6 +496,7 @@ export default async function AdminCustomersPage({
                   <SortableTh column="method" label="決済方法" sort={sort} basePath={BASE} params={params} />
                   <SortableTh column="payment" label="お支払い" sort={sort} basePath={BASE} params={params} />
                   <SortableTh column="ship" label="出荷" sort={sort} basePath={BASE} params={params} />
+                  <Th>キャンセル</Th>
                   <SortableTh column="contracted" label="ご契約日" sort={sort} basePath={BASE} params={params} />
                   <Th align="right">修正</Th>
                 </tr>
@@ -492,6 +510,7 @@ export default async function AdminCustomersPage({
                     referrerName={nameByCode.get(c.referrerCode) ?? ""}
                     staffName={nameByCode.get(c.staffCode) ?? ""}
                     staffCompany={companyByCode.get(c.staffCode) ?? ""}
+                    orders={ordersByCustomer.get(c.id) ?? []}
                     progress={progressSourceOf(c)}
                     introduced={isIntroduced(c)}
                   />

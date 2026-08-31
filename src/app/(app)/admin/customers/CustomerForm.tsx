@@ -8,6 +8,7 @@ import {
 import { Fragment, useActionState, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Search, X } from "lucide-react";
+import { updateShipmentAction } from "@/actions/order-actions";
 import {
   setCustomerPaymentStatusAction,
   stopPadSubscriptionAction,
@@ -390,6 +391,85 @@ function Status({ value, tone }: { value: string; tone: Tone }) {
   return <Badge tone={tone}>{value}</Badge>;
 }
 
+/**
+ * 受注を止める（キャンセルにする）欄。
+ *
+ * キャンセルにすると、その受注から立った報酬が取り消される（同額のマイナスが立つ）。
+ * 押し間違いの影響が大きいので、選んだあとに一度確かめてから送る。
+ *
+ * 対象の受注が1件に決まるときだけ、この画面から操作できるようにする。
+ * 2件以上あるとどれを止めるのか決められないため、受注一覧へ回す。
+ */
+function CancelCell({
+  customerName,
+  orders,
+}: {
+  customerName: string;
+  orders: { id: string; shipStatus: string }[];
+}) {
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState("");
+  const router = useRouter();
+
+  const live = orders.filter((o) => o.shipStatus !== "キャンセル");
+  const cancelled = orders.length > 0 && live.length === 0;
+
+  if (cancelled) {
+    return <Badge tone="bad">キャンセル</Badge>;
+  }
+  if (orders.length === 0) {
+    return <span className="text-ink-500">—</span>;
+  }
+  if (live.length > 1) {
+    return (
+      <span className="whitespace-nowrap text-xs text-ink-400">
+        受注が {live.length} 件あります
+      </span>
+    );
+  }
+
+  const target = live[0];
+
+  function cancel() {
+    const ok = window.confirm(
+      `${customerName || "このお客様"} のご注文をキャンセルにします。\n` +
+        "この受注から発生した報酬も取り消されます（同額のマイナスが立ちます）。\n" +
+        "よろしいですか。",
+    );
+    if (!ok) return;
+    setError("");
+    const data = new FormData();
+    data.set("id", target.id);
+    data.set("shipStatus", "キャンセル");
+    data.set("confirmCancel", "true");
+    startTransition(async () => {
+      const res = await updateShipmentAction({}, data);
+      if (res.error) setError(res.error);
+      else router.refresh();
+    });
+  }
+
+  return (
+    <div className="whitespace-nowrap">
+      <button
+        type="button"
+        onClick={cancel}
+        disabled={pending}
+        className={
+          "whitespace-nowrap rounded-lg border border-bad-500/50 bg-bad-500/10 px-2.5 py-1.5 " +
+          "text-sm font-medium text-bad-100 transition hover:bg-bad-500/20 " +
+          "focus:outline-none focus:ring-2 focus:ring-bad-500/40 disabled:opacity-60"
+        }
+      >
+        {pending ? "取消中…" : "キャンセルにする"}
+      </button>
+      {error ? (
+        <div className="mt-1 text-xs leading-snug text-bad-500">{error}</div>
+      ) : null}
+    </div>
+  );
+}
+
 /* ---------- 一覧の1行 ---------- */
 
 /**
@@ -402,6 +482,7 @@ export function CustomerRow({
   referrerName,
   staffName,
   staffCompany,
+  orders,
   progress,
   introduced,
 }: {
@@ -414,6 +495,8 @@ export function CustomerRow({
   staffName: string;
   /** 担当スタッフが属している会社の名前。紹介元の欄に添える。 */
   staffCompany: string;
+  /** このお客様の受注。キャンセルの欄で使う。 */
+  orders: { id: string; shipStatus: string }[];
   /**
    * 進み具合のもとになる状態。
    * 顧客台帳と受注では言葉が違う（審査完了／承認）ため、
@@ -434,9 +517,12 @@ export function CustomerRow({
    */
   const [payStatus, setPayStatus] = useState(customer.paymentStatus);
 
+  /* キャンセルされた受注は、受注一覧と同じように行を赤く出す。 */
+  const cancelled = orders.length > 0 && orders.every((o) => o.shipStatus === "キャンセル");
+
   return (
     <Fragment>
-      <tr>
+      <tr className={cancelled ? "bg-bad-500/10" : undefined}>
         {/* お名前からその方の詳細ページへ。受注一覧の注文者名と同じ操作にそろえる。 */}
         <Td>
           <div className="min-w-0">
@@ -544,6 +630,9 @@ export function CustomerRow({
               <span className="ml-1 text-ink-400">お届け状況</span>
             </a>
           ) : null}
+        </Td>
+        <Td>
+          <CancelCell customerName={customer.name} orders={orders} />
         </Td>
         <Td numeric className="whitespace-nowrap">
           {fullDate(customer.contractedOn)}

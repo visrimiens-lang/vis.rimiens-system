@@ -4,7 +4,11 @@ import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import { select, selectOne } from "@/lib/db";
 import { PRODUCT_COLUMNS, buildProductMatcher } from "@/lib/product-match";
-import { paymentMethodLabel, paymentStatusOf } from "@/lib/payment-status";
+import {
+  paymentMethodLabel,
+  paymentStatusLabel,
+  paymentStatusOf,
+} from "@/lib/payment-status";
 import { rankLabel, rankShort } from "@/lib/labels";
 import { digitsOf } from "@/lib/list-params";
 import {
@@ -464,9 +468,15 @@ export default async function AdminOrderDetailPage({
           <Field label="お支払い方法">
             {paymentMethodLabel(str(order, "payment_method")) || str(order, "payment_method")}
           </Field>
+          {/* 出す言葉は決済方法で変える（振込は着金、アプラスは決済）。一覧と同じ言い方。 */}
           <Field label="お支払い">
             <StatusBadge
-              status={paymentStatusOf(str(order, "payment_method"), str(order, "payment_status"))}
+              status={
+                paymentStatusLabel(
+                  str(order, "payment_method"),
+                  paymentStatusOf(str(order, "payment_method"), str(order, "payment_status")),
+                ) || paymentStatusOf(str(order, "payment_method"), str(order, "payment_status"))
+              }
             />
           </Field>
           <Field label="審査結果">

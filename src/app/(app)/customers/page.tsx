@@ -33,7 +33,11 @@ import {
   yamatoTrackingUrl,
   type ProgressStep,
 } from "@/components/Progress";
-import { paymentMethodLabel, paymentStatusOf } from "@/lib/payment-status";
+import {
+  paymentMethodLabel,
+  paymentStatusLabel,
+  paymentStatusOf,
+} from "@/lib/payment-status";
 import {
   ALL,
   buildListHref,
@@ -760,8 +764,19 @@ export default async function CustomersPage({
                         paymentStatus={o.payStatus}
                       />
                     </Td>
+                    {/*
+                      出す言葉は決済方法で変える（振込は着金、アプラスは決済）。
+                      本部の顧客管理・受注一覧と同じ言い方にそろえる。
+                      同じ受注が画面ごとに違って見えると照合できないため。
+                    */}
                     <Td>
-                      <StatusBadge status={o.stopped ? "キャンセル" : o.payStatus} />
+                      <StatusBadge
+                        status={
+                          o.stopped
+                            ? "キャンセル"
+                            : paymentStatusLabel(o.paymentMethod, o.payStatus) || o.payStatus
+                        }
+                      />
                       {o.paymentMethod ? (
                         <div className="mt-1 whitespace-nowrap text-xs text-ink-400">
                           {paymentMethodLabel(o.paymentMethod)}

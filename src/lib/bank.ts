@@ -23,12 +23,27 @@ export type BankFields = {
   accountHolder: string;
 };
 
+/**
+ * 口座番号として通せない理由。通せるときは空。
+ *
+ * 理由を分けて返す。ひとまとめに「7桁までの数字になっていません」と出していたころ、
+ * 0000000（7桁の数字）を入れた方が「正しく入れているのにエラーになる」と詰まった。
+ * 何が引っかかったのかが分からないと直しようがない。
+ */
+export function accountNoProblem(accountNo: string): string {
+  const digits = (accountNo || "").replace(/[^0-9]/g, "");
+  if (digits.length < 4 || digits.length > 7) {
+    return "口座番号（半角の数字4〜7桁で入力してください）";
+  }
+  if (/^(\d)\1+$/.test(digits)) {
+    return "口座番号（0000000 のように同じ数字だけの番号は、実在しない口座とみなして登録できません）";
+  }
+  return "";
+}
+
 /** 口座番号として通せる形か。 */
 export function accountNoLooksReal(accountNo: string): boolean {
-  const digits = (accountNo || "").replace(/[^0-9]/g, "");
-  if (digits.length < 4 || digits.length > 7) return false;
-  if (/^(\d)\1+$/.test(digits)) return false; // 全部同じ数字
-  return true;
+  return accountNoProblem(accountNo) === "";
 }
 
 /** 振込先がそろっていて、支払済みにしてよいか。 */
@@ -50,7 +65,10 @@ export function missingBankFields(b: BankFields | null): string[] {
   if (!b.bankName) missing.push("金融機関名");
   if (!b.bankBranch) missing.push("支店名");
   if (!b.accountNo) missing.push("口座番号");
-  else if (!accountNoLooksReal(b.accountNo)) missing.push("口座番号（7桁までの数字になっていません）");
+  else {
+    const problem = accountNoProblem(b.accountNo);
+    if (problem) missing.push(problem);
+  }
   if (!b.accountHolder) missing.push("口座名義");
   return missing;
 }

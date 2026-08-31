@@ -745,12 +745,19 @@ export function EditForm({
               </option>
             ))}
           </SelectField>
+          {/*
+            報酬の支払は、ここに入っている口座番号が実在しそうかを見てから
+            支払済にできる仕組みになっている（lib/bank.ts）。
+            決まりを入力の時点で伝えておかないと、保存はできたのに
+            支払の画面で断られて「正しく入れているのにエラー」となる。
+          */}
           <Field
             name="accountNo"
             label="口座番号"
             defaultValue={agency.accountNo}
             maxLength={20}
             disabled={pending}
+            hint="半角の数字4〜7桁。0000000 のように同じ数字だけの番号は、報酬の支払に進めません。"
           />
           <Field
             name="accountHolder"

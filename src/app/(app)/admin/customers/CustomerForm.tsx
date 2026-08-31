@@ -210,19 +210,26 @@ function StatusPicker({
   const btnRef = useRef<HTMLButtonElement>(null);
 
   const current = options.find((o) => o.value === value) ?? options[0];
+  /*
+   * 色は --color-good-500 / -100 と --color-bad-500 / -100 しか定義されていない。
+   * -200 や -300 を書いても色が付かないので、Badge と同じ階調にそろえる。
+   */
   const toneOf = (tone: "good" | "bad", on: boolean) =>
     tone === "good"
       ? on
-        ? "border-good-500/60 bg-good-500/20 text-good-200"
-        : "text-good-300"
+        ? "border-good-500/60 bg-good-500/20 text-good-100"
+        : "text-good-100"
       : on
-        ? "border-bad-500/60 bg-bad-500/20 text-bad-200"
-        : "text-bad-300";
+        ? "border-bad-500/60 bg-bad-500/20 text-bad-100"
+        : "text-bad-100";
 
   const place = useCallback(() => {
     const r = btnRef.current?.getBoundingClientRect();
     if (!r) return;
-    setAt({ top: r.bottom + 4, left: r.left, width: Math.max(r.width, 132) });
+    const width = Math.max(r.width, 132);
+    // 画面の右端から出ないように寄せる。表の右側の行でも全部が見えるように。
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+    setAt({ top: r.bottom + 4, left, width });
   }, []);
 
   /*
@@ -268,8 +275,8 @@ function StatusPicker({
           "text-sm font-semibold leading-tight transition " +
           "focus:outline-none focus:ring-2 focus:ring-gold-500/40 disabled:opacity-60 " +
           (current.tone === "good"
-            ? "border-good-500/60 bg-good-500/15 text-good-200 hover:bg-good-500/25"
-            : "border-bad-500/60 bg-bad-500/15 text-bad-200 hover:bg-bad-500/25")
+            ? "border-good-500/60 bg-good-500/15 text-good-100 hover:bg-good-500/25"
+            : "border-bad-500/60 bg-bad-500/15 text-bad-100 hover:bg-bad-500/25")
         }
       >
         <span className="whitespace-nowrap">{current.label}</span>

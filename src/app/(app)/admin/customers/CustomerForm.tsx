@@ -1,18 +1,9 @@
 "use client";
 
 import { isManualPaymentMethod, paymentMethodLabel } from "@/lib/payment-status";
-import {
-  Fragment,
-  useActionState,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  useTransition,
-} from "react";
-import { createPortal } from "react-dom";
+import { Fragment, useActionState, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ChevronDown, Search, X } from "lucide-react";
+import { Search, X } from "lucide-react";
 import {
   setCustomerPaymentStatusAction,
   stopPadSubscriptionAction,
@@ -183,17 +174,21 @@ function shipTone(v: string): Tone {
  * 選んだ時点で保存する。押し忘れる保存ボタンを増やさないため。
  */
 /**
- * お支払いの状態を選ぶ小さな一覧。
+ * お支払いの状態を切り替える、横並びの2択。
  *
- * ブラウザ標準の <select> は、開いたあとの一覧を OS が描く。
- * そのため Mac と Windows で見た目が変わり、Windows では
- * 背景も文字色も指定が効かず読みにくかった（2026-08-31 の指摘）。
- * どの環境でも同じに見えるよう、開いたあとの一覧まで自前で描く。
+ * はじめはブラウザ標準の <select> を使っていたが、開いたあとの一覧は
+ * OS が描くため Mac と Windows で見た目が変わり、Windows では
+ * 背景も文字色も指定が効かず読みにくかった。
  *
- * 表は横スクロールする入れ物の中にあるので、一覧は画面基準（fixed）で出す。
- * 入れ物の中に絶対配置すると、右端の行で切れてしまう。
+ * そこで自前の一覧を出す形にしたところ、今度は位置合わせで手こずった。
+ * 表は横スクロールする入れ物の中にあり、しかも transform の掛かった親が
+ * いるため、fixed で置いても基準がずれて画面の外へ出てしまう。
+ *
+ * 選ぶものが2つしかないので、開くのをやめて横に並べる。
+ * 開かなければ位置合わせは要らず、どの環境でも同じに見える。
+ * いま選ばれている側だけ色を付ける（着金待ちは赤、決済完了は緑）。
  */
-function StatusPicker({
+function StatusToggle({
   value,
   options,
   disabled,
@@ -206,142 +201,38 @@ function StatusPicker({
   onPick: (next: string) => void;
   label: string;
 }) {
-  const [open, setOpen] = useState(false);
-  const [at, setAt] = useState<{ top: number; left: number; width: number } | null>(null);
-  const btnRef = useRef<HTMLButtonElement>(null);
-
-  const current = options.find((o) => o.value === value) ?? options[0];
-  /*
-   * 色は --color-good-500 / -100 と --color-bad-500 / -100 しか定義されていない。
-   * -200 や -300 を書いても色が付かないので、Badge と同じ階調にそろえる。
-   */
-  const toneOf = (tone: "good" | "bad", on: boolean) =>
-    tone === "good"
-      ? on
-        ? "border-good-500/60 bg-good-500/20 text-good-100"
-        : "text-good-100"
-      : on
-        ? "border-bad-500/60 bg-bad-500/20 text-bad-100"
-        : "text-bad-100";
-
-  const place = useCallback(() => {
-    const r = btnRef.current?.getBoundingClientRect();
-    if (!r) return;
-    const width = Math.max(r.width, 132);
-    // 画面の右端から出ないように寄せる。表の右側の行でも全部が見えるように。
-    const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
-    setAt({ top: r.bottom + 4, left, width });
-  }, []);
-
-  /*
-   * 開いている間は、Esc で閉じ、スクロールや画面幅の変化には位置を合わせ直す。
-   *
-   * はじめは「動いたら閉じる」にしていたが、押した拍子に入れ物が少し動いて
-   * scroll が飛び、開いた直後に閉じてしまって一度も出せなかった。
-   * 追従させれば、その取りこぼしが起きない。
-   */
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("keydown", onKey);
-    window.addEventListener("scroll", place, true);
-    window.addEventListener("resize", place);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", place, true);
-      window.removeEventListener("resize", place);
-    };
-  }, [open, place]);
-
-  function toggle() {
-    if (disabled) return;
-    place();
-    setOpen((v) => !v);
-  }
-
   return (
-    <>
-      <button
-        ref={btnRef}
-        type="button"
-        onClick={toggle}
-        disabled={disabled}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-label={label}
-        className={
-          "inline-flex w-auto items-center gap-1.5 rounded-lg border py-1.5 pl-3 pr-2 " +
-          "text-sm font-semibold leading-tight transition " +
-          "focus:outline-none focus:ring-2 focus:ring-gold-500/40 disabled:opacity-60 " +
-          (current.tone === "good"
-            ? "border-good-500/60 bg-good-500/15 text-good-100 hover:bg-good-500/25"
-            : "border-bad-500/60 bg-bad-500/15 text-bad-100 hover:bg-bad-500/25")
-        }
-      >
-        <span className="whitespace-nowrap">{current.label}</span>
-        <ChevronDown aria-hidden className="h-3.5 w-3.5 opacity-80" />
-      </button>
-
-      {/*
-        一覧は body の直下へ出す（ポータル）。
-        position: fixed は、transform を持つ親があるとその親を基準にしてしまう。
-        表の入れ物に transform が掛かっていて、実際 312px ずれて出ていた。
-        body 直下なら、どの行から開いても画面の座標どおりに置ける。
-      */}
-      {open && at
-        ? createPortal(
-        <>
-          {/* 外を押したら閉じるための受け皿 */}
-          <div
-            className="fixed inset-0 z-40"
-            onClick={() => setOpen(false)}
-            aria-hidden
-          />
-          <ul
-            role="listbox"
-            aria-label={label}
-            style={{ top: at.top, left: at.left, minWidth: at.width }}
+    <div
+      role="group"
+      aria-label={label}
+      className="inline-flex overflow-hidden rounded-lg border border-ink-700 bg-ink-900"
+    >
+      {options.map((o) => {
+        const on = o.value === value;
+        const tone = on
+          ? o.tone === "good"
+            ? "bg-good-500/25 text-good-100"
+            : "bg-bad-500/25 text-bad-100"
+          : "text-ink-400 hover:bg-ink-800 hover:text-ink-200";
+        return (
+          <button
+            key={o.value}
+            type="button"
+            aria-pressed={on}
+            disabled={disabled || on}
+            onClick={() => onPick(o.value)}
             className={
-              "fixed z-50 overflow-hidden rounded-lg border border-ink-700 " +
-              "bg-ink-900 p-1 shadow-xl shadow-black/50"
+              "whitespace-nowrap px-2.5 py-1.5 text-sm font-semibold leading-tight " +
+              "transition focus:outline-none focus:ring-2 focus:ring-inset " +
+              "focus:ring-gold-500/40 disabled:cursor-default " +
+              tone
             }
           >
-            {options.map((o) => {
-              const on = o.value === value;
-              return (
-                <li key={o.value}>
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={on}
-                    onClick={() => {
-                      setOpen(false);
-                      if (!on) onPick(o.value);
-                    }}
-                    className={
-                      "flex w-full items-center gap-2 whitespace-nowrap rounded-md border " +
-                      "border-transparent px-2.5 py-1.5 text-left text-sm font-semibold " +
-                      "transition hover:bg-ink-800 " +
-                      toneOf(o.tone, on)
-                    }
-                  >
-                    <Check
-                      aria-hidden
-                      className={"h-3.5 w-3.5 " + (on ? "opacity-100" : "opacity-0")}
-                    />
-                    {o.label}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </>,
-            document.body,
-          )
-        : null}
-    </>
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -409,7 +300,7 @@ function PaymentStatusCell({
 
   return (
     <div className="whitespace-nowrap">
-      <StatusPicker
+      <StatusToggle
         label="お支払いの状態"
         value={done ? "決済完了" : "着金待ち"}
         disabled={pending}

@@ -20,6 +20,17 @@ export function IssuePassword({
 }) {
   const [state, run, pending] = useActionState(issuePasswordAction, initial);
   const [selected, setSelected] = useState("");
+  /*
+   * マイページを使わない相手は、既定では一覧に出さない。
+   * 取次店が増えるほど「発行しなくてよい相手」で一覧が埋まり、
+   * 出すべき相手を探しにくくなるため（2026-08-31 の依頼）。
+   * ただし「本部が個別に認めた場合」の発行はできる必要があるので、
+   * 消してしまわずに、ここで出し入れできるようにしておく。
+   */
+  const [showAll, setShowAll] = useState(false);
+
+  const listed = showAll ? agencies : agencies.filter((a) => a.usesPortal);
+  const hidden = agencies.length - agencies.filter((a) => a.usesPortal).length;
 
   const target = agencies.find((a) => a.code === selected);
 
@@ -32,7 +43,8 @@ export function IssuePassword({
       </p>
       <p className="text-xs leading-relaxed text-ink-400">
         マイページを使うのは<strong className="text-ink-200">エリア統括代理店と総販売代理店だけ</strong>です。
-        「マイページ対象外」と付いている相手への発行は、原則不要です。
+        一覧にはその相手だけを出しています。
+        {hidden > 0 ? `（マイページを使わない ${hidden} 件は出していません）` : ""}
       </p>
 
       <form action={run} className="flex flex-wrap items-end gap-3">
@@ -46,7 +58,7 @@ export function IssuePassword({
             className="mt-1.5 w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2.5 text-sm text-ink-50 focus:border-gold-500 focus:outline-none"
           >
             <option value="">選択してください</option>
-            {agencies.map((a) => (
+            {listed.map((a) => (
               <option key={a.code} value={a.code}>
                 {a.code}　{a.name}
                 {a.hasPassword ? "（発行済み）" : ""}
@@ -55,6 +67,22 @@ export function IssuePassword({
             ))}
           </select>
         </label>
+
+        {hidden > 0 ? (
+          <label className="flex items-center gap-2 pb-2.5 text-xs text-ink-400">
+            <input
+              type="checkbox"
+              checked={showAll}
+              onChange={(e) => {
+                setShowAll(e.target.checked);
+                // 隠す側に戻すとき、選んでいた相手が一覧から消えることがある
+                if (!e.target.checked) setSelected("");
+              }}
+              className="h-3.5 w-3.5 accent-gold-500"
+            />
+            マイページ対象外も出す
+          </label>
+        ) : null}
 
         <button
           type="submit"

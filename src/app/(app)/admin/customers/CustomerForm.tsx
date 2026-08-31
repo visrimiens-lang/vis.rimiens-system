@@ -5,9 +5,18 @@ import {
   paymentMethodLabel,
   paymentStatusLabel,
 } from "@/lib/payment-status";
-import { Fragment, useActionState, useState, useTransition } from "react";
+import {
+  Fragment,
+  useActionState,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Search, X } from "lucide-react";
+import { Check, ChevronDown, Search, X } from "lucide-react";
 import { updateShipmentAction } from "@/actions/order-actions";
 import {
   setCustomerPaymentStatusAction,
@@ -392,6 +401,142 @@ function Status({ value, tone }: { value: string; tone: Tone }) {
 }
 
 /**
+ * 開いて選ぶプルダウン。
+ *
+ * ブラウザ標準の <select> は使わない。開いたあとの一覧を OS が描くため、
+ * Mac と Windows で見た目が変わり、Windows では背景も文字色も指定が効かない。
+ *
+ * 一覧は body の直下へ出す（ポータル）。
+ * position: fixed は transform を持つ親があるとその親を基準にしてしまい、
+ * 表の入れ物に transform が掛かっているため、そのままだと数百px ずれる。
+ */
+function Dropdown({
+  value,
+  options,
+  disabled,
+  onPick,
+  label,
+}: {
+  value: string;
+  options: { value: string; label: string; tone: "good" | "bad" | "plain" }[];
+  disabled?: boolean;
+  onPick: (next: string) => void;
+  label: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [at, setAt] = useState<{ top: number; left: number; width: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  const current = options.find((o) => o.value === value) ?? options[0];
+  const toneCls = (tone: "good" | "bad" | "plain") =>
+    tone === "bad"
+      ? "border-bad-500/60 bg-bad-500/15 text-bad-100"
+      : tone === "good"
+        ? "border-good-500/60 bg-good-500/15 text-good-100"
+        : "border-ink-700 bg-ink-900 text-ink-200";
+
+  const place = useCallback(() => {
+    const r = btnRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const width = Math.max(r.width, 150);
+    // 画面の右端から出ないように寄せる
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+    setAt({ top: r.bottom + 4, left, width });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    // 動いたら閉じるのではなく位置を合わせ直す。
+    // 閉じる作りにすると、押した拍子の小さなスクロールで開いた直後に閉じてしまう。
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open, place]);
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={label}
+        onClick={() => {
+          if (disabled) return;
+          place();
+          setOpen((v) => !v);
+        }}
+        className={
+          "inline-flex w-auto items-center gap-1.5 whitespace-nowrap rounded-lg border " +
+          "py-1.5 pl-3 pr-2 text-sm font-semibold leading-tight transition " +
+          "focus:outline-none focus:ring-2 focus:ring-gold-500/40 disabled:opacity-60 " +
+          toneCls(current.tone)
+        }
+      >
+        <span>{current.label}</span>
+        <ChevronDown aria-hidden className="h-3.5 w-3.5 opacity-80" />
+      </button>
+
+      {open && at
+        ? createPortal(
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} aria-hidden />
+              <ul
+                role="listbox"
+                aria-label={label}
+                style={{ top: at.top, left: at.left, minWidth: at.width }}
+                className="fixed z-50 overflow-hidden rounded-lg border border-ink-700 bg-ink-900 p-1 shadow-xl shadow-black/50"
+              >
+                {options.map((o) => {
+                  const on = o.value === value;
+                  return (
+                    <li key={o.value}>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={on}
+                        onClick={() => {
+                          setOpen(false);
+                          if (!on) onPick(o.value);
+                        }}
+                        className={
+                          "flex w-full items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-1.5 " +
+                          "text-left text-sm font-semibold transition hover:bg-ink-800 " +
+                          (o.tone === "bad"
+                            ? "text-bad-100"
+                            : o.tone === "good"
+                              ? "text-good-100"
+                              : "text-ink-200")
+                        }
+                      >
+                        <Check
+                          aria-hidden
+                          className={"h-3.5 w-3.5 " + (on ? "opacity-100" : "opacity-0")}
+                        />
+                        {o.label}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>,
+            document.body,
+          )
+        : null}
+    </>
+  );
+}
+
+/**
  * 受注を止める（キャンセルにする）欄。
  *
  * キャンセルにすると、その受注から立った報酬が取り消される（同額のマイナスが立つ）。
@@ -426,19 +571,26 @@ function CancelCell({
   }
 
   function pick(next: string) {
-    if (next !== "キャンセル") return;
-    const target = live[0];
+    const target = next === "キャンセル" ? live[0] : orders[0];
     if (!target) return;
-    const ok = window.confirm(
-      `${customerName || "このお客様"} のご注文をキャンセルにします。\n` +
-        "この受注から発生した報酬も取り消されます（同額のマイナスが立ちます）。\n" +
-        "よろしいですか。",
-    );
+    const who = customerName || "このお客様";
+    const ok =
+      next === "キャンセル"
+        ? window.confirm(
+            `${who} のご注文をキャンセルにします。\n` +
+              "この受注から発生した報酬も取り消されます（同額のマイナスが立ちます）。\n" +
+              "よろしいですか。",
+          )
+        : window.confirm(
+            `${who} のご注文を「出荷待ち」に戻します。\n` +
+              "取り消した報酬は自動では立て直りません。必要なら受注詳細でご確認ください。\n" +
+              "よろしいですか。",
+          );
     if (!ok) return;
     setError("");
     const data = new FormData();
     data.set("id", target.id);
-    data.set("shipStatus", "キャンセル");
+    data.set("shipStatus", next === "キャンセル" ? "キャンセル" : "出荷待ち");
     data.set("confirmCancel", "true");
     startTransition(async () => {
       const res = await updateShipmentAction({}, data);
@@ -454,20 +606,17 @@ function CancelCell({
         戻しても取り消した報酬は自動では立て直らないため、
         受注詳細で状況を見ながら判断してもらう。
       */}
-      <StatusToggle
+      <Dropdown
         label="キャンセルの状態"
         value={cancelled ? "キャンセル" : "通常"}
-        disabled={pending || cancelled}
+        disabled={pending}
         onPick={pick}
         options={[
-          { value: "通常", label: "通常", tone: "good" },
+          { value: "通常", label: "通常", tone: "plain" },
           { value: "キャンセル", label: "キャンセル", tone: "bad" },
         ]}
       />
       {pending ? <div className="mt-1 text-xs text-ink-400">取消中…</div> : null}
-      {cancelled ? (
-        <div className="mt-1 text-xs text-ink-400">戻すときは受注詳細から</div>
-      ) : null}
       {error ? (
         <div className="mt-1 text-xs leading-snug text-bad-500">{error}</div>
       ) : null}

@@ -888,7 +888,7 @@ export default async function AgencyDetailPage({
       </Card>
 
       {canHaveChildren ? (
-        <Card title="この代理店の配下を、本部が手で登録する">
+        <Card title="この代理店のスタッフを、本部が手で登録する">
           <NewChildForm parentCode={agency.code} parentName={agency.name} />
         </Card>
       ) : (

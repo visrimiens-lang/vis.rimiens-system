@@ -102,15 +102,48 @@
     },
     true
   );
+  /*
+   * 送信の直前に、建物欄へ「 #REF=コード」を書き足す（2026-09-01）。
+   *
+   * UTAGE の通知は ?ref= を載せないが、建物欄はそのまま載せる。
+   * 同じ決済の通知に載って届けば、連絡先の突き合わせ（上の控え）が
+   * 要らなくなり、別のスタッフに付く取り違えが起きない。
+   * ポータル側（/api/webhooks/order）が目印を読み取ってから取り除くので、
+   * 受注に残る建物名は元のまま。控えは目印が読めなかったときの保険として残す。
+   */
+  function markBuilding() {
+    var inputs = document.querySelectorAll("input, textarea");
+    for (var i = 0; i < inputs.length; i++) {
+      var el = inputs[i];
+      if (el.type === "hidden" || el.disabled) continue;
+      var hay = [el.name, el.id, el.placeholder, el.getAttribute("aria-label")]
+        .join(" ")
+        .toLowerCase();
+      if (/building|建物|マンション|部屋番号/.test(hay)) {
+        // 入力し直しで二重に付かないよう、古い目印は消してから付ける
+        var base = (el.value || "").replace(/\s*#REF=[A-Za-z0-9-]+\s*$/i, "");
+        el.value = base + " #REF=" + ref;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        return;
+      }
+    }
+  }
+
+  function beforeSubmit() {
+    markBuilding();
+    claim();
+  }
+
   // 送信ボタンを押した瞬間にも、念のためもう一度
-  document.addEventListener("submit", claim, true);
+  document.addEventListener("submit", beforeSubmit, true);
   document.addEventListener(
     "click",
     function (e) {
       var t = e.target;
       if (!t) return;
       var tag = (t.tagName || "").toLowerCase();
-      if (tag === "button" || (tag === "input" && t.type === "submit")) claim();
+      if (tag === "button" || (tag === "input" && t.type === "submit")) beforeSubmit();
     },
     true
   );

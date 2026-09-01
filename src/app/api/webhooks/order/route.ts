@@ -95,7 +95,18 @@ type StaffCheck = { code: string; note: string };
  * UTAGE は QRの ?ref= を決済の通知に載せないので、
  * 通知だけでは「誰の売上か」が決まらない。
  * お客様が決済ページで連絡先を入れたときに /api/ref-claim へ控えているので、
- * メールアドレス（無ければ電話番号）で突き合わせる。
+ * 連絡先で突き合わせる。
+ *
+ * ■ メールと電話の両方で探す（2026-09-01）
+ *
+ * 以前は「通知にメールがあればメールだけ」で探していた。
+ * ところが、決済ページで打ったメールと UTAGE が通知してくるメールは
+ * 同じとは限らない（LINE登録時の別アドレスが通知に載ることがある）。
+ * メールが食い違うと本人の控えを見つけられず、たまたま連絡先が引っかかった
+ * 別の控え（＝別のスタッフのQR）に付いてしまう事故が起きた。
+ * メールと電話の両方で探し、次の順で選ぶ。
+ *   1. メールも電話も一致する控え（本人でほぼ確実）
+ *   2. どちらか片方が一致する控えのうち、いちばん新しいもの
  *
  * 拾うのは直近のものだけ。古い控えまで見ると、同じ方が
  * 別の代理店から買い直したときに前の付け先を引き継いでしまう。
@@ -111,22 +122,32 @@ async function refFromClaim(
   if (!mail && !tel) return { ref: "", claimId: null };
 
   const since = new Date(Date.now() - CLAIM_WINDOW_HOURS * 3600 * 1000).toISOString();
-  const filter = mail
-    ? `email=eq.${encodeURIComponent(mail)}`
-    : `phone=eq.${encodeURIComponent(tel)}`;
+  const both = mail && tel;
+  const filter = both
+    ? `or=(email.eq.${encodeURIComponent(mail)},phone.eq.${encodeURIComponent(tel)})`
+    : mail
+      ? `email=eq.${encodeURIComponent(mail)}`
+      : `phone=eq.${encodeURIComponent(tel)}`;
 
   try {
     const rows = await select<Record<string, unknown>>(
-      `ref_claims?select=id,ref&${filter}&used_by=is.null` +
-        `&created_at=gte.${encodeURIComponent(since)}&order=created_at.desc&limit=1`,
+      `ref_claims?select=id,ref,email,phone&${filter}&used_by=is.null` +
+        `&created_at=gte.${encodeURIComponent(since)}&order=created_at.desc&limit=10`,
     );
     if (rows.length === 0) return { ref: "", claimId: null };
+    // メールも電話も一致する控えがあれば最優先。無ければ新しい順の先頭。
+    const exact = rows.find(
+      (r) =>
+        String(r["email"] ?? "").toLowerCase() === mail &&
+        normalizePhone(String(r["phone"] ?? "")) === tel,
+    );
+    const hit = (both && exact) || rows[0];
     /*
      * ここでは「使用済み」の印を付けない。付けるのは受注の登録が成功したあと。
      * 先に印を付けると、登録が一時障害で失敗して再送されたとき、
      * 控えがもう拾えず、再送分が帰属なし（報酬0件）で登録されてしまう。
      */
-    return { ref: String(rows[0]["ref"] ?? ""), claimId: rows[0]["id"] };
+    return { ref: String(hit["ref"] ?? ""), claimId: hit["id"] };
   } catch {
     // 控えの表がまだ無いときも、決済の取り込みは止めない
     return { ref: "", claimId: null };

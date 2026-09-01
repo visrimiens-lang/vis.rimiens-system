@@ -59,9 +59,23 @@
     return "";
   }
 
+  /*
+   * 形の壊れた値は送らない（2026-09-01）。
+   * 入力の途中で控えが飛ぶため、「1006」のような打ちかけの電話番号が
+   * 保存されていた。中途半端な控えは突き合わせの事故のもとになるので、
+   * メールは @ と . を含むもの、電話は数字10〜11桁になったものだけ送る。
+   */
+  function validEmail(v) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? v : "";
+  }
+  function validPhone(v) {
+    var d = (v || "").replace(/[^0-9]/g, "");
+    return /^0\d{9,10}$/.test(d) ? d : "";
+  }
+
   function claim() {
-    var email = valueOf(["email", "mail", "メール"]);
-    var phone = valueOf(["tel", "phone", "電話"]);
+    var email = validEmail(valueOf(["email", "mail", "メール"]));
+    var phone = validPhone(valueOf(["tel", "phone", "電話"]));
     if (!email && !phone) return;
 
     var key = ref + "|" + email + "|" + phone;

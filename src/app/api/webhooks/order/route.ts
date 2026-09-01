@@ -312,15 +312,23 @@ export async function POST(req: NextRequest) {
   const phone = pick(data, "phone", "tel", "電話");
 
   /*
-   * 誰の紹介かを表すコード。
+   * 誰の紹介かを表すコード。次の順で決める。
    *
-   * 本来は決済の通知に載って届くが、UTAGE は QRの ?ref= を通知に載せない。
-   * そのため実受注7件は付け先が空のまま入り、報酬が1件も立たなかった。
-   * 通知に入っていないときは、決済ページのカスタムJSが残した控え
-   * （ref_claims・/api/ref-claim）を連絡先で突き合わせて補う。
+   *   1. 建物欄の目印（ #REF=コード ）。決済ページのJSが送信の直前に
+   *      建物欄へ書き足したもので、決済そのものと同じ通知に載って届くため、
+   *      連絡先の突き合わせが要らない＝取り違えが起きない（2026-09-01）。
+   *      目印はここで取り除くので、受注に残る建物名は元のまま。
+   *   2. 通知のコード欄（UTAGE は QRの ?ref= を通知に載せないため、通常は空）。
+   *   3. 控え（ref_claims）との連絡先の突き合わせ。目印もコード欄も無いときの保険。
    */
+  const buildingRaw = pick(data, "building", "建物");
+  const refMark = buildingRaw.match(/\s*#REF=([A-Za-z0-9-]{1,20})\s*$/i);
+  const building = refMark ? buildingRaw.slice(0, refMark.index).trim() : buildingRaw;
+
   const agencyFromWebhook =
-    pickExact(data, "ref", "ref_code", "partner", "代理店コード", "agency_code") || "";
+    (refMark ? refMark[1] : "") ||
+    pickExact(data, "ref", "ref_code", "partner", "代理店コード", "agency_code") ||
+    "";
   const claim = agencyFromWebhook
     ? { ref: "", claimId: null }
     : await refFromClaim(email, phone);
@@ -335,7 +343,7 @@ export async function POST(req: NextRequest) {
       phone,
       zip: pick(data, "zipcode", "zip", "郵便"),
       address: pick(data, "address", "住所"),
-      building: pick(data, "building", "建物"),
+      building,
       productName: product,
       amount: toAmount(pick(data, "amount", "price", "金額", "total")),
       quantity: Number(pick(data, "quantity", "数量")) || 1,

@@ -325,6 +325,14 @@ export async function POST(req: NextRequest) {
   const refMark = buildingRaw.match(/\s*#REF=([A-Za-z0-9-]{1,20})\s*$/i);
   const building = refMark ? buildingRaw.slice(0, refMark.index).trim() : buildingRaw;
 
+  /*
+   * UTAGE は住所の通知に建物欄を連結して載せるため、
+   * 建物欄に書いた目印が住所の末尾にも現れる（実例: 受注135・136）。
+   * 送り状に出る住所なので、ここでも必ず取り除く。
+   */
+  const stripMark = (v: string) => v.replace(/\s*#REF=[A-Za-z0-9-]{1,20}\s*/gi, "").trim();
+  const address = stripMark(pick(data, "address", "住所"));
+
   const agencyFromWebhook =
     (refMark ? refMark[1] : "") ||
     pickExact(data, "ref", "ref_code", "partner", "代理店コード", "agency_code") ||
@@ -342,7 +350,7 @@ export async function POST(req: NextRequest) {
       email,
       phone,
       zip: pick(data, "zipcode", "zip", "郵便"),
-      address: pick(data, "address", "住所"),
+      address,
       building,
       productName: product,
       amount: toAmount(pick(data, "amount", "price", "金額", "total")),

@@ -128,10 +128,13 @@ function ShipmentSection({
   const [status, setStatus] = useState(shipStatus || "出荷待ち");
   const [tracking, setTracking] = useState(trackingNo);
   const [agreed, setAgreed] = useState(false);
+  /* 手渡し・店舗受け取りなど、送り状を使わないお届け。
+     チェックが入っているときだけ、送り状番号なしの出荷済を許す。 */
+  const [noTracking, setNoTracking] = useState(false);
 
   const shipping = status === "出荷済";
   const cancelling = status === "キャンセル" && shipStatus !== "キャンセル";
-  const missingTracking = shipping && !tracking.trim();
+  const missingTracking = shipping && !tracking.trim() && !noTracking;
   const blocked = missingTracking || (cancelling && !agreed);
 
   return (
@@ -211,9 +214,27 @@ function ShipmentSection({
           </label>
         </div>
 
+        {shipping && !tracking.trim() ? (
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              name="noTracking"
+              value="true"
+              checked={noTracking}
+              onChange={(e) => setNoTracking(e.target.checked)}
+              disabled={pending}
+              className="h-4 w-4 rounded border-ink-600 bg-ink-950 accent-gold-500"
+            />
+            <span>
+              送り状を使わないお届けです（手渡し・店舗受け取りなど）。送り状番号なしで出荷済にします。
+            </span>
+          </label>
+        ) : null}
+
         {missingTracking ? (
           <Notice tone="warn">
             出荷済にするには送り状番号が必要です。まだ送り状ができていない場合は「出荷手配中」で保存してください。
+            手渡し・店舗受け取りの場合は、上のチェックを入れてください。
           </Notice>
         ) : null}
 

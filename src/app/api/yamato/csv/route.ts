@@ -59,7 +59,8 @@ export async function GET(req: NextRequest) {
       name: s_(o, "customer_name"),
       phone: s_(o, "phone"),
       zip: s_(o, "zip"),
-      address: `${s_(o, "address")}${s_(o, "building")}`,
+      address: s_(o, "address"),
+      building: s_(o, "building"),
       quantity: Number(o["quantity"] ?? 1) || 1,
       productName: s_(o, "product_name"),
     }));

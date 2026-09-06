@@ -22,32 +22,14 @@ import type { OutboundOrder, ShipperConfig } from "./yamato";
  *
  * ■ 列の並び
  *
- * B2クラウドの「送り状発行データ取込」は、初回に画面で項目の対応づけを
- * 行う（任意フォーマット取込）。見出し行の名前をB2の項目名に合わせてあるので、
- * 対応づけはほぼ自動で埋まる。一度作ったパターンは保存されるので、
- * 2回目からはファイルを選ぶだけで取り込める。
+ * B2クラウドの「外部データから発行」の基本レイアウト（固定の列順）に
+ * そろえてある。以前は見出し付きの独自の並びで、B2側で初回に
+ * 項目の対応づけ（任意フォーマット取込）をする前提だったが、
+ * 現場は対応づけをせずそのまま取り込むため、全列が1つずつ
+ * 別の項目に流れ込む事故が起きた（2026-09-07・銀座本店の発行）。
+ * 基本レイアウトなら対応づけ不要で、ファイルを選ぶだけで通る。
+ * 見出し行も付けない（B2の既定は1行目もデータとして読むため）。
  */
-
-/** 見出し。B2クラウドの項目名にそろえてある。 */
-const HEADERS = [
-  "お客様管理番号",
-  "送り状種類",
-  "クール区分",
-  "出荷予定日",
-  "お届け先電話番号",
-  "お届け先郵便番号",
-  "お届け先住所",
-  "お届け先名",
-  "ご依頼主電話番号",
-  "ご依頼主郵便番号",
-  "ご依頼主住所",
-  "ご依頼主名",
-  "品名1",
-  "個数",
-  "請求先顧客コード",
-  "請求先分類コード",
-  "運賃管理番号",
-];
 
 /** CSVの1マス。カンマ・改行・引用符が入っても壊れないようにする。 */
 function cell(v: string): string {
@@ -55,7 +37,12 @@ function cell(v: string): string {
   return /[",]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s;
 }
 
-export type CsvOrder = OutboundOrder & { quantity: number; productName: string };
+export type CsvOrder = OutboundOrder & {
+  quantity: number;
+  productName: string;
+  /** 建物名。B2では住所と別の「アパートマンション名」列に入れる */
+  building?: string;
+};
 
 /**
  * 送り状に印字する品名。
@@ -83,27 +70,56 @@ export function buildB2Csv(
   orders: CsvOrder[],
   shipDate: string,
 ): Buffer {
-  const lines = [HEADERS.map(cell).join(",")];
+  // B2の基本レイアウトの日付は YYYY/MM/DD。YYYYMMDD や YYYY-MM-DD で来ても直す
+  const d = shipDate.replace(/[^0-9]/g, "");
+  const ship = `${d.slice(0, 4)}/${d.slice(4, 6)}/${d.slice(6, 8)}`;
+
+  const lines: string[] = [];
   for (const o of orders) {
     lines.push(
       [
-        o.orderId, // お客様管理番号。発行結果と受注を突き合わせる鍵になる
-        "0", // 送り状種類：発払い
-        "0", // クール区分：なし
-        shipDate, // YYYYMMDD
-        o.phone,
-        o.zip.replace(/[^0-9]/g, ""),
-        o.address,
-        o.name,
-        cfg.shipper.tel,
-        cfg.shipper.zip,
-        cfg.shipper.address,
-        cfg.shipper.name,
-        itemNameFor(cfg, o.productName),
-        String(o.quantity > 0 ? o.quantity : 1),
-        cfg.invoiceCode,
-        cfg.invoiceCodeExt,
-        cfg.invoiceFreightNo,
+        o.orderId, // 1 お客様管理番号。発行結果と受注を突き合わせる鍵になる
+        "0", // 2 送り状種類：発払い
+        "0", // 3 クール区分：なし
+        "", // 4 伝票番号（発行時にB2が採番する）
+        ship, // 5 出荷予定日
+        "", // 6 お届け予定日（指定しない）
+        "", // 7 配達時間帯（指定しない）
+        "", // 8 お届け先コード
+        o.phone, // 9 お届け先電話番号
+        "", // 10 電話番号枝番
+        o.zip.replace(/[^0-9]/g, ""), // 11 お届け先郵便番号
+        o.address, // 12 お届け先住所
+        o.building ?? "", // 13 お届け先アパートマンション名
+        "", // 14 会社・部門1
+        "", // 15 会社・部門2
+        o.name, // 16 お届け先名
+        "", // 17 お届け先名(カナ)
+        "様", // 18 敬称
+        "", // 19 ご依頼主コード
+        cfg.shipper.tel, // 20 ご依頼主電話番号
+        "", // 21 電話番号枝番
+        cfg.shipper.zip.replace(/[^0-9]/g, ""), // 22 ご依頼主郵便番号
+        cfg.shipper.address, // 23 ご依頼主住所
+        "", // 24 ご依頼主アパートマンション名
+        cfg.shipper.name, // 25 ご依頼主名
+        "", // 26 ご依頼主名(カナ)
+        "", // 27 品名コード1
+        itemNameFor(cfg, o.productName), // 28 品名1
+        "", // 29 品名コード2
+        "", // 30 品名2
+        "", // 31 荷扱い1
+        "", // 32 荷扱い2
+        "", // 33 記事
+        "", // 34 コレクト代金引換額
+        "", // 35 内消費税額等
+        "", // 36 止置き
+        "", // 37 止置き営業所コード
+        String(o.quantity > 0 ? o.quantity : 1), // 38 発行枚数（1箱1台なので台数ぶん）
+        "", // 39 個数口表示フラグ
+        cfg.invoiceCode, // 40 請求先顧客コード
+        cfg.invoiceCodeExt, // 41 請求先分類コード
+        cfg.invoiceFreightNo, // 42 運賃管理番号
       ]
         .map(cell)
         .join(","),

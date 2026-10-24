@@ -617,6 +617,14 @@ function kindOf(
  *
  * お名前が同じで、メールアドレスが一致すれば同一人物として扱う。
  * 解約済みは除く（同じ名前の別の方が入り直すことがあるため）。
+ *
+ * 会社（区分00）の行は「人」ではないので、同一人物の候補にしない（2026-10-24）。
+ * 個人事業主が会社を個人名で登録すると、会社の行の名前とメールが
+ * ご本人のライセンス登録と一致してしまい、「登録済み」として
+ * 会社向けのご案内（QRが入らない文面）を送り返していた。
+ * 法人名で登録している会社では名前が一致しないため起きず、
+ * 代表者ご本人のスタッフ登録（HYSH0001 など）は普通に通っていた。
+ * 会社の行を除けば、個人名で登録した会社でも同じ流れになる。
  */
 async function findSamePerson(name: string, email: string): Promise<Row | null> {
   const nm = (name || "").replace(/[\s\u3000]/g, "");
@@ -629,7 +637,7 @@ async function findSamePerson(name: string, email: string): Promise<Row | null> 
    */
   const rows = await select<Row>(
     `agencies?select=code,name,status,code_kind,qr1_url,qr2_url,qr2_status,qr2_rejected_note` +
-      `&email=eq.${encodeURIComponent(mail)}`,
+      `&email=eq.${encodeURIComponent(mail)}&code_kind=neq.${KIND_COMPANY}`,
   );
   return (
     rows.find(

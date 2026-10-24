@@ -1038,7 +1038,6 @@ export function CustomerEditForm({
             {customer.trackingNo ? `　送り状番号：${customer.trackingNo}` : ""}
           </div>
 
-          <PadSubscriptionRow customer={customer} />
 
           <div className="flex flex-wrap items-center gap-2">
             <button type="submit" disabled={saving} className={primaryBtn}>
@@ -1046,6 +1045,13 @@ export function CustomerEditForm({
             </button>
           </div>
         </form>
+        {/*
+          定期の作り直し・解約は、それぞれ自分の <form> を持つ。
+          上の保存フォームの中に置くと <form> の入れ子になり、ブラウザが内側の form を
+          捨ててボタンが効かなくなる（2026-10-24 にスマホで「押せない」と報告）。
+          必ず保存フォームの外（兄弟）に置く。
+        */}
+        <PadSubscriptionRow customer={customer} />
 
       {state.error ? (
         <div className="mt-3">

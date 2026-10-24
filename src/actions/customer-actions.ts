@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { currentViewer } from "@/lib/auth";
-import { audit, selectOne, update } from "@/lib/db";
+import { audit, select, selectOne, update } from "@/lib/db";
+import { createPadSubscription } from "@/lib/pad-subscription";
 import { isManualPaymentMethod } from "@/lib/payment-status";
 import { StripeError, stripeConfigured, stripeReq } from "@/lib/stripe";
 
@@ -426,4 +427,60 @@ export async function stopPadSubscriptionAction(
 
   revalidatePath("/admin/customers");
   return { ok: "定期パッド配送を解約しました。" };
+}
+
+/**
+ * 1年後の定期を、本部の手で作り直す。
+ *
+ * 受注時の自動作成は、Vercel の STRIPE_SECRET_KEY に鍵ではなくキーIDが
+ * 入っていた期間（〜2026-10-24）に全件失敗していた。予定日（pad_charge_from）は
+ * 台帳に残っているので、そのお客様のカード決済の受注を使って同じ処理をもう一度通す。
+ * 予定日は台帳の値を使うため、作り直しても初回請求はずれない。
+ *
+ * 振込・アプラスのお客様はカードが無いので作れない（期日に請求書を送る運用のまま）。
+ */
+export async function retryPadSubscriptionAction(
+  _prev: CustomerFormState,
+  formData: FormData,
+): Promise<CustomerFormState> {
+  const denied = await denyIfNotHq();
+  if (denied) return { error: denied };
+
+  const id = String(formData.get("customerId") ?? "").trim();
+  if (!/^\d+$/.test(id)) return { error: "お客様を特定できませんでした。" };
+
+  let orders: Row[];
+  try {
+    orders = await select<Row>(
+      `orders?select=id,product_name,payment_method,stripe_payment_id&customer_id=eq.${id}&order=id.desc`,
+    );
+  } catch (e) {
+    return { error: `受注を読めませんでした。${e instanceof Error ? e.message : ""}` };
+  }
+  // 本体のカード決済（Stripe の決済番号つき）だけが対象。いちばん新しいものを使う
+  const target = orders.find(
+    (o) =>
+      /本体/.test(s_(o, "product_name")) &&
+      s_(o, "payment_method") === "Stripe" &&
+      s_(o, "stripe_payment_id").startsWith("pi_"),
+  );
+  if (!target) {
+    return {
+      error:
+        "このお客様にはカード決済の本体受注（Stripe の決済番号つき）が無いため、自動の定期は作れません。" +
+        "振込・アプラスの場合は、請求予定日に請求書をお送りください。",
+    };
+  }
+
+  try {
+    const r = await createPadSubscription(s_(target, "id"), { actor: "HQ" });
+    if (!r.created) return { error: r.reason };
+    revalidatePath(`/admin/customers/${id}`);
+    revalidatePath("/admin/customers");
+    return { ok: `定期を作りました。初回請求日 ${r.from}（Stripe ${r.subscriptionId}）。` };
+  } catch (e) {
+    return {
+      error: `Stripe で定期を作れませんでした。${e instanceof Error ? e.message : "原因を特定できませんでした。"}`,
+    };
+  }
 }

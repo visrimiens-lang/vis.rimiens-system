@@ -82,123 +82,160 @@ async function ensureYearlyPrice(): Promise<string> {
   return String(price["id"]);
 }
 
+/** 定期を仕込んだ結果。本部が画面から呼び直すときに、何が起きたかを伝えるため。 */
+export type PadSubscriptionResult =
+  | { created: true; subscriptionId: string; from: string }
+  | { created: false; reason: string };
+
+/**
+ * 受注1件ぶんの定期を仕込む本体。
+ *
+ * Stripe との通信に失敗したときは例外をそのまま投げる。
+ * 受注登録のついでに呼ぶときは schedulePadSubscription が受け止めて記録に残し、
+ * 本部が画面から呼び直すときは retryPadSubscriptionAction がそのまま画面に出す。
+ */
+export async function createPadSubscription(
+  orderId: string,
+  opts: { actor?: string } = {},
+): Promise<PadSubscriptionResult> {
+  const actor = opts.actor ?? "intake";
+  const order = await selectOne<Row>(
+    `orders?select=id,customer_id,customer_name,product_name,payment_method,stripe_payment_id&id=eq.${encodeURIComponent(orderId)}`,
+  );
+  if (!order) return { created: false, reason: "受注が見つかりませんでした。" };
+
+  const productName = s_(order, "product_name");
+  if (!isMainUnitOrder(productName)) {
+    return { created: false, reason: "本体の受注ではないため、定期は付きません。" };
+  }
+
+  const customerId = s_(order, "customer_id");
+  if (!/^\d+$/.test(customerId)) {
+    // 顧客台帳に紐づいていない受注には予定日を残す場所がない。
+    // 紐づけ失敗はすでに audit に残っているので、ここでは何もしない。
+    return { created: false, reason: "顧客台帳に紐づいていない受注のため、予定日を残せません。" };
+  }
+
+  const customer = await selectOne<Row>(
+    `customers?select=id,name,email,phone,pad_subscription_id,pad_charge_from&id=eq.${customerId}`,
+  );
+  if (!customer) return { created: false, reason: "顧客台帳が見つかりませんでした。" };
+
+  // 同じお客様に二重に定期を作らない（通知の再送・買い直しで二度届くことがある）
+  const already = s_(customer, "pad_subscription_id");
+  if (already) return { created: false, reason: `すでに定期があります（${already}）。` };
+
+  /*
+   * 請求予定日は、台帳にすでに入っていればそれを使う（2026-10-24）。
+   * 予定日は受注の時点で「購入日＋1年（OP①付きは2年）」として台帳に入れてある。
+   * 作り直しで今日から数え直すと初回請求が遅れる
+   * （実際、9/24 購入の方を 10/24 に作り直すと 2027-09-24 → 2027-10-24 にずれる）。
+   *
+   * まだ入っていなければ、ここで先に台帳へ残す。この先（Stripe連携）が失敗しても、
+   * 「この日から定期が始まるはずのお客様」が台帳から見えるようにするため。
+   */
+  const recorded = s_(customer, "pad_charge_from");
+  const from = /^\d{4}-\d{2}-\d{2}$/.test(recorded)
+    ? recorded
+    : chargeFromDate(hasOp1(productName) ? 730 : 365);
+  if (from !== recorded) {
+    try {
+      await update(`customers?id=eq.${customerId}`, { pad_charge_from: from });
+    } catch {
+      // 列がまだ無い。supabase/migrations の pad_subscription を流すと入り始める。
+    }
+  }
+
+  const method = s_(order, "payment_method");
+  const paymentIntent = s_(order, "stripe_payment_id");
+  if (method !== "Stripe" || !paymentIntent.startsWith("pi_")) {
+    // 銀行振込・アプラス（またはカード情報なし）。自動化はせず、予定日の記録だけ。
+    return {
+      created: false,
+      reason: `カード決済の番号が無いため自動では作れません。予定日（${from}）に手で請求してください。`,
+    };
+  }
+  if (!stripeConfigured()) {
+    await audit(actor, "1年後定期を自動で作れませんでした", { type: "order", key: orderId }, {
+      顧客: s_(order, "customer_name"),
+      理由: "STRIPE_SECRET_KEY が未設定のため。設定後の受注から自動で作られます。",
+      請求予定日: from,
+    });
+    return { created: false, reason: "STRIPE_SECRET_KEY が未設定のため作れませんでした。" };
+  }
+
+  /* ── 決済に使ったカードを取り出す ── */
+  const pi = await stripeReq("GET", `/payment_intents/${paymentIntent}`);
+  const paymentMethod = s_(pi, "payment_method");
+  if (!paymentMethod) {
+    throw new Error("決済からカード情報を取り出せませんでした。");
+  }
+
+  /* ── Stripe 上のお客様を用意して、カードを持たせる ── */
+  let stripeCustomer = s_(pi, "customer");
+  if (!stripeCustomer) {
+    const created = await stripeReq("POST", "/customers", {
+      name: s_(customer, "name") || s_(order, "customer_name"),
+      email: s_(customer, "email") || undefined,
+      phone: s_(customer, "phone") || undefined,
+      metadata: { vis_customer_id: customerId },
+    });
+    stripeCustomer = String(created["id"]);
+  }
+  try {
+    await stripeReq("POST", `/payment_methods/${paymentMethod}/attach`, {
+      customer: stripeCustomer,
+    });
+  } catch (e) {
+    // すでに同じお客様に付いている場合はそのまま使えるので握りつぶす
+    if (!(e instanceof StripeError && /already been attached/i.test(e.message))) throw e;
+  }
+  await stripeReq("POST", `/customers/${stripeCustomer}`, {
+    invoice_settings: { default_payment_method: paymentMethod },
+  });
+
+  /* ── トライアル付きの定期を作る（期日が来ると 17,500円/年が自動で走る） ── */
+  const price = await ensureYearlyPrice();
+  const trialEnd = Math.floor(
+    new Date(`${from}T00:00:00+09:00`).getTime() / 1000,
+  );
+  const sub = await stripeReq("POST", "/subscriptions", {
+    customer: stripeCustomer,
+    items: [{ price }],
+    trial_end: trialEnd,
+    metadata: {
+      vis_order_id: orderId,
+      vis_customer_id: customerId,
+      op1: hasOp1(productName) ? "1" : "0",
+    },
+  });
+
+  const subscriptionId = String(sub["id"]);
+  await update(`customers?id=eq.${customerId}`, {
+    pad_subscription_id: subscriptionId,
+  });
+  await audit(actor, "1年後定期を作成", { type: "customer", key: customerId }, {
+    顧客: s_(customer, "name"),
+    初回請求日: from,
+    OP1: hasOp1(productName) ? "あり（2年後開始）" : "なし（1年後開始）",
+    Stripe定期: subscriptionId,
+  });
+  return { created: true, subscriptionId, from };
+}
+
 /**
  * 受注1件ぶんの定期を仕込む。受注登録が終わったあとに呼ぶ。
  * どんな失敗でも投げない（受注の登録を巻き添えにしないため）。
  */
 export async function schedulePadSubscription(orderId: string): Promise<void> {
   try {
-    const order = await selectOne<Row>(
-      `orders?select=id,customer_id,customer_name,product_name,payment_method,stripe_payment_id&id=eq.${encodeURIComponent(orderId)}`,
-    );
-    if (!order) return;
-
-    const productName = s_(order, "product_name");
-    if (!isMainUnitOrder(productName)) return;
-
-    const customerId = s_(order, "customer_id");
-    if (!/^\d+$/.test(customerId)) {
-      // 顧客台帳に紐づいていない受注には予定日を残す場所がない。
-      // 紐づけ失敗はすでに audit に残っているので、ここでは何もしない。
-      return;
-    }
-
-    const days = hasOp1(productName) ? 730 : 365;
-    const from = chargeFromDate(days);
-
-    const customer = await selectOne<Row>(
-      `customers?select=id,name,email,phone,pad_subscription_id,pad_charge_from&id=eq.${customerId}`,
-    );
-    if (!customer) return;
-
-    // 同じお客様に二重に定期を作らない（通知の再送・買い直しで二度届くことがある）
-    if (s_(customer, "pad_subscription_id")) return;
-
-    /*
-     * まず請求予定日を台帳に残す。ここから先（Stripe連携）が失敗しても、
-     * 「この日から定期が始まるはずのお客様」が台帳から見えるようにする。
-     */
-    try {
-      await update(`customers?id=eq.${customerId}`, { pad_charge_from: from });
-    } catch {
-      // 列がまだ無い。supabase/migrations の pad_subscription を流すと入り始める。
-    }
-
-    const method = s_(order, "payment_method");
-    const paymentIntent = s_(order, "stripe_payment_id");
-    if (method !== "Stripe" || !paymentIntent.startsWith("pi_")) {
-      // 銀行振込・アプラス（またはカード情報なし）。自動化はせず、予定日の記録だけ。
-      return;
-    }
-    if (!stripeConfigured()) {
-      await audit("intake", "1年後定期を自動で作れませんでした", { type: "order", key: orderId }, {
-        顧客: s_(order, "customer_name"),
-        理由: "STRIPE_SECRET_KEY が未設定のため。設定後の受注から自動で作られます。",
-        請求予定日: from,
-      });
-      return;
-    }
-
-    /* ── 決済に使ったカードを取り出す ── */
-    const pi = await stripeReq("GET", `/payment_intents/${paymentIntent}`);
-    const paymentMethod = s_(pi, "payment_method");
-    if (!paymentMethod) {
-      throw new Error("決済からカード情報を取り出せませんでした。");
-    }
-
-    /* ── Stripe 上のお客様を用意して、カードを持たせる ── */
-    let stripeCustomer = s_(pi, "customer");
-    if (!stripeCustomer) {
-      const created = await stripeReq("POST", "/customers", {
-        name: s_(customer, "name") || s_(order, "customer_name"),
-        email: s_(customer, "email") || undefined,
-        phone: s_(customer, "phone") || undefined,
-        metadata: { vis_customer_id: customerId },
-      });
-      stripeCustomer = String(created["id"]);
-    }
-    try {
-      await stripeReq("POST", `/payment_methods/${paymentMethod}/attach`, {
-        customer: stripeCustomer,
-      });
-    } catch (e) {
-      // すでに同じお客様に付いている場合はそのまま使えるので握りつぶす
-      if (!(e instanceof StripeError && /already been attached/i.test(e.message))) throw e;
-    }
-    await stripeReq("POST", `/customers/${stripeCustomer}`, {
-      invoice_settings: { default_payment_method: paymentMethod },
-    });
-
-    /* ── トライアル付きの定期を作る（期日が来ると 17,500円/年が自動で走る） ── */
-    const price = await ensureYearlyPrice();
-    const trialEnd = Math.floor(
-      new Date(`${from}T00:00:00+09:00`).getTime() / 1000,
-    );
-    const sub = await stripeReq("POST", "/subscriptions", {
-      customer: stripeCustomer,
-      items: [{ price }],
-      trial_end: trialEnd,
-      metadata: {
-        vis_order_id: orderId,
-        vis_customer_id: customerId,
-        op1: hasOp1(productName) ? "1" : "0",
-      },
-    });
-
-    await update(`customers?id=eq.${customerId}`, {
-      pad_subscription_id: String(sub["id"]),
-    });
-    await audit("intake", "1年後定期を作成", { type: "customer", key: customerId }, {
-      顧客: s_(customer, "name"),
-      初回請求日: from,
-      OP1: hasOp1(productName) ? "あり（2年後開始）" : "なし（1年後開始）",
-      Stripe定期: String(sub["id"]),
-    });
+    await createPadSubscription(orderId);
   } catch (e) {
     /*
      * ここに来るのは Stripe 連携の失敗。
      * テストモードの決済（本番キーでは読めない）もここに落ちる。
      * 予定日は先に台帳へ入れてあるので、本部が手で請求すれば取りこぼしはない。
+     * 鍵を直したあとは、顧客の詳細画面「定期を作り直す」から同じ処理を通せる。
      */
     console.error("[pad-subscription]", e);
     await audit("intake", "1年後定期の自動作成に失敗", { type: "order", key: orderId }, {

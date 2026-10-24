@@ -19,6 +19,7 @@ import { useRouter } from "next/navigation";
 import { Check, ChevronDown, Search, X } from "lucide-react";
 import { updateShipmentAction } from "@/actions/order-actions";
 import {
+  retryPadSubscriptionAction,
   setCustomerPaymentStatusAction,
   stopPadSubscriptionAction,
   updateCustomerAction,
@@ -350,6 +351,10 @@ function PadSubscriptionRow({ customer }: { customer: CustomerView }) {
     stopPadSubscriptionAction,
     {},
   );
+  const [retryState, retryAction, retrying] = useActionState<CustomerFormState, FormData>(
+    retryPadSubscriptionAction,
+    {},
+  );
   const [confirmed, setConfirmed] = useState(false);
 
   if (!customer.padSubscriptionId && !customer.padChargeFrom) return null;
@@ -384,10 +389,32 @@ function PadSubscriptionRow({ customer }: { customer: CustomerView }) {
           </form>
         </>
       ) : (
-        <p className="mt-1 text-ink-400">
-          {jpDate(customer.padChargeFrom)} が初回の請求予定日です。カードのご登録が無いため
-          自動では請求されません。期日になったら本部から請求書をお送りください。
-        </p>
+        <>
+          {/*
+            予定日だけが入っていて Stripe の定期が無い状態。
+            振込・アプラスのお客様はこれが正常（期日に手で請求する）。
+            カードのお客様は、受注時の自動作成が失敗した場合にここに来る
+            （2026-10-24 までは鍵の設定誤りで全件そうなっていた）。
+            同じ処理をここから通し直せる。予定日は台帳の値を使うので初回請求はずれない。
+          */}
+          <p className="mt-1 text-ink-400">
+            {jpDate(customer.padChargeFrom)} が初回の請求予定日です。Stripe の定期はまだありません。
+            カード決済のお客様は下のボタンで作り直せます。振込・アプラスのお客様は、期日になったら
+            本部から請求書をお送りください。
+          </p>
+          <form action={retryAction} className="mt-2">
+            <input type="hidden" name="customerId" value={customer.id} />
+            <button
+              type="submit"
+              disabled={retrying}
+              className="rounded-md border border-ink-700 px-3 py-1 font-semibold text-ink-200 transition hover:bg-ink-900 disabled:opacity-50"
+            >
+              {retrying ? "作成中…" : "カードで定期を作り直す"}
+            </button>
+          </form>
+          {retryState.error ? <p className="mt-1 text-bad-500">{retryState.error}</p> : null}
+          {retryState.ok ? <p className="mt-1 text-ink-300">{retryState.ok}</p> : null}
+        </>
       )}
       {state.error ? <p className="mt-1 text-bad-500">{state.error}</p> : null}
       {state.ok ? <p className="mt-1 text-ink-300">{state.ok}</p> : null}

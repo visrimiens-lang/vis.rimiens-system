@@ -49,6 +49,7 @@ function s_(r: Row, k: string): string {
 function sourceLabel(source: string): string {
   if (source === "jotform") return "JotForm（申込フォーム）";
   if (source === "utage") return "UTAGE・決済";
+  if (source === "stripe") return "Stripe・支払いリンク決済";
   return source || "不明";
 }
 

@@ -274,6 +274,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "内容を読み取れませんでした。" }, { status: 400 });
   }
 
+  return handleOrderNotification("utage", data);
+}
+
+/**
+ * 通知1件を受注にする共用の処理。
+ *
+ * UTAGE の決済通知（上の POST）と、Stripe の支払いリンク決済（/api/webhooks/stripe）の
+ * 両方からここに入る（2026-10-25）。受け口を2つ持つと、重複よけ・担当者の付け方・
+ * 1年後定期の仕込みがずれていくので、項目名をそろえたうえで1本にまとめている。
+ * source は受信箱に残す出どころ（"utage" / "stripe"）。
+ */
+export async function handleOrderNotification(
+  source: "utage" | "stripe",
+  data: Record<string, unknown>,
+): Promise<NextResponse> {
   /*
    * 決済の番号。同じ通知が二度届いたときに、二重で受注を立てないための鍵になる。
    *
@@ -294,7 +309,7 @@ export async function POST(req: NextRequest) {
       "決済ID", "決済番号",
     ) || null;
 
-  const box = await receive("utage", paymentId, null, data);
+  const box = await receive(source, paymentId, null, data);
   if (box.duplicate) {
     return NextResponse.json({ ok: true, message: "受付済みです。" });
   }

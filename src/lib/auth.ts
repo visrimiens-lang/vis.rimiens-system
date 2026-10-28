@@ -4,7 +4,8 @@ import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
 import { cache } from "react";
 import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
-import { select, selectAll, selectOne, update } from "./db";
+import { inList, select, selectAll, selectOne, update } from "./db";
+import { codeCandidates, pickByCandidates } from "./code-alias";
 import type { Viewer, AgencyRank } from "./types";
 import { clearFailures, isLocked, recordFailure } from "./rate-limit";
 
@@ -82,7 +83,13 @@ function str(r: Row | null, k: string): string {
 async function rawAgency(code: string): Promise<Row | null> {
   const c = normalizeCode(code);
   if (!c) return null;
-  return selectOne<Row>(`agencies?select=*&code=eq.${encodeURIComponent(c)}`);
+  // 改名 SQL を流す前後どちらの DB でも引けるよう、新旧の綴りをまとめて引く（code-alias.ts）
+  const cands = codeCandidates(c);
+  if (cands.length === 1) {
+    return selectOne<Row>(`agencies?select=*&code=eq.${encodeURIComponent(c)}`);
+  }
+  const rows = await select<Row>(`agencies?select=*&code=${inList(cands)}`);
+  return pickByCandidates(rows, cands);
 }
 
 /**

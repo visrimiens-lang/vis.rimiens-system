@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { insert, select } from "@/lib/db";
+import { inList, insert, select } from "@/lib/db";
+import { codeCandidates, pickByCandidates } from "@/lib/code-alias";
 import { normalizeCode, normalizePhone } from "@/lib/intake";
 
 /**
@@ -72,12 +73,17 @@ export async function POST(req: NextRequest) {
 
   try {
     // 実在するコードでなければ控えない（打ち間違いといたずらを弾く）
-    const known = await select<Record<string, unknown>>(
-      `agencies?select=code&code=eq.${encodeURIComponent(ref)}`,
+    // 改名 SQL を流す前後どちらの DB でも引けるよう、新旧の綴りをまとめて引く（code-alias.ts）
+    const cands = codeCandidates(ref);
+    const known = pickByCandidates(
+      await select<Record<string, unknown>>(`agencies?select=code&code=${inList(cands)}`),
+      cands,
     );
-    if (known.length === 0) {
+    if (!known) {
       return cors(NextResponse.json({ ok: true, stored: false }));
     }
+    // 控えには DB に入っている綴りを書く（読み替え後の文字を書くと改名 SQL が拾えない）
+    const storedRef = String(known["code"] ?? ref);
 
     // 同じ連絡先の控えが増えすぎていたら受け付けない
     const filter = email
@@ -90,7 +96,7 @@ export async function POST(req: NextRequest) {
       return cors(NextResponse.json({ ok: true, stored: false }));
     }
 
-    await insert("ref_claims", [{ ref, email: email || null, phone: phone || null }]);
+    await insert("ref_claims", [{ ref: storedRef, email: email || null, phone: phone || null }]);
     return cors(NextResponse.json({ ok: true, stored: true }));
   } catch {
     // 控えられなくても決済は続けてもらう

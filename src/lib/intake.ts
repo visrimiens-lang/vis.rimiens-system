@@ -1,7 +1,7 @@
 import "server-only";
-import { audit, count, insert, remove, select, selectOne, update } from "./db";
+import { audit, count, inList, insert, remove, select, selectOne, update } from "./db";
 import { todayInJapan } from "./jst";
-import { canonicalCode } from "./code-alias";
+import { canonicalCode, codeCandidates, pickByCandidates } from "./code-alias";
 import { usesPortal } from "./labels";
 import { OFFICIAL_LINE_URL, QR2_APPROVED, buildQrUrl, tossUpUrl } from "./qr";
 import { initialPaymentStatus } from "./payment-status";
@@ -249,6 +249,24 @@ export async function nextAgencyCode(orgCode: string): Promise<string | null> {
 /* ═══════════════════════ 上位代理店を探す ═══════════════════════ */
 
 /**
+ * そろえ済みの代理店コードで1件引く。
+ *
+ * 改名（RIM → RIMI、2026-10-29）の前後で DB に入っている綴りが違う。
+ * コードの配備と SQL の実行は同時にできないので、その間に届いた受注・申込・ログインが
+ * 「見つからない」で落ちないように、新旧の綴りを1回の問い合わせでまとめて引く。
+ * 返す行の code は DB に実際に入っている綴り（SQL 前なら RIM、後なら RIMI）。
+ * 呼び出し側はこの code をそのまま使い、読み替え後の文字を書き込まないこと（code-alias.ts 参照）。
+ */
+async function agencyRowByCode(c: string): Promise<Row | null> {
+  const cands = codeCandidates(c);
+  if (cands.length === 1) {
+    return selectOne<Row>(`agencies?select=*&code=eq.${encodeURIComponent(c)}`);
+  }
+  const rows = await select<Row>(`agencies?select=*&code=${inList(cands)}`);
+  return pickByCandidates(rows, cands);
+}
+
+/**
  * 招待コードから上位代理店を探す。
  *
  * 招待コードは、上位代理店が配る文字列。代理店コードそのものが使われることも多い。
@@ -264,9 +282,7 @@ export async function resolveParent(inviteCode: string): Promise<Row | null> {
    * 2026-08-20 からは会社の代理店コードが自社コードそのもの（MENO など）に
    * なるため、ふつうはここで見つかる。
    */
-  const byCode = await selectOne<Row>(
-    `agencies?select=*&code=eq.${encodeURIComponent(c)}`,
-  );
+  const byCode = await agencyRowByCode(c);
   if (byCode) return byCode;
 
   /*
@@ -1162,7 +1178,7 @@ export type OrderApplication = {
 async function agencyByCode(code: string): Promise<Row | null> {
   const c = normalizeCode(code);
   if (!c) return null;
-  return selectOne<Row>(`agencies?select=*&code=eq.${encodeURIComponent(c)}`);
+  return agencyRowByCode(c);
 }
 
 /** 受注1件の「誰が売ったか」と「どの代理店の売上か」。 */
@@ -1221,6 +1237,14 @@ export async function resolveAttribution(
     // 取次パートナーの紹介。紹介報酬は本人、販売報酬は所属先に立てる。
     out.referrerCode = s_(ref, "code");
     out.agencyCode = s_(ref, "parent_code") || s_(ref, "code");
+  } else if (ref) {
+    /*
+     * 会社本人の売上。付け先は DB に入っている綴りにそろえる。
+     * 旧コード RIM で届いたものは normalizeCode で RIMI になっているが、
+     * 改名 SQL を流す前の DB には RIM しか無い。読み替え後の RIMI をそのまま書くと、
+     * SQL（= 'RIM' だけ置換）に拾われない受注ができ、総販売代理店の報酬が黙って欠ける。
+     */
+    out.agencyCode = s_(ref, "code");
   }
 
   // コードが無く、担当者だけが分かっているときは、その方の所属先を売上の付け先にする

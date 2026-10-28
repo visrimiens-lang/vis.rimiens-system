@@ -1,8 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { schedulePadSubscription } from "@/lib/pad-subscription";
-import { audit, select, selectOne, update } from "@/lib/db";
-import { canonicalCode } from "@/lib/code-alias";
+import { audit, inList, select, selectOne, update } from "@/lib/db";
+import { canonicalCode, codeCandidates, pickByCandidates } from "@/lib/code-alias";
 import {
   KIND_STAFF,
   markProcessed,
@@ -193,8 +193,13 @@ async function verifyStaffCode(raw: string): Promise<StaffCheck> {
 
   let person: Record<string, unknown> | null = null;
   try {
-    person = await selectOne<Record<string, unknown>>(
-      `agencies?select=code,name,code_kind&code=eq.${encodeURIComponent(given)}`,
+    // 改名 SQL を流す前後どちらの DB でも引けるよう、新旧の綴りをまとめて引く（code-alias.ts）
+    const cands = codeCandidates(given);
+    person = pickByCandidates(
+      await select<Record<string, unknown>>(
+        `agencies?select=code,name,code_kind&code=${inList(cands)}`,
+      ),
+      cands,
     );
   } catch (e) {
     // 照合できなかったときも、確かめていないコードは記録しない

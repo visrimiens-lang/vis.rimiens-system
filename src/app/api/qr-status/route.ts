@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { selectOne } from "@/lib/db";
-import { canonicalCode } from "@/lib/code-alias";
+import { inList, select } from "@/lib/db";
+import { canonicalCode, codeCandidates, pickByCandidates } from "@/lib/code-alias";
 
 /**
  * 「このご案内リンク（?ref=代理店コード）は今も使ってよいか」を返す。
@@ -52,8 +52,13 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const a = await selectOne<Record<string, unknown>>(
-      `agencies?select=status,qr2_status,qr2_rejected_note&code=eq.${encodeURIComponent(ref)}`,
+    // 改名 SQL を流す前後どちらの DB でも引けるよう、新旧の綴りをまとめて引く（code-alias.ts）
+    const cands = codeCandidates(ref);
+    const a = pickByCandidates(
+      await select<Record<string, unknown>>(
+        `agencies?select=code,status,qr2_status,qr2_rejected_note&code=${inList(cands)}`,
+      ),
+      cands,
     );
     // 知らないコードは通す（打ち間違いで正規の決済を止めない。帰属は要確認に落ちる）
     if (!a) return cors(NextResponse.json({ ok: true, usable: true }));

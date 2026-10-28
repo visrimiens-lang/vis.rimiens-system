@@ -53,3 +53,36 @@ describe("isLegacyCode", () => {
     expect(isLegacyCode("")).toBe(false);
   });
 });
+
+import { codeCandidates, pickByCandidates } from "./code-alias";
+
+describe("codeCandidates", () => {
+  it("改名の対象は 新コード → 旧コード の順で両方返す", () => {
+    expect(codeCandidates("RIM")).toEqual(["RIMI", "RIM"]);
+    expect(codeCandidates("RIMI")).toEqual(["RIMI", "RIM"]);
+    expect(codeCandidates("rim")).toEqual(["RIMI", "RIM"]);
+  });
+
+  it("改名と無関係なコードは自分だけ", () => {
+    expect(codeCandidates("MENO")).toEqual(["MENO"]);
+    expect(codeCandidates("RIMI0001")).toEqual(["RIMI0001"]);
+    expect(codeCandidates("RIM0001")).toEqual(["RIM0001"]);
+  });
+});
+
+describe("pickByCandidates", () => {
+  const rows = [{ code: "RIM", name: "旧" }, { code: "RIMI", name: "新" }];
+
+  it("新コードの行があればそれを選ぶ", () => {
+    expect(pickByCandidates(rows, ["RIMI", "RIM"])?.name).toBe("新");
+  });
+
+  it("新コードの行が無ければ旧コードの行（SQL を流す前の DB）", () => {
+    expect(pickByCandidates([rows[0]], ["RIMI", "RIM"])?.name).toBe("旧");
+  });
+
+  it("どちらも無ければ null", () => {
+    expect(pickByCandidates([], ["RIMI", "RIM"])).toBeNull();
+    expect(pickByCandidates([{ code: "MENO" }], ["RIMI", "RIM"])).toBeNull();
+  });
+});

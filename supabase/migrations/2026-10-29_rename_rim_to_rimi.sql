@@ -7,9 +7,18 @@
 -- それを写している各テーブルの列。
 --
 -- ■ 流す順番（必ず守る）
---   1. ZEROTH_CODE を RIMI にしたコード（src/lib/intake.ts）を本番に配備し、Ready を確認する
---   2. この SQL を Supabase の SQL Editor で丸ごと実行する（1つのトランザクション）
---   3. 流し終えたら最後の select で RIM が 0 件・RIMI の代理店が 1 件であることを目で確かめる
+--   1. ZEROTH_CODE を RIMI にし、新旧どちらの綴りでも引けるようにしたコード
+--      （src/lib/intake.ts / src/lib/code-alias.ts）を本番に配備し、Ready を確認する。
+--      このコードは DB が RIM のままでも RIMI になっても正しく動くので、SQL の実行は急がなくてよい
+--   2. この SQL を Supabase の SQL Editor で丸ごと実行する（1つのトランザクション）。
+--      エディタ内で文字列を選択したまま Run すると選択範囲だけが実行されるので、
+--      実行前にエディタの何も無いところをクリックして選択を解除する
+--   3. 流し終えたら画面に出る表（最後の select）を見る。
+--      「RIM の残り」が 0、「agencies.code = RIMI」が 1、qr1_url / qr2_url が ?ref=RIMI で終わっていれば成功。
+--      件数の期待値は 2026-10-29 01:30 JST 時点の下限（15 / 34 / 5 / 5 / 13 / 10 / 24 / 7）。
+--      それ以上なら正常（流すまでに入った受注・申込のぶん増える）。それ未満なら部分実行を疑う
+--   4. 失敗したとき（赤いエラー）は、DO ブロックの raise exception で全部取り消されている。
+--      続けて別のクエリを流して「current transaction is aborted」と出たら rollback; を単独で流す
 --
 -- ■ 置き換えの方針
 --   ・完全一致（= 'RIM'）だけを置き換える。RIM0001 のような「RIM で始まる別のコード」には触らない
@@ -20,12 +29,13 @@
 --   ・途中でひとつでも想定と違えば raise exception で全部なかったことにする
 --
 -- ■ 元に戻すには
---   下の update を 'RIMI' → 'RIM' の向きに書き換えて流す（agencies.invite_code / org_code は
---   本部が手で RIMI にしたものなので戻さない）。コード側の ZEROTH_CODE も戻すこと。
+--   supabase/rollback/2026-10-29_rollback_rimi_to_rim.sql を流す（agencies.invite_code / org_code は
+--   本部が手で RIMI にしたものなので戻さない）。コード側は新旧どちらの綴りでも引けるので、
+--   DB だけ戻しても動く。恒久的に戻すなら ZEROTH_CODE と code-alias.ts の表も戻すこと。
 
 begin;
 
--- 1. 事前確認（1件ちょうどの RIM があり、RIMI がまだ無いこと）
+-- 1. 事前確認（1件ちょうどの RIM があり、RIMI がまだ無く、RIMI を写した行も無いこと）
 do $$
 declare n integer;
 begin
@@ -36,6 +46,28 @@ begin
   select count(*) into n from public.agencies where code = 'RIMI';
   if n <> 0 then
     raise exception 'agencies.code = RIMI が既に % 件あります。中止します', n;
+  end if;
+  /*
+   * 'RIMI' が既に写されている行が無いこと。
+   * あるとすれば、読み替え後の文字をそのまま書いてしまった古いコードが動いていた間に入った行。
+   * この SQL は = 'RIM' しか置換しないので、そういう行は直せない。先に本部画面で付け先を入れ直す。
+   * （agencies.invite_code / org_code の RIMI は本部が手で設定した正しい値なので見ない）
+   */
+  select
+      (select count(*) from public.agencies where parent_code = 'RIMI' or zeroth_code = 'RIMI')
+    + (select count(*) from public.customers
+        where agency_code = 'RIMI' or referrer_code = 'RIMI' or closer_code = 'RIMI' or staff_code = 'RIMI')
+    + (select count(*) from public.orders
+        where agency_code = 'RIMI' or staff_code = 'RIMI' or niji_code = 'RIMI'
+           or zeroth_code = 'RIMI' or referrer_code = 'RIMI')
+    + (select count(*) from public.rewards where agency_code = 'RIMI')
+    + (select count(*) from public.ref_claims where ref = 'RIMI')
+    + (select count(*) from public.leads where referrer_code = 'RIMI')
+    + (select count(*) from public.demo_machines where holder_code = 'RIMI')
+    + (select count(*) from public.portal_password_requests where agency_code = 'RIMI')
+  into n;
+  if n <> 0 then
+    raise exception 'RIMI を写した行が既に % 件あります（配備と SQL の間に入ったもの）。本部画面で付け先を直してから流してください。中止します', n;
   end if;
 end $$;
 
@@ -125,14 +157,33 @@ end $$;
 
 commit;
 
--- 7. 目で確かめる（期待値: 1行目が RIMI の会社、以降は 2026-10-29 時点の件数 15 / 34 / 5 / 5 / 13 / 10 / 24 / 7）
-select code, name, rank, parent_code, zeroth_code, invite_code, org_code, qr1_url, qr2_url
-  from public.agencies where code = 'RIMI';
-select 'agencies.parent_code' as col, count(*) from public.agencies where parent_code = 'RIMI'
-union all select 'agencies.zeroth_code', count(*) from public.agencies where zeroth_code = 'RIMI'
-union all select 'customers.agency_code', count(*) from public.customers where agency_code = 'RIMI'
-union all select 'orders.agency_code', count(*) from public.orders where agency_code = 'RIMI'
-union all select 'orders.zeroth_code', count(*) from public.orders where zeroth_code = 'RIMI'
-union all select 'rewards.agency_code', count(*) from public.rewards where agency_code = 'RIMI'
-union all select 'ref_claims.ref', count(*) from public.ref_claims where ref = 'RIMI'
-union all select 'audit_log.target_key', count(*) from public.audit_log where target_type = 'agency' and target_key = 'RIMI';
+-- 7. 目で確かめる。SQL Editor は最後の1文の結果しか表示しないので、確認は1文にまとめてある。
+--    期待値は 2026-10-29 01:30 JST 時点の下限。「RIM の残り」0 と「agencies.code = RIMI」1 だけは必ず一致すること。
+select 1 as n, 'agencies.code = RIMI（1 のはず）' as item,
+       (select count(*) from public.agencies where code = 'RIMI')::text as value
+union all select 2, 'RIM の残り・全列（0 のはず）',
+       ( (select count(*) from public.agencies
+            where code = 'RIM' or parent_code = 'RIM' or zeroth_code = 'RIM' or invite_code = 'RIM' or org_code = 'RIM'
+               or qr1_url ~ '[?&]ref=RIM$' or qr2_url ~ '[?&]ref=RIM$')
+       + (select count(*) from public.customers
+            where agency_code = 'RIM' or referrer_code = 'RIM' or closer_code = 'RIM' or staff_code = 'RIM')
+       + (select count(*) from public.orders
+            where agency_code = 'RIM' or staff_code = 'RIM' or niji_code = 'RIM' or zeroth_code = 'RIM' or referrer_code = 'RIM')
+       + (select count(*) from public.rewards where agency_code = 'RIM')
+       + (select count(*) from public.ref_claims where ref = 'RIM')
+       + (select count(*) from public.leads where referrer_code = 'RIM')
+       + (select count(*) from public.demo_machines where holder_code = 'RIM')
+       + (select count(*) from public.portal_password_requests where agency_code = 'RIM')
+       + (select count(*) from public.audit_log where (target_type = 'agency' and target_key = 'RIM') or actor = 'RIM') )::text
+union all select 3, 'RIMI の qr1_url（?ref=RIMI で終わるはず）', coalesce((select qr1_url from public.agencies where code = 'RIMI'), '')
+union all select 4, 'RIMI の qr2_url（?ref=RIMI で終わるはず）', coalesce((select qr2_url from public.agencies where code = 'RIMI'), '')
+union all select 5, 'RIMI の zeroth_code（RIMI のはず）', coalesce((select zeroth_code from public.agencies where code = 'RIMI'), '')
+union all select 6, 'agencies.parent_code = RIMI（15 以上）', (select count(*) from public.agencies where parent_code = 'RIMI')::text
+union all select 7, 'agencies.zeroth_code = RIMI（34 以上）', (select count(*) from public.agencies where zeroth_code = 'RIMI')::text
+union all select 8, 'customers.agency_code = RIMI（5 以上）', (select count(*) from public.customers where agency_code = 'RIMI')::text
+union all select 9, 'orders.agency_code = RIMI（5 以上）', (select count(*) from public.orders where agency_code = 'RIMI')::text
+union all select 10, 'orders.zeroth_code = RIMI（13 以上）', (select count(*) from public.orders where zeroth_code = 'RIMI')::text
+union all select 11, 'rewards.agency_code = RIMI（10 以上）', (select count(*) from public.rewards where agency_code = 'RIMI')::text
+union all select 12, 'ref_claims.ref = RIMI（24 以上）', (select count(*) from public.ref_claims where ref = 'RIMI')::text
+union all select 13, 'audit_log.target_key = RIMI（7 以上）', (select count(*) from public.audit_log where target_type = 'agency' and target_key = 'RIMI')::text
+order by n;

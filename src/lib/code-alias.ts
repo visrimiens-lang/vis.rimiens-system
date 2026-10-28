@@ -35,3 +35,41 @@ export function canonicalCode(code: string): string {
 export function isLegacyCode(code: string): boolean {
   return Object.prototype.hasOwnProperty.call(LEGACY_CODE_ALIASES, (code || "").toUpperCase());
 }
+
+/**
+ * あるコードを DB で引くときに試す綴りを、優先順に返す。
+ *
+ * 改名の前後で DB の中身が違う（SQL を流す前は旧コード、流した後は新コード）。
+ * コードの配備と SQL の実行は同時にできないので、その間も壊れないように
+ * 「新コードで引いて、無ければ旧コードで引く」を1回の問い合わせ（code=in.(…)）で済ませる。
+ *
+ *   codeCandidates("RIM")  → ["RIMI", "RIM"]
+ *   codeCandidates("RIMI") → ["RIMI", "RIM"]
+ *   codeCandidates("MENO") → ["MENO"]
+ *
+ * 見つかった行の code（DB に実際に入っている綴り）をそのまま使うこと。
+ * 読み替え後の文字を書き込むと、SQL を流す前の期間に新コードの行ができてしまい、
+ * `= '旧コード'` でしか置換しない SQL がその行を見落とす。
+ */
+export function codeCandidates(code: string): string[] {
+  const canonical = canonicalCode(code);
+  const legacy = Object.entries(LEGACY_CODE_ALIASES)
+    .filter(([, to]) => to === canonical.toUpperCase())
+    .map(([from]) => from);
+  return legacy.length > 0 ? [canonical, ...legacy] : [code];
+}
+
+/**
+ * 候補の中から、DB で見つかった行を優先順（新コード → 旧コード）で1つ選ぶ。
+ * 新旧が両方あることは SQL のガードで防いでいるが、万一あっても新コードの行を使う。
+ */
+export function pickByCandidates<T extends Record<string, unknown>>(
+  rows: T[],
+  candidates: string[],
+): T | null {
+  for (const c of candidates) {
+    const hit = rows.find((r) => String(r["code"] ?? "") === c);
+    if (hit) return hit;
+  }
+  return null;
+}

@@ -2,9 +2,9 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
-import { select, selectOne, val } from "@/lib/db";
+import { inList, select, val } from "@/lib/db";
 import { listAllAgencies } from "@/lib/agencies";
-import { canonicalCode } from "@/lib/code-alias";
+import { canonicalCode, codeCandidates, pickByCandidates } from "@/lib/code-alias";
 import {
   agencyTypeOf,
   belongsToOrg,
@@ -219,12 +219,14 @@ export default async function AgencyDetailPage({
 
   const { code: rawCode } = await params;
   /*
-   * 改名前の旧コード（/admin/agencies/RIM）で開かれたら、新しいコードの URL に送る。
-   * ブックマークや承認メールの URL は改名しても書き換わらないため。
+   * 改名前の旧コード（/admin/agencies/RIM）で開かれても、新旧の綴りをまとめて引いて
+   * 見つかった行を表示する。改名 SQL を流す前後どちらでも開けるようにするため
+   * （ブックマークや承認メールの URL は改名しても書き換わらない）。
+   * 行が見つかり、URL の綴りと DB の綴りが違えば、DB の綴りの URL へ送る。
    */
   const given = (rawCode ?? "").trim();
-  const code = canonicalCode(given);
-  if (code !== given) redirect(`/admin/agencies/${encodeURIComponent(code)}`);
+  let code = canonicalCode(given);
+  const cands = codeCandidates(given);
 
   let row: Row | null = null;
   let logs: Row[] = [];
@@ -233,10 +235,12 @@ export default async function AgencyDetailPage({
   let loadError: string | null = null;
 
   try {
-    row = await selectOne<Row>(
-      `agencies?select=*&code=eq.${encodeURIComponent(code)}`,
+    row = pickByCandidates(
+      await select<Row>(`agencies?select=*&code=${inList(cands)}`),
+      cands,
     );
     if (row) {
+      code = s(row, "code");
       const quoted = encodeURIComponent(val(code));
       [logs, everyone] = await Promise.all([
         select<Row>(
@@ -250,6 +254,12 @@ export default async function AgencyDetailPage({
       e instanceof Error
         ? e.message
         : "代理店マスタの読み込みに失敗しました。時間をおいて開き直してください。";
+  }
+
+  // 旧コードの URL で開かれていたら、DB に入っている綴りの URL へ送る
+  // （try の中で redirect すると、Next.js が投げる案内用の例外まで catch に食われて効かない）
+  if (row && s(row, "code") !== given) {
+    redirect(`/admin/agencies/${encodeURIComponent(s(row, "code"))}`);
   }
 
   /*

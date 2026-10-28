@@ -1,6 +1,7 @@
 import "server-only";
 import { audit, count, insert, remove, select, selectOne, update } from "./db";
 import { todayInJapan } from "./jst";
+import { canonicalCode } from "./code-alias";
 import { usesPortal } from "./labels";
 import { OFFICIAL_LINE_URL, QR2_APPROVED, buildQrUrl, tossUpUrl } from "./qr";
 import { initialPaymentStatus } from "./payment-status";
@@ -40,14 +41,19 @@ export const KIND_REFERRER = "01";    // 取次パートナー（紹介のみ）
 export const KIND_STAFF = "02";       // スタッフ（代理店に所属する個人）
 
 /**
- * ゼロ次代理店（総販売代理店）のコード。
+ * ゼロ次代理店（総販売代理店＝株式会社Rimiens）のコード。
  *
  * エリア統括代理店の申込には招待コードが無い。上位は必ずここになる決まりなので、
  * 招待コードを求めずにここへぶら下げる
  * （make-blueprints/scenario-13-v3-FINAL3.json のエリア統括ルートが
- *   上位代理店コードに "RIM" を直接書いているのと同じ扱い）。
+ *   上位代理店コードを直接書いているのと同じ扱い）。
+ *
+ * 2026-10-29 に RIM から RIMI に変えた（他の会社と同じ4文字にそろえるため）。
+ * データベース側は supabase/migrations/2026-10-29_rename_rim_to_rimi.sql で
+ * 一括で置き換え済み。旧コード RIM が外から届いたときは
+ * normalizeCode（→ code-alias.ts）が RIMI に読み替える。
  */
-export const ZEROTH_CODE = "RIM";
+export const ZEROTH_CODE = "RIMI";
 
 export type IntakeResult =
   /**
@@ -80,10 +86,17 @@ export type IntakeResult =
 export const KOJIN_ORG = "KVIS";
 
 export function normalizeCode(input: string): string {
-  return (input || "")
+  const code = (input || "")
     .normalize("NFKC")   // 全角英数字を半角に
     .replace(/\s+/g, "") // 途中の空白も落とす
     .toUpperCase();
+  /*
+   * 改名前の旧コード（RIM など）は、いまのコードに読み替える。
+   * 配り済みの QR・覚えているログインID・ログイン中の Cookie には旧コードが
+   * 残り続けるので、ここで寄せないと「知らないコード」として売上の付け先が空になる。
+   * 完全一致だけ読み替え、RIM0001 のような別のコードには触らない。
+   */
+  return canonicalCode(code);
 }
 
 /**
@@ -120,7 +133,7 @@ export function normalizeArea(input: string): string {
  * 組織を表す英字（自社コード）として使える形か確かめる。
  *
  * 申込フォーム側は4文字のマスク（例 目のトレーニング株式会社 → MENO）だが、
- * 先に作った RIM・MET は3文字のまま動いている。
+ * 先に作った MET は3文字のまま動いている（RIM は 2026-10-29 に RIMI へそろえた）。
  * どちらも通るように、英字2〜6文字を受け付ける。
  */
 export function isOrgCode(code: string): boolean {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { selectOne } from "@/lib/db";
+import { canonicalCode } from "@/lib/code-alias";
 
 /**
  * 「このご案内リンク（?ref=代理店コード）は今も使ってよいか」を返す。
@@ -43,7 +44,8 @@ export async function OPTIONS() {
 }
 
 export async function GET(req: NextRequest) {
-  const ref = (req.nextUrl.searchParams.get("ref") ?? "").trim();
+  // 配り済みの旧 QR（?ref=RIM）は改名後のコードに読み替えてから引く（code-alias.ts）
+  const ref = canonicalCode((req.nextUrl.searchParams.get("ref") ?? "").trim());
   // コードが無い・長すぎる・変な文字 → 判定できないので通す
   if (!ref || ref.length > 20 || !/^[A-Za-z0-9_-]+$/.test(ref)) {
     return cors(NextResponse.json({ ok: true, usable: true }));

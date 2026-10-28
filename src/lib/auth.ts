@@ -71,9 +71,18 @@ function str(r: Row | null, k: string): string {
   return v === null || v === undefined ? "" : String(v);
 }
 
-/** 代理店コードで1件引く。 */
+/**
+ * 代理店コードで1件引く。
+ *
+ * 改名前の旧コード（RIM → RIMI、2026-10-29）はここで読み替える。
+ * ログイン中の Cookie には改名前のコードが残っているので、
+ * そのままでは改名した瞬間に全員がログアウト扱いになる。
+ * ログインIDも同じ理由で、旧コードのまま打ってもよい。
+ */
 async function rawAgency(code: string): Promise<Row | null> {
-  return selectOne<Row>(`agencies?select=*&code=eq.${encodeURIComponent(code)}`);
+  const c = normalizeCode(code);
+  if (!c) return null;
+  return selectOne<Row>(`agencies?select=*&code=eq.${encodeURIComponent(c)}`);
 }
 
 /**

@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { currentViewer } from "@/lib/auth";
 import { select, selectOne, val } from "@/lib/db";
 import { listAllAgencies } from "@/lib/agencies";
+import { canonicalCode } from "@/lib/code-alias";
 import {
   agencyTypeOf,
   belongsToOrg,
@@ -217,7 +218,13 @@ export default async function AgencyDetailPage({
   if (viewer.kind !== "hq") redirect("/dashboard");
 
   const { code: rawCode } = await params;
-  const code = (rawCode ?? "").trim();
+  /*
+   * 改名前の旧コード（/admin/agencies/RIM）で開かれたら、新しいコードの URL に送る。
+   * ブックマークや承認メールの URL は改名しても書き換わらないため。
+   */
+  const given = (rawCode ?? "").trim();
+  const code = canonicalCode(given);
+  if (code !== given) redirect(`/admin/agencies/${encodeURIComponent(code)}`);
 
   let row: Row | null = null;
   let logs: Row[] = [];

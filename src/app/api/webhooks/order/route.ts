@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { schedulePadSubscription } from "@/lib/pad-subscription";
 import { audit, select, selectOne, update } from "@/lib/db";
+import { canonicalCode } from "@/lib/code-alias";
 import {
   KIND_STAFF,
   markProcessed,
@@ -178,7 +179,8 @@ async function markClaimUsed(claimId: unknown, orderId: string): Promise<void> {
  * 受注そのものは止めない（お客様の注文が消えるほうが困るため）。
  */
 async function verifyStaffCode(raw: string): Promise<StaffCheck> {
-  const given = (raw || "").trim();
+  // 改名前の旧コード（RIM）が打たれていたら、いまのコードに読み替える（code-alias.ts）
+  const given = canonicalCode((raw || "").trim());
   if (!given) return { code: "", note: "" };
 
   const shown = given.slice(0, 40);
